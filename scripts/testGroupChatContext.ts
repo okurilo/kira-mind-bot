@@ -97,6 +97,30 @@ async function main() {
         assert(snapshot.systemHint.includes("не выдумывай"));
     }
 
+    {
+        const chatId = -1001004;
+        const text = "@KiraMindBot что тут было?";
+        const ctx: any = {
+            chat: { id: chatId, type: "supergroup" },
+            from: { id: 42, first_name: "Лена" },
+            message: {
+                message_id: 41,
+                text,
+                entities: [mentionEntity(text, "@KiraMindBot")],
+            },
+            session: {},
+        };
+
+        const snapshot = await buildGroupChatContext(ctx, text, {
+            botUsername: "KiraMindBot",
+            enabled: false,
+        });
+        assert.equal(snapshot.isGroupChat, true);
+        assert.equal(snapshot.promptBlock, "");
+        assert.equal(snapshot.recentMessages.length, 0);
+        assert(snapshot.debugSummary.includes("disabled"));
+    }
+
     console.log("groupChatContext checks passed");
 }
 
