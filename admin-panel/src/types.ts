@@ -5,6 +5,7 @@ export interface ConfigEntry {
   rawState?: 'missing' | 'empty' | 'value';
   source?: 'env_file' | 'inherited_default_text' | 'system_default';
   configPath?: string;
+  sourceInfo?: ConfigSourceInfo;
 }
 
 export interface ConfigResponse {
@@ -44,10 +45,42 @@ export interface ModelPreset {
   values: Record<string, string | null>;
 }
 
+export interface ConfigSourceInfo {
+  kind: 'env_file' | 'database' | 'env_fallback' | 'system_default' | 'runtime_setting';
+  label: string;
+  description?: string;
+  technicalPath?: string;
+  appliesImmediately?: boolean;
+}
+
 export interface ModelPresetResponse {
   presets: ModelPreset[];
   activePresetId: string | null;
-  configPath: string;
+  source?: ConfigSourceInfo;
+  configPath?: string;
+}
+
+export type AiProvider = 'openai' | 'deepseek' | 'gemini';
+export type AiPresetName = 'gpt-max' | 'gpt-balanced' | 'gpt-lean' | 'hybrid-deepseek-gpt' | 'hybrid-gemini-gpt';
+
+export interface AiModelRef {
+  provider: AiProvider;
+  model: string;
+}
+
+export interface AiPresetConfig {
+  name: AiPresetName;
+  title: string;
+  description: string;
+  models: Record<string, AiModelRef>;
+}
+
+export interface AiPresetResponse {
+  activePresetName: AiPresetName;
+  storedPresetName?: AiPresetName | null;
+  envDefaultPreset: AiPresetName;
+  availablePresets: AiPresetConfig[];
+  source: ConfigSourceInfo;
 }
 
 export interface PersonalityProfile {

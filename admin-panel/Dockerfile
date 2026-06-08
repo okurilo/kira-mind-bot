@@ -15,5 +15,6 @@ COPY server.js ./
 COPY openaiModelHelpers.js ./
 RUN mkdir -p ./src
 COPY src/openai-model-registry.json ./src/openai-model-registry.json
+COPY src/ai-model-presets.json ./src/ai-model-presets.json
 EXPOSE 3000
 CMD ["node", "server.js"]
