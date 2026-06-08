@@ -12,7 +12,8 @@
     "test:voice-reply": "ts-node scripts/testVoiceReply.ts",
     "test:voice-number-normalization": "ts-node scripts/testRussianSpeechNumbers.ts",
     "test:speech-text-preparation": "ts-node scripts/testSpeechTextPreparation.ts",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint . --ext .ts",
+    "test:ai-presets": "ts-node scripts/testAiModelPresets.ts"
   },
   "author": "",
   "license": "ISC",
