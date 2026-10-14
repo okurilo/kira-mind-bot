@@ -208,17 +208,17 @@ async function main() {
         };
         // End-to-end selection -> preset -> actual request, without an extra routing call.
         for (const [preset, task, provider, model] of [
-            ['gpt-balanced', 'lightweightText', 'openai', 'gpt-5.4-nano'],
-            ['gpt-balanced', 'memoryExtraction', 'openai', 'gpt-5.4-mini'],
-            ['gpt-balanced', selectConversationTask({ details: { responseComplexity: 'routine' } }), 'openai', 'gpt-5.4-mini'],
-            ['gpt-balanced', selectConversationTask({ details: { responseComplexity: 'complex' } }), 'openai', 'gpt-5.4'],
-            ['gpt-lean', selectConversationTask(undefined, true), 'openai', 'gpt-5.4'],
-            ['gpt-balanced', selectConversationTask({ subIntents: [{ intent: 'ВЕБ_ПОИСК' }] }), 'openai', 'gpt-5.4'],
-            ['gpt-balanced', selectConversationTask(), 'openai', 'gpt-5.4-mini'],
+            ['gpt-balanced', 'lightweightText', 'openai', 'gpt-6-luna'],
+            ['gpt-balanced', 'memoryExtraction', 'openai', 'gpt-6-luna'],
+            ['gpt-balanced', selectConversationTask({ details: { responseComplexity: 'routine' } }), 'openai', 'gpt-6.1-sol'],
+            ['gpt-balanced', selectConversationTask({ details: { responseComplexity: 'complex' } }), 'openai', 'gpt-6.1-sol'],
+            ['gpt-lean', selectConversationTask(undefined, true), 'openai', 'gpt-6-luna'],
+            ['gpt-balanced', selectConversationTask({ subIntents: [{ intent: 'ВЕБ_ПОИСК' }] }), 'openai', 'gpt-6.1-sol'],
+            ['gpt-balanced', selectConversationTask(), 'openai', 'gpt-6.1-sol'],
             ['gemini-full', 'lightweightText', 'gemini', 'gemini-3.5-flash-lite'],
-            ['gemini-full', 'complexReasoning', 'gemini', 'gemini-3.6-flash'],
+            ['gemini-full', 'complexReasoning', 'gemini', 'gemini-3.8-flash'],
             ['glm-full', 'lightweightText', 'zai', 'glm-4.7-flashx'],
-            ['glm-full', 'complexReasoning', 'zai', 'glm-5.2'],
+            ['glm-full', 'complexReasoning', 'zai', 'glm-5.3'],
         ]) {
             calls.length = 0;
             await withPreset(preset, () => createChatCompletionForTask(task as AiTaskKey, {
@@ -433,10 +433,10 @@ async function main() {
         assert.deepStrictEqual(
             calls.map((call) => `${call.provider}:${String(call.body.model)}`),
             [
-                'gemini:gemini-3.6-flash',
-                'gemini:gemini-3.6-flash',
-                'zai:glm-5.2',
-                'zai:glm-5.2',
+                'gemini:gemini-3.8-flash',
+                'gemini:gemini-3.8-flash',
+                'zai:glm-5.3',
+                'zai:glm-5.3',
             ],
             'Новый маршрут не должен наследовать retries/triedModels/lastFailedModel старого preset',
         );
@@ -464,7 +464,7 @@ async function main() {
                 messages: [{ role: 'user', content: 'hello' }],
                 max_completion_tokens: 128,
                 temperature: 1,
-                model: 'gpt-5.4-mini',
+                model: 'gpt-6.1-sol',
             },
         });
 
@@ -486,7 +486,7 @@ async function main() {
             body: {
                 messages: [{ role: 'user', content: 'hello' }],
                 max_tokens: 321,
-                model: 'gemini-3.6-flash',
+                model: 'gemini-3.8-flash',
             },
         });
         assert.deepStrictEqual(
@@ -518,7 +518,7 @@ async function main() {
             body: {
                 messages: [{ role: 'user', content: 'classify' }],
                 max_tokens: 64,
-                model: 'gemini-3.6-flash',
+                model: 'gemini-3.8-flash',
             },
         });
         assert.deepStrictEqual(calls[1], {
@@ -527,7 +527,7 @@ async function main() {
             body: {
                 messages: [{ role: 'user', content: 'classify' }],
                 max_completion_tokens: 64,
-                model: 'gpt-5.4-mini',
+                model: 'gpt-6-luna',
             },
         });
         geminiMutableClient.chat.completions.create = originalGeminiChatCreate;
@@ -549,7 +549,7 @@ async function main() {
             body: {
                 input: 'find current docs',
                 tools: [{ type: 'web_search_preview' }],
-                model: 'gpt-5.4-mini',
+                model: 'gpt-6-luna',
             },
         });
 
@@ -558,7 +558,7 @@ async function main() {
         const originalWebSearchModel: AiModelRef = { ...webSearchModel };
         aiPresets['hybrid-gemini-gpt'].models.webSearchReasoning = {
             provider: 'gemini',
-            model: 'gemini-3.6-flash',
+            model: 'gemini-3.8-flash',
         };
         try {
             await withPreset('hybrid-gemini-gpt', async () => {
@@ -578,7 +578,7 @@ async function main() {
                     url: 'https://generativelanguage.googleapis.com/v1/interactions',
                     method: 'POST',
                     body: {
-                        model: 'gemini-3.6-flash',
+                        model: 'gemini-3.8-flash',
                         store: false,
                         input: 'find current docs',
                         tools: [{ type: 'google_search' }],
@@ -610,7 +610,7 @@ async function main() {
                 url: 'https://generativelanguage.googleapis.com/v1/interactions',
                 method: 'POST',
                 body: {
-                    model: 'gemini-3.6-flash',
+                    model: 'gemini-3.8-flash',
                     store: false,
                     input: 'find current docs',
                     system_instruction: 'Use fresh web data.',
@@ -645,7 +645,7 @@ async function main() {
                 url: 'https://generativelanguage.googleapis.com/v1/interactions',
                 method: 'POST',
                 body: {
-                    model: 'gemini-3.6-flash',
+                    model: 'gemini-3.8-flash',
                     store: false,
                     input: 'find current docs',
                     system_instruction: 'Use fresh web data.',
@@ -722,7 +722,7 @@ async function main() {
                     thinking: { type: 'enabled' },
                     reasoning_effort: 'max',
                 },
-                model: 'glm-5.2',
+                model: 'glm-5.3',
             },
         });
 
@@ -748,7 +748,7 @@ async function main() {
             provider: 'zai',
             method: 'chat.completions.create',
             body: {
-                model: 'glm-5.2',
+                model: 'glm-5.3',
                 messages: [
                     { role: 'user', content: 'find current docs' },
                 ],
@@ -773,7 +773,7 @@ async function main() {
         const originalGlmWebSearchModel = { ...aiPresets['glm-balanced'].models.webSearchReasoning };
         aiPresets['glm-balanced'].models.webSearchReasoning = {
             provider: 'zai',
-            model: 'glm-5.2',
+            model: 'glm-5.3',
         };
         try {
             await withPreset('glm-balanced', async () => {
@@ -799,7 +799,7 @@ async function main() {
             provider: 'zai',
             method: 'chat.completions.create',
             body: {
-                model: 'glm-5.2',
+                model: 'glm-5.3',
                 messages: [
                     { role: 'user', content: 'plain response only' },
                 ],
@@ -852,7 +852,7 @@ async function main() {
                     url: 'https://generativelanguage.googleapis.com/v1/interactions',
                     method: 'POST',
                     body: {
-                        model: 'gemini-3.6-flash',
+                        model: 'gemini-3.8-flash',
                         store: false,
                         input: [
                             {
@@ -879,7 +879,7 @@ async function main() {
             method: 'audio.transcriptions.create',
             body: {
                 file: '[stream]',
-                model: 'whisper-1',
+                model: 'gpt-4o-mini-transcribe',
                 language: 'ru',
                 response_format: 'text',
             },
@@ -938,7 +938,7 @@ async function main() {
         );
         assert.strictEqual((calls[2] as RecordedCall).body.model, 'gemini-3.5-flash-lite');
         assert.ok(degradedConsoleLogs[0]?.startsWith('[AI DEGRADED] SWITCH | task=conversation'));
-        assert.ok(degradedConsoleLogs[0]?.includes('gemini:gemini-3.6-flash → gemini:gemini-3.5-flash-lite'));
+        assert.ok(degradedConsoleLogs[0]?.includes('gemini:gemini-3.8-flash → gemini:gemini-3.5-flash-lite'));
         assert.ok(degradedConsoleLogs[0]?.includes('reason=HTTP 503, http_503, provider_unavailable, Error, retryable'));
         assert.ok(degradedConsoleLogs[0]?.includes('requestId=gemini-chat-degraded-1'));
         assert.ok(degradedConsoleLogs[0]?.includes('traceId='));
@@ -959,7 +959,7 @@ async function main() {
         }
         assert.deepStrictEqual(
             calls.map((call) => (call.body as { model?: string }).model),
-            ['gemini-3.6-flash', 'gemini-3.5-flash-lite'],
+            ['gemini-3.8-flash', 'gemini-3.5-flash-lite'],
             'AI_GEMINI_RETRY_MAX_ATTEMPTS=0 должен сразу переходить к degradation chain',
         );
 
@@ -988,7 +988,7 @@ async function main() {
                 body: body as Record<string, unknown>,
             });
             const error = new Error('Gemini unavailable including lite') as Error & { status?: number };
-            error.status = body.model === 'gemini-3.6-flash' ? 503 : 500;
+            error.status = body.model === 'gemini-3.8-flash' ? 503 : 500;
             throw error;
         };
         await assert.rejects(() => withPreset('gemini-full', async () => {
@@ -996,20 +996,17 @@ async function main() {
                 messages: [{ role: 'user', content: 'test failed degradation' }],
             } satisfies ChatParamsWithoutModel);
         }));
-        // primary(3.6-flash, 2 вызова: primary + retry) → degraded chain:
-        // 3.5-flash-lite → 3.1-flash-lite → 2.5-flash-lite, все падают → reject.
-        assert.strictEqual(calls.length, 5);
-        assert.strictEqual((calls[0] as RecordedCall).body.model, 'gemini-3.6-flash');
-        assert.strictEqual((calls[1] as RecordedCall).body.model, 'gemini-3.6-flash');
+        // primary(3.8-flash, 2 вызова: primary + retry) → degraded chain:
+        // 3.5-flash-lite → 2.5-flash-lite, обе падают → reject.
+        assert.strictEqual(calls.length, 4);
+        assert.strictEqual((calls[0] as RecordedCall).body.model, 'gemini-3.8-flash');
+        assert.strictEqual((calls[1] as RecordedCall).body.model, 'gemini-3.8-flash');
         assert.strictEqual((calls[2] as RecordedCall).body.model, 'gemini-3.5-flash-lite');
-        assert.strictEqual((calls[3] as RecordedCall).body.model, 'gemini-3.1-flash-lite');
-        assert.strictEqual((calls[4] as RecordedCall).body.model, 'gemini-2.5-flash-lite');
+        assert.strictEqual((calls[3] as RecordedCall).body.model, 'gemini-2.5-flash-lite');
         assert.ok(degradedConsoleLogs.some((line) => line.startsWith('[AI DEGRADED] SWITCH | task=conversation')
-            && line.includes('gemini:gemini-3.6-flash → gemini:gemini-3.5-flash-lite')));
+            && line.includes('gemini:gemini-3.8-flash → gemini:gemini-3.5-flash-lite')));
         assert.ok(degradedConsoleLogs.some((line) => line.startsWith('[AI DEGRADED] FAILED | task=conversation')
             && line.includes('model=gemini:gemini-3.5-flash-lite')));
-        assert.ok(degradedConsoleLogs.some((line) => line.startsWith('[AI DEGRADED] FAILED | task=conversation')
-            && line.includes('model=gemini:gemini-3.1-flash-lite')));
         assert.ok(degradedConsoleLogs.some((line) => line.startsWith('[AI DEGRADED] FAILED | task=conversation')
             && line.includes('model=gemini:gemini-2.5-flash-lite')));
         assert.ok(!degradedConsoleLogs.some((line) => line.includes('[AI DEGRADED] ACTIVE')));
@@ -1081,7 +1078,7 @@ async function main() {
             assert.strictEqual(interactionBody?.body?.model, 'gemini-3.5-flash-lite');
         }
         assert.ok(degradedConsoleLogs[0]?.startsWith('[AI DEGRADED] SWITCH | task=webSearchReasoning'));
-        assert.ok(degradedConsoleLogs[0]?.includes('gemini:gemini-3.6-flash → gemini:gemini-3.5-flash-lite'));
+        assert.ok(degradedConsoleLogs[0]?.includes('gemini:gemini-3.8-flash → gemini:gemini-3.5-flash-lite'));
         assert.ok(degradedConsoleLogs[1]?.startsWith('[AI DEGRADED] ACTIVE | task=webSearchReasoning'));
         assert.ok(degradedConsoleLogs[1]?.includes('model=gemini:gemini-3.5-flash-lite'));
 
@@ -1121,12 +1118,9 @@ async function main() {
             } satisfies ResponseParamsWithoutModel);
             assert.strictEqual(result.output_text, 'deepest fallback result');
         });
-        assert.strictEqual(calls.length, 5, 'web search должен пройти primary + retry и три lite-модели');
+        assert.strictEqual(calls.length, 4, 'web search должен пройти primary + retry и две lite-модели');
         assert.strictEqual((calls[2]?.body as { body?: { model?: string } })?.body?.model, 'gemini-3.5-flash-lite');
-        assert.strictEqual((calls[3]?.body as { body?: { model?: string } })?.body?.model, 'gemini-3.1-flash-lite');
-        assert.strictEqual((calls[4]?.body as { body?: { model?: string } })?.body?.model, 'gemini-2.5-flash-lite');
-        assert.ok(degradedConsoleLogs.some((line) => line.startsWith('[AI DEGRADED] SWITCH | task=webSearchReasoning')
-            && line.includes('gemini:gemini-3.1-flash-lite → gemini:gemini-2.5-flash-lite')));
+        assert.strictEqual((calls[3]?.body as { body?: { model?: string } })?.body?.model, 'gemini-2.5-flash-lite');
         assert.ok(degradedConsoleLogs.some((line) => line.startsWith('[AI DEGRADED] ACTIVE | task=webSearchReasoning')
             && line.includes('model=gemini:gemini-2.5-flash-lite')));
 
