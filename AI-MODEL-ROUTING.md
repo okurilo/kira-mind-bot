@@ -61,7 +61,9 @@
 
 ## Совместимость и эксплуатационные замечания
 
-- GPT-6 Luna поддерживает Chat Completions и Responses; встроенные инструменты, в том числе web search, используют Responses. При `reasoning_effort` отличном от `none` нельзя отправлять `temperature` и `top_p`; текущий OpenAI adapter этих параметров не добавляет.
+- GPT-6 Luna поддерживает Chat Completions и Responses; встроенные инструменты, в том числе web search, используют Responses. Для GPT-6 при включённом reasoning `temperature`, `top_p` и logprobs-параметры удаляются адаптером OpenAI; явный `reasoning_effort: none` сохраняет sampling только на Luna/Sol. `gpt-lean` использует свои модели и для fallback, поэтому не повышает запрос до Sol.
+- Gemini 3.x оптимизированы под sampling defaults: адаптер удаляет `temperature`, `top_p`, `top_k` и `n` для Gemini 3.5 Flash-Lite и 3.8 Flash. У GLM-5.3 и GLM-4.7 температура остаётся поддерживаемой и регулируемой, её адаптер сохраняет.
+- OpenRouter Auto выбирает модель динамически, поэтому его адаптер не передаёт `temperature`, чтобы целевая reasoning-модель не отклонила общий запрос.
 - Gemini 3.1 Flash-Lite deprecated с 7 мая 2026, официальный shutdown запланирован на 7 мая 2027; её убрал из degradation chain. Цепочка текущего Gemini runtime: 3.8 Flash → 3.5 Flash-Lite → 2.5 Flash-Lite. Доступ к 2.5 Flash-Lite зависит от истории аккаунта Google; если модель недоступна аккаунту, останется предыдущая успешная Flash-Lite ступень.
 - Z.AI GLM-5.3 заменяет GLM-5.2 по той же цене; FlashX оставлен для utility задач. GLM-5.3-Flash не выбран основным маршрутом, потому что его thinking нельзя отключить, а GLM-4.7-FlashX дешевле для проверок. Для vision выбран тарифицируемый GLM-4.6V-FlashX вместо прежнего ID `glm-5v-turbo` с неясной применимостью к текущей цене.
 - В GPT-6 Luna image input supported; audio input not supported. Для дешёвой транскрибации выбран отдельный `gpt-4o-mini-transcribe`; в Gemini-only используется мультимодальный Gemini 3.8 Flash, а в GLM-only — GLM-ASR-2512.

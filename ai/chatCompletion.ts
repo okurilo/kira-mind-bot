@@ -333,7 +333,7 @@ async function createFallbackExecution(
     traceId: string,
     attempt: number,
 ): Promise<AiExecutionResult> {
-    const fallbackModel = getTaskFallbackModel(taskKey);
+    const fallbackModel = getTaskFallbackModel(taskKey, route.presetName);
     const response = await createFallbackChatCompletion(
         taskKey,
         params,
@@ -342,6 +342,7 @@ async function createFallbackExecution(
         traceId,
         attempt,
         route.modelRef,
+        route.presetName,
     );
     return {
         response,
@@ -359,8 +360,9 @@ export async function createFallbackChatCompletion(
     traceId = createAiExecutionTrace().traceId,
     attempt = 1,
     originalModelRef?: AiModelRef,
+    fallbackPresetName?: string,
 ): Promise<ChatCompletion> {
-    const fallbackModel = getTaskFallbackModel(taskKey);
+    const fallbackModel = getTaskFallbackModel(taskKey, fallbackPresetName);
     const originalErrorParser = originalModelRef
         ? getErrorIdentityParser(originalModelRef)
         : undefined;
@@ -420,13 +422,15 @@ export async function createJsonChatCompletionForTask<T>(
             'json-parse-fallback',
             trace.traceId,
             execution.attempt + 1,
+            undefined,
+            execution.route.presetName,
         );
         const fallbackParsed = parseLLMJson<T>(fallbackResponse.choices[0]?.message?.content || '');
         if (fallbackParsed) {
             return fallbackParsed;
         }
 
-        const fallbackModel = getTaskFallbackModel(taskKey);
+        const fallbackModel = getTaskFallbackModel(taskKey, execution.route.presetName);
         recordJsonResolutionFailure(
             taskKey,
             execution.route.presetName,
