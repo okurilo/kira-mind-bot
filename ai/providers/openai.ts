@@ -63,17 +63,18 @@ function omitUnsupportedReasoningSamplingParams<T extends Record<string, any>>(
     const canDisableReasoning = GPT6_MODELS_WITH_NONE_REASONING.has(model);
     if (canDisableReasoning && effort === 'none') return params;
 
-    const normalized = { ...params } as T;
+    const normalized: Record<string, any> = { ...params };
     delete normalized.temperature;
     delete normalized.top_p;
     delete normalized.top_logprobs;
     delete normalized.logprobs;
-    if (Array.isArray(normalized.include)) {
-        normalized.include = normalized.include.filter(
+    const include = normalized['include'];
+    if (Array.isArray(include)) {
+        normalized['include'] = include.filter(
             (item: unknown) => item !== 'message.output_text.logprobs',
         );
     }
-    return normalized;
+    return normalized as T;
 }
 
 const openaiClient = new OpenAI({
