@@ -4,18 +4,18 @@
 
 ## Вывод по расходу двух ботов
 
-За пять суток в таблицах usage двух ботов около $4.44 расчётной стоимости текстовых вызовов до скидок за кэш. Ещё около $0.08 приходится на восемь вызовов web search по тарифу OpenAI; изображения и длительность транскрибации в token-логах не представлены. Поэтому расчёт близок к наблюдаемым $5, но не является точной сверкой биллинга.
+За пять суток в таблицах usage двух ботов около $4.45 расчётной стоимости текстовых вызовов до скидок за кэш. Ещё около $0.08 приходится на восемь вызовов web search по тарифу OpenAI; изображения и длительность транскрибации в token-логах не представлены. Поэтому расчёт близок к наблюдаемым $5, но не является точной сверкой биллинга.
 
 | Маршрут | Вызовы | Вход / выход, токенов | Расчёт по тарифу |
 | --- | ---: | ---: | ---: |
 | GPT-5.4 `complexReasoning` | 245 | 298 260 / 118 301 | $2.52 |
 | GPT-5.4 mini | — | 1 154 164 / 224 563 | $1.88 |
-| GPT-5.4 nano | — | 181 794 / 8 752 | $0.04 |
+| GPT-5.4 nano | — | 181 794 / 8 752 | $0.05 |
 | Embeddings | — | 166 494 | около $0.004 |
 
 Сильное рассуждение было дорогой частью: 245 вызовов GPT-5.4 дали примерно 57% стоимости текста. Вызовы коротких проверок и embeddings почти не повлияли на сумму. После исчерпания баланса Кира ещё писала много ошибок `credit_balance_exhausted` с нулевыми токенами; это засорило журнал, но не создало сопоставимого платного usage. Повторный retry/fallback при исчерпанном балансе следует считать эксплуатационным шумом, а не объяснением $5.
 
-Для оценки нового маршрута пересчитаны те же 1.63 млн входных и 352 тыс. выходных токенов по GPT-6 Luna: около $0.34 вместо $4.44 за текст. Вместе с восемью web search это около $0.42 за те же пять суток, до учёта кэша, изображений, аудио и расхождений между локальными логами и provider invoice. Это тарифная оценка, а не гарантированный будущий счёт. Luna оставлена даже на `complexReasoning` в `gpt-lean`: OpenAI указывает reasoning по умолчанию `medium`; если качество сложных ответов не устроит, переключить этот один маршрут на Gemini 3.8 Flash (сейчас $0.75/$3.75) или GPT-6.1 Sol ($2/$10).
+Для оценки нового маршрута пересчитаны те же 1.63 млн входных и 352 тыс. выходных токенов по GPT-6 Luna: около $0.34 вместо $4.45 за текст. Вместе с восемью web search это около $0.42 за те же пять суток, до учёта кэша, изображений, аудио и расхождений между локальными логами и provider invoice. Это тарифная оценка, а не гарантированный будущий счёт. Luna оставлена даже на `complexReasoning` в `gpt-lean`: OpenAI указывает reasoning по умолчанию `medium`; если качество сложных ответов не устроит, переключить этот один маршрут на Gemini 3.8 Flash (сейчас $0.75/$3.75) или GPT-6.1 Sol ($2/$10).
 
 ## Тарифы, USD за 1 млн токенов
 
@@ -51,7 +51,7 @@
 | `gpt-max` | Sol / Luna / Sol | Astra | Sol | Sol | Sol / Sol | Sol | OpenAI small / gpt-4o-mini-transcribe |
 | `gpt-balanced` | Luna / Luna / Luna | Sol | Sol | Luna | Luna / Sol | Luna | OpenAI small / gpt-4o-mini-transcribe |
 | `gpt-lean` | Luna / Luna / Luna | Luna | Luna | Luna | Luna / Luna | Luna | OpenAI small / gpt-4o-mini-transcribe |
-| `hybrid-openrouter-gpt` | Auto / Luna / Luna | Sol | Auto | extraction Luna; consolidation Auto | analysis Auto / Luna | GPT-4o | OpenAI small / gpt-4o-mini-transcribe |
+| `hybrid-openrouter-gpt` | Auto / Luna / Luna | Sol | Auto | extraction Luna; consolidation Auto | analysis Auto / Luna | GPT Luna | OpenAI small / gpt-4o-mini-transcribe |
 | `hybrid-gemini-gpt` | Gemini Lite / Luna / Luna | Gemini Flash | Gemini Flash | GPT Luna / Gemini Lite | Gemini Lite / GPT Luna | Gemini Flash | OpenAI small / gpt-4o-mini-transcribe |
 | `gemini-full` | Gemini Lite / Gemini Lite / Flash | Gemini Flash | Gemini Flash | Gemini Lite | Gemini Lite / Gemini Flash | Gemini Flash | Gemini Embedding 2 / Gemini Flash |
 | `glm-full` | GLM FlashX / GLM FlashX / GLM-5.3 | GLM-5.3 | GLM-5.3 | GLM-5.3 | GLM-5.3 / GLM-5.3 | GLM-4.6V-FlashX | OpenAI small / GLM-ASR-2512 |
