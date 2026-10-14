@@ -36,6 +36,7 @@ const GEMINI_CHAT_COMPLETION_ALLOWED_PARAMS = new Set([
 const GEMINI_MODELS_WITHOUT_SAMPLING_PARAMS = new Set([
     'gemini-3.5-flash',
     'gemini-3.6-flash',
+    'gemini-3.8-flash',
     'gemini-3.5-flash-lite',
 ]);
 
@@ -172,10 +173,10 @@ function buildGeminiRetryPolicy(): RetryPolicy {
 // ─── Same-provider degradation chain ─────────────────────────────────────────
 // При отказе модели Gemini execution-flow спрашивает у провайдера цепочку
 // моделей того же провайдера: heavy → flash-lite → более дешёвая flash-lite.
-// Все модели GA и подтверждены актуальными на июль 2026.
+// Все модели GA и сверены с актуальностью на октябрь 2026.
 const GEMINI_DEGRADATION_CHAIN: ReadonlyArray<AiModelRef> = [
+    { provider: 'gemini', model: 'gemini-3.8-flash' },
     { provider: 'gemini', model: 'gemini-3.5-flash-lite' },
-    { provider: 'gemini', model: 'gemini-3.1-flash-lite' },
     { provider: 'gemini', model: 'gemini-2.5-flash-lite' },
 ];
 

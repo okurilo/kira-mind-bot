@@ -1,5 +1,8 @@
 {
   "gemini": {
+    "gemini-3.8-flash": {
+      "supportsTranscription": true
+    },
     "gemini-embedding-2": {
       "supportsEmbedding": true,
       "supportsChatCompletions": false,
@@ -26,6 +29,9 @@
       "supportsPromptCaching": false
     },
     "glm-5v-turbo": {
+      "supportsVision": true
+    },
+    "glm-4.6v-flashx": {
       "supportsVision": true
     },
     "glm-4.6v": {

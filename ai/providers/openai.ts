@@ -32,6 +32,15 @@ const OPENAI_CAPABILITIES: AiProviderCapabilities = {
         'gpt-5.4-nano': {
             chatTokenParam: 'max_completion_tokens',
         },
+        'gpt-6-luna': {
+            chatTokenParam: 'max_completion_tokens',
+        },
+        'gpt-6.1-sol': {
+            chatTokenParam: 'max_completion_tokens',
+        },
+        'gpt-6-astra': {
+            chatTokenParam: 'max_completion_tokens',
+        },
     },
 };
 

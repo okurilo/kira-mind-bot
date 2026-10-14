@@ -22,7 +22,7 @@ function withPreset<T>(preset: string, fn: () => T): T {
 withPreset('hybrid-openrouter-gpt', () => {
     assert.deepStrictEqual(resolveModelForTask('intentClassification'), {
         provider: 'openai',
-        model: 'gpt-5.4-nano',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('conversation'), {
         provider: 'openrouter',
@@ -33,11 +33,11 @@ withPreset('hybrid-openrouter-gpt', () => {
 withPreset('hybrid-gemini-gpt', () => {
     assert.deepStrictEqual(resolveModelForTask('browserVision'), {
         provider: 'gemini',
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
     });
     assert.deepStrictEqual(resolveModelForTask('conversation'), {
         provider: 'gemini',
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
     });
     assert.deepStrictEqual(resolveModelForTask('messageAnalysis'), {
         provider: 'gemini',
@@ -45,15 +45,15 @@ withPreset('hybrid-gemini-gpt', () => {
     });
     assert.deepStrictEqual(resolveModelForTask('memoryExtraction'), {
         provider: 'openai',
-        model: 'gpt-5.4-mini',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('intentClassification'), {
         provider: 'openai',
-        model: 'gpt-5.4-nano',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('webSearchReasoning'), {
         provider: 'openai',
-        model: 'gpt-5.4-mini',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('embedding'), {
         provider: 'openai',
@@ -61,18 +61,18 @@ withPreset('hybrid-gemini-gpt', () => {
     });
     assert.deepStrictEqual(resolveModelForTask('transcription'), {
         provider: 'openai',
-        model: 'whisper-1',
+        model: 'gpt-4o-mini-transcribe',
     });
 });
 
 withPreset('gemini-full', () => {
     assert.deepStrictEqual(resolveModelForTask('webSearchReasoning'), {
         provider: 'gemini',
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
     });
     assert.deepStrictEqual(resolveModelForTask('browserVision'), {
         provider: 'gemini',
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
     });
     assert.deepStrictEqual(resolveModelForTask('embedding'), {
         provider: 'gemini',
@@ -80,7 +80,7 @@ withPreset('gemini-full', () => {
     });
     assert.deepStrictEqual(resolveModelForTask('transcription'), {
         provider: 'gemini',
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.8-flash',
     });
 });
 
@@ -117,23 +117,23 @@ withPreset('gemini-full', () => {
 withPreset('glm-balanced', () => {
     assert.deepStrictEqual(resolveModelForTask('intentClassification'), {
         provider: 'openai',
-        model: 'gpt-5.4-nano',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('intentDedup'), {
         provider: 'openai',
-        model: 'gpt-5.4-nano',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('conversation'), {
         provider: 'zai',
-        model: 'glm-5.2',
+        model: 'glm-5.3',
     });
     assert.deepStrictEqual(resolveModelForTask('browserPlanning'), {
         provider: 'openai',
-        model: 'gpt-5.4-nano',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('browserVision'), {
         provider: 'openai',
-        model: 'gpt-4o',
+        model: 'gpt-6-luna',
     });
     assert.deepStrictEqual(resolveModelForTask('embedding'), {
         provider: 'openai',
@@ -144,11 +144,11 @@ withPreset('glm-balanced', () => {
 withPreset('glm-full', () => {
     assert.deepStrictEqual(resolveModelForTask('webSearchReasoning'), {
         provider: 'zai',
-        model: 'glm-5.2',
+        model: 'glm-5.3',
     });
     assert.deepStrictEqual(resolveModelForTask('browserVision'), {
         provider: 'zai',
-        model: 'glm-5v-turbo',
+        model: 'glm-4.6v-flashx',
     });
     assert.deepStrictEqual(resolveModelForTask('transcription'), {
         provider: 'zai',
@@ -176,11 +176,11 @@ withPreset('gemini-direct-balanced', () => {
 
 assert.deepStrictEqual(getFallbackModel('conversation'), {
     provider: 'openai',
-    model: 'gpt-5.4-mini',
+    model: 'gpt-6-luna',
 });
 assert.deepStrictEqual(getFallbackModel('browserVision'), {
     provider: 'openai',
-    model: 'gpt-4o',
+    model: 'gpt-6-luna',
 });
 assert.deepStrictEqual(getFallbackModel('embedding'), {
     provider: 'openai',
@@ -188,7 +188,7 @@ assert.deepStrictEqual(getFallbackModel('embedding'), {
 });
 assert.deepStrictEqual(getFallbackModel('transcription'), {
     provider: 'openai',
-    model: 'whisper-1',
+    model: 'gpt-4o-mini-transcribe',
 });
 
 withPreset('invalid-preset', () => {

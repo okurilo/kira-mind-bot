@@ -247,7 +247,7 @@ async function main() {
     let degradedJsonCalls = 0;
     geminiMutableClient.chat.completions.create = async (body: Record<string, unknown>) => {
       degradedJsonCalls += 1;
-      if (body.model === 'gemini-3.6-flash') {
+      if (body.model === 'gemini-3.8-flash') {
         throw Object.assign(new Error('Gemini heavy 503'), {
           status: 503,
           response: { headers: new Headers({ 'x-goog-request-id': `gem-json-${degradedJsonCalls}` }) },
@@ -358,7 +358,7 @@ async function main() {
       id: 'chat-gemini-json-invalid',
       object: 'chat.completion',
       created: 0,
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{invalid json' } }],
       usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
     });
@@ -391,7 +391,7 @@ async function main() {
       id: 'chat-gemini-json-invalid-primary',
       object: 'chat.completion',
       created: 0,
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-3.5-flash-lite',
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{invalid json' } }],
       usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
     });
@@ -431,7 +431,7 @@ async function main() {
       id: 'chat-gemini-json-invalid-full',
       object: 'chat.completion',
       created: 0,
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.8-flash',
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: '{invalid json' } }],
       usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
     });
@@ -593,7 +593,7 @@ async function main() {
     globalThis.setTimeout = originalSetTimeout;
 
     // gemini-full: primary + retry (baseline 1) + same-provider degradation chain
-    // (gemini-3.5-flash-lite → 3.1-flash-lite → 2.5-flash-lite), все падают → reject.
+    // (gemini-3.5-flash-lite → 2.5-flash-lite), все падают → reject.
     // Контракт: ни одного GPT-вызова (cross-provider fallback запрещён для true-full).
     assert.strictEqual(geminiFullOpenAiCalls, 0);
     assert.ok(geminiFullAttempts >= 3, 'gemini-full должен сделать минимум primary + retry + degradation');

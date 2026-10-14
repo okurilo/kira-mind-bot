@@ -84,30 +84,30 @@ describe("AI preset registry", () => {
 });
 
 describe("AI model fallback and environment selection", () => {
-    test("uses nano for lightweight structured tasks", () => {
+    test("uses Luna for lightweight structured tasks", () => {
         for (const task of ["lightweightText", "intentClassification", "intentDedup", "browserPlanning"] as AiTaskKey[]) {
-            assert.deepEqual(getFallbackModel(task), { provider: "openai", model: "gpt-5.4-nano" });
+            assert.deepEqual(getFallbackModel(task), { provider: "openai", model: "gpt-6-luna" });
         }
     });
 
-    test("uses a vision-capable fallback for browser screenshots", () => {
-        assert.deepEqual(getFallbackModel("browserVision"), { provider: "openai", model: "gpt-4o" });
+    test("uses Luna as the browser screenshot fallback", () => {
+        assert.deepEqual(getFallbackModel("browserVision"), { provider: "openai", model: "gpt-6-luna" });
     });
 
-    test("uses mini for remaining text task types", () => {
-        const nanoTasks = new Set<AiTaskKey>(["lightweightText", "intentClassification", "intentDedup", "browserPlanning"]);
-        for (const task of TASK_KEYS.filter((key) => !nanoTasks.has(key) && !["complexReasoning", "browserVision", "embedding", "transcription"].includes(key))) {
-            assert.deepEqual(getFallbackModel(task), { provider: "openai", model: "gpt-5.4-mini" }, task);
+    test("uses Luna for remaining text task types", () => {
+        const lunaTasks = new Set<AiTaskKey>(["lightweightText", "intentClassification", "intentDedup", "browserPlanning"]);
+        for (const task of TASK_KEYS.filter((key) => !lunaTasks.has(key) && !["complexReasoning", "browserVision", "embedding", "transcription"].includes(key))) {
+            assert.deepEqual(getFallbackModel(task), { provider: "openai", model: "gpt-6-luna" }, task);
         }
     });
 
     test("preserves a strong fallback for complex reasoning", () => {
-        assert.deepEqual(getFallbackModel("complexReasoning"), { provider: "openai", model: "gpt-5.4" });
+        assert.deepEqual(getFallbackModel("complexReasoning"), { provider: "openai", model: "gpt-6.1-sol" });
     });
 
     test("uses task-specific fallbacks for embeddings and transcription", () => {
         assert.deepEqual(getFallbackModel("embedding"), { provider: "openai", model: "text-embedding-3-small" });
-        assert.deepEqual(getFallbackModel("transcription"), { provider: "openai", model: "whisper-1" });
+        assert.deepEqual(getFallbackModel("transcription"), { provider: "openai", model: "gpt-4o-mini-transcribe" });
     });
 
     test("uses a valid environment preset and falls back for invalid values", () => {

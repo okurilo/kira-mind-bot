@@ -67,7 +67,7 @@ function main(): void {
 
     // 4. Gemini предоставляет цепочку same-provider degradation, исключая текущую модель.
     const geminiChainFromHeavy = resolveDegradationChain(geminiAdapter.getSameProviderDegradationChain, {
-        currentModel: 'gemini-3.6-flash',
+        currentModel: 'gemini-3.8-flash',
         retryable: true,
     }, geminiAdapter);
     assert.ok(geminiChainFromHeavy.length >= 1, 'Gemini должен иметь минимум одну degraded-модель для heavy');
@@ -76,7 +76,7 @@ function main(): void {
         'Gemini degradation chain должна содержать только Gemini-модели',
     );
     assert.ok(
-        geminiChainFromHeavy.every((entry) => entry.model !== 'gemini-3.6-flash'),
+        geminiChainFromHeavy.every((entry) => entry.model !== 'gemini-3.8-flash'),
         'Gemini degradation chain не должна возвращать текущую модель',
     );
 
@@ -92,7 +92,7 @@ function main(): void {
     );
     assert.deepStrictEqual(
         geminiChainFromLite.map((entry) => entry.model),
-        ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite'],
+        ['gemini-2.5-flash-lite'],
         'Degradation от lite должна идти только вниз и не возвращать более дорогую модель',
     );
 
