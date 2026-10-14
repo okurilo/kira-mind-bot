@@ -39,7 +39,10 @@ export const openrouterProviderAdapter: AiProviderAdapter = {
     },
     normalizeChatParams(model, params) {
         const capabilities = this.getModelCapabilities(model);
-        return applyChatTokenParamMode(params, capabilities.chatTokenParam);
+        const normalized = applyChatTokenParamMode(params, capabilities.chatTokenParam);
+        // Auto Router can select reasoning models that reject non-default sampling values.
+        if (model === 'openrouter/auto') delete normalized.temperature;
+        return normalized;
     },
     async createChatCompletion(model, params) {
         return this.client.chat.completions.create({

@@ -44,6 +44,38 @@ const OPENAI_CAPABILITIES: AiProviderCapabilities = {
     },
 };
 
+const GPT6_MODELS_WITH_NONE_REASONING = new Set([
+    'gpt-6-sol',
+    'gpt-6-luna',
+]);
+
+function omitUnsupportedReasoningSamplingParams<T extends Record<string, any>>(
+    model: string,
+    params: T,
+): T {
+    const isGpt6Model = model.startsWith('gpt-6-') || model.startsWith('gpt-6.');
+    if (!isGpt6Model) return params;
+
+    const reasoning = params.reasoning && typeof params.reasoning === 'object'
+        ? params.reasoning as { effort?: unknown }
+        : undefined;
+    const effort = params.reasoning_effort ?? reasoning?.effort;
+    const canDisableReasoning = GPT6_MODELS_WITH_NONE_REASONING.has(model);
+    if (canDisableReasoning && effort === 'none') return params;
+
+    const normalized = { ...params } as T;
+    delete normalized.temperature;
+    delete normalized.top_p;
+    delete normalized.top_logprobs;
+    delete normalized.logprobs;
+    if (Array.isArray(normalized.include)) {
+        normalized.include = normalized.include.filter(
+            (item: unknown) => item !== 'message.output_text.logprobs',
+        );
+    }
+    return normalized;
+}
+
 const openaiClient = new OpenAI({
     apiKey: config.openAiApiKey || process.env.OPENAI_API_KEY,
     maxRetries: 0,
@@ -59,7 +91,10 @@ export const openaiProviderAdapter: AiProviderAdapter = {
     },
     normalizeChatParams(model, params) {
         const capabilities = this.getModelCapabilities(model);
-        return applyChatTokenParamMode(params, capabilities.chatTokenParam);
+        return omitUnsupportedReasoningSamplingParams(
+            model,
+            applyChatTokenParamMode(params, capabilities.chatTokenParam),
+        );
     },
     async createChatCompletion(model, params) {
         return this.client.chat.completions.create({
@@ -75,7 +110,7 @@ export const openaiProviderAdapter: AiProviderAdapter = {
         }
 
         return this.client.responses.create({
-            ...params,
+            ...omitUnsupportedReasoningSamplingParams(model, params),
             model,
         });
     },
