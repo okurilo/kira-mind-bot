@@ -10,6 +10,7 @@
   <script defer src="/account/account.js"></script>
 </head>
 <body>
+  <div id="account-app">
   <a class="skip" href="#main">К содержимому</a>
   <header class="topbar"><a class="brand" href="/">Kira Mind<span>Моя Кира</span></a><button id="logout" class="quiet" hidden>Выйти</button></header>
   <main id="main" tabindex="-1">
@@ -32,7 +33,9 @@
     </section>
     <footer><a id="privacy" href="/privacy/">Конфиденциальность</a><a id="support" href="/support/">Поддержка</a></footer>
   </main>
-  <dialog id="proof-dialog" aria-labelledby="proof-title">
+  </div>
+  <div id="proof-backdrop" hidden aria-hidden="true"></div>
+  <dialog id="proof-dialog" aria-labelledby="proof-title" aria-describedby="proof-description" aria-modal="true">
     <div class="dialog-heading"><h2 id="proof-title">Подтверди вход</h2><button id="proof-cancel" class="quiet" type="button">Отмена</button></div>
     <p id="proof-description" class="secondary"></p><div id="proof-content" class="stack"></div>
     <p id="proof-status" class="secondary" role="status" aria-live="polite"></p>

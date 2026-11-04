@@ -7,6 +7,7 @@
   const hintKey = 'kira-account-intent-v1';
   const scripts = new Map();
   let refreshing;
+  let proofFocus;
   const token = () => window.crypto.randomUUID();
   const node = (tag, text, className) => { const value = document.createElement(tag); if (text !== undefined) value.textContent = text; if (className) value.className = className; return value; };
   const button = (text, run, className) => { const value = node('button', text, className); value.type = 'button'; value.addEventListener('click', () => { void Promise.resolve(run()).catch(report); }); return value; };
@@ -202,16 +203,39 @@
       script.onerror = () => { clearTimeout(timer); scripts.delete(key); reject(Error('Не удалось загрузить подтверждение.')); }; script.src = url; script.async = true; document.head.append(script); }); scripts.set(key,promise); return promise;
   }
   function active(context) { return state.flow === context && context.sequence === state.sequence; }
+  function openProof() {
+    const dialog = $('proof-dialog');
+    if (dialog.open) return;
+    proofFocus = document.activeElement;
+    $('account-app').inert = true; $('proof-backdrop').hidden = false; document.body.classList.add('proof-open');
+    // Provider challenge frames are attached to body. Native showModal() would
+    // put this dialog above them and make them inert, regardless of z-index.
+    dialog.show(); $('proof-cancel').focus();
+  }
+  function closeProof() {
+    const dialog = $('proof-dialog');
+    dialog.close(); dialog.inert = false; dialog.setAttribute('aria-modal', 'true');
+    $('account-app').inert = false; $('proof-backdrop').hidden = true; document.body.classList.remove('proof-open');
+    const restore = proofFocus; proofFocus = null;
+    if (restore?.isConnected) restore.focus();
+  }
+  function captchaOpen(context, open) {
+    if (!active(context) || !$('proof-dialog').open) return;
+    // The provider owns focus while its external challenge is displayed.
+    $('proof-dialog').inert = open; $('proof-dialog').setAttribute('aria-modal', String(!open));
+    if (!open) context.captchaSlot?.querySelector('iframe, button, [tabindex]')?.focus();
+  }
   function closeFlow(context) {
     if (!context || state.flow !== context) return;
+    state.flow = null;
     if (context.widget !== undefined && window.hcaptcha) window.hcaptcha.remove(context.widget);
     context.credentials = null; context.identityToken = null;
-    state.flow = null; $('proof-dialog').close(); $('proof-content').replaceChildren(); $('proof-status').textContent = '';
+    closeProof(); $('proof-content').replaceChildren(); $('proof-status').textContent = '';
   }
   function cancelFlow() {
     const current = state.flow; state.sequence++;
     if (current) { current.credentials = null; current.identityToken = null; current.controller.abort(); if (current.widget !== undefined && window.hcaptcha) window.hcaptcha.remove(current.widget); }
-    state.flow = null; state.grant = null; saveHint(null); $('proof-dialog').close(); $('proof-content').replaceChildren();
+    state.flow = null; state.grant = null; saveHint(null); closeProof(); $('proof-content').replaceChildren();
     notice(current?.sending ? 'Результат пока не подтверждён. Проверь список способов входа.' : 'Подтверждение отменено.'); if (state.session) void render('methods');
   }
   function validTelegramUrl(flow) {
@@ -229,9 +253,13 @@
     if (!active(context)) return;
     $('proof-status').textContent = 'Пройди проверку, чтобы продолжить.';
     const slot = node('div', undefined, 'captcha-slot'); $('proof-content').append(slot);
+    context.captchaSlot = slot;
     context.widget = window.hcaptcha.render(slot, { sitekey: state.config.proof.hcaptchaSiteKey, size: slot.clientWidth < 304 ? 'compact' : 'normal', theme: matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light',
-      callback: value => { if (active(context)) void finish(context,value); }, 'expired-callback': () => { if (active(context)) $('proof-status').textContent = 'Проверка истекла. Пройди её ещё раз.'; },
-      'error-callback': () => { if (active(context)) $('proof-status').textContent = 'Не удалось загрузить проверку. Отмени и попробуй ещё раз.'; } });
+      'open-callback': () => captchaOpen(context, true), 'close-callback': () => captchaOpen(context, false),
+      callback: value => { if (active(context)) { captchaOpen(context, false); void finish(context,value); } },
+      'expired-callback': () => { if (active(context)) { captchaOpen(context, false); $('proof-status').textContent = 'Проверка истекла. Пройди её ещё раз.'; } },
+      'chalexpired-callback': () => { if (active(context)) { captchaOpen(context, false); $('proof-status').textContent = 'Задание истекло. Пройди проверку ещё раз.'; } },
+      'error-callback': () => { if (active(context)) { captchaOpen(context, false); $('proof-status').textContent = 'Не удалось загрузить проверку. Отмени и попробуй ещё раз.'; } } });
   }
   async function google(context) {
     await loadScript('google','https://accounts.google.com/gsi/client?hl=ru', () => Boolean(window.google?.accounts?.id)); if (!active(context)) return;
@@ -248,7 +276,7 @@
     const context = { sequence: ++state.sequence, purpose, provider: name, controller: new AbortController(), credentials, flow: null, sending: false }; state.flow = context;
     $('proof-title').textContent = purpose === 'link' ? `Добавить ${labels[name]}` : purpose === 'reauthenticate' ? 'Подтверди текущий вход' : `Войти через ${labels[name]}`;
     $('proof-description').textContent = purpose === 'link' ? 'Этот способ будет связан с текущей Кирой.' : 'Подтверди вход и пройди проверку.';
-    $('proof-content').replaceChildren(); $('proof-status').textContent = 'Подготавливаем подтверждение…'; if (!$('proof-dialog').open) $('proof-dialog').showModal();
+    $('proof-content').replaceChildren(); $('proof-status').textContent = 'Подготавливаем подтверждение…'; openProof();
     try {
       if (purpose !== 'login') await session(state.intent.accountId);
       if (!active(context)) return;
@@ -289,7 +317,7 @@
     const data = await own('account/identities');
     if (sequence !== state.sequence || view !== state.view) return;
     $('proof-content').replaceChildren(); $('proof-title').textContent = 'Подтверди текущий вход'; $('proof-description').textContent = 'Выбери уже подключённый способ.'; $('proof-status').textContent = '';
-    if (!$('proof-dialog').open) $('proof-dialog').showModal();
+    openProof();
     for (const item of data.identities) {
       if (item.provider === 'password') $('proof-content').append(button('Пароль', () => passwordReauth(intent.accountId), 'secondary-button'));
       else if (available(item.provider)) $('proof-content').append(button(labels[item.provider], () => flow('reauthenticate',item.provider), 'secondary-button'));
@@ -334,11 +362,20 @@
     if(value.purpose!=='login'&&(!state.session||!hint||hint.accountId!==state.session.account.id)){saveHint(null);return;}
     if (!value.outcomeAvailable && !(value.provider==='telegram'&&value.callbackReceived)) return;
     const context={sequence:++state.sequence,purpose:value.purpose,provider:value.provider,flow:{flowId:value.flowId},controller:new AbortController(),sending:false};state.flow=context;
-    $('proof-title').textContent='Продолжить подтверждение';$('proof-description').textContent='Проверь вход, чтобы закончить действие.';$('proof-content').replaceChildren();$('proof-dialog').showModal();
+    $('proof-title').textContent='Продолжить подтверждение';$('proof-description').textContent='Проверь вход, чтобы закончить действие.';$('proof-content').replaceChildren();openProof();
     if(value.outcomeAvailable)await finish(context,undefined,true);else await captcha(context);
   }
   $('password-login').addEventListener('submit',event=>{event.preventDefault();const form=event.currentTarget;const credentials={username:form.elements.username.value,password:form.elements.password.value};form.elements.password.value='';void startLogin('password',credentials).catch(report);});
   $('proof-cancel').addEventListener('click',cancelFlow);$('proof-dialog').addEventListener('cancel',event=>{event.preventDefault();cancelFlow();});
+  $('proof-dialog').addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); cancelFlow(); return; }
+    if (event.key !== 'Tab' || $('proof-dialog').inert) return;
+    const controls = [...$('proof-dialog').querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], iframe, [tabindex]:not([tabindex="-1"])')]
+      .filter(control => control.getClientRects().length);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  });
   $('logout').addEventListener('click',()=>{void logout().catch(report);});
   function cancelOperator() { state.sequence++; if(state.operatorSubmission)state.operatorSubmission.cancelled=true; $('operator-dialog').close();state.grant=null;saveHint(null);$('operator-form').reset();notice(state.operatorSubmission?.sending?'Результат пока не подтверждён. Проверь доступ аккаунта.':'Привязка отменена.'); }
   $('operator-cancel').addEventListener('click',cancelOperator);

@@ -39,6 +39,8 @@ GET `/api/v1/web/api/` допускает только `account`, `account/ident
 
 Google использует официальный GIS ID token с серверным nonce и существующим Web client ID. Telegram использует RS256, S256 PKCE, `openid profile` и HTTPS callback `/api/v1/web/auth/telegram/callback`; native callback не заменяется. Code, state и verifier сохраняются зашифрованными максимум на 5 минут; JWT/профиль Google и CAPTCHA-ввод не сохраняются. Истёкшие потоки удаляются maintenance, записи аккаунта — фактическим удалением аккаунта.
 
+Окно подтверждения открывается через `dialog.show()` с собственной подложкой и `inert` только на оболочке кабинета. `showModal()` здесь недопустим: внешний iframe задания hCaptcha добавляется в `body` и иначе оказывается под native top layer и становится недоступным. На время задания официальные open/close callbacks передают фокус провайдеру и отключают элементы окна; закрытие, истечение, ошибка и отмена восстанавливают доступ. Клавиатурная навигация и возврат фокуса проверяются вместе с обычным входом, Telegram-продолжением и повторным подтверждением. `npm run test:account-console-browser` после сборки запускает реальный Chromium с полностью синтетическими API/iframe; это проверка взаимодействия, не фактическое прохождение CAPTCHA провайдера.
+
 ## Граница оператора
 
 `KIRA_PUBLIC_OPERATOR_ENABLED=true` вместе с origin и отдельным случайным `KIRA_OPERATOR_BRIDGE_SECRET` из 64 hex включает фиксированный `/operator/` proxy к Docker-сервису `http://admin-panel:3000`. Те же значения задаются менеджеру и admin-panel; только admin-panel использует `KIRA_ACCOUNT_AUTH_URL=http://kira-accounts:3300`. Bridge-secret не передаётся worker-ам. Сохраняется приватный loopback-доступ к панели с прежним ADMIN_USERNAME/ADMIN_PASSWORD.

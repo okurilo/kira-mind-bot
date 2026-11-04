@@ -5,12 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 
 class Element {
-    clientWidth = 252; hidden = false; open = false; disabled = false; value = ''; textContent = ''; type = ''; className = '';
-    children: any[] = []; listeners = new Map<string,Function>(); classList = {add:()=>{}};
+    clientWidth = 252; hidden = false; open = false; modal = false; inert = false; isConnected = true; disabled = false; value = ''; textContent = ''; type = ''; className = '';
+    children: any[] = []; listeners = new Map<string,Function>(); attributes = new Map<string,string>(); classList = {add:()=>{},remove:()=>{}};
     elements: any = {username:{value:'synthetic_operator',focus(){}},password:{value:'synthetic-operator-password'}};
     addEventListener(name:string,handler:Function){this.listeners.set(name,handler);}
     append(...items:any[]){this.children.push(...items);} replaceChildren(...items:any[]){this.children=items;}
-    setAttribute(){} showModal(){this.open=true;} close(){this.open=false;} focus(){} remove(){} reset(){this.elements.password.value='';}
+    setAttribute(name:string,value:string){this.attributes.set(name,value);} show(){this.open=true;this.modal=false;} showModal(){this.open=true;this.modal=true;} close(){this.open=false;} focus(){} remove(){} reset(){this.elements.password.value='';}
+    querySelector(){return this.children[0] || null;}
     async fire(name:string){await this.listeners.get(name)?.({preventDefault(){},currentTarget:this});}
 }
 function latch(){let resolve!:(value?:any)=>void;const promise=new Promise<any>(done=>{resolve=done;});return{promise,resolve};}
@@ -19,12 +20,12 @@ const session = (operatorAccess=false) => ({account:{id:accountId,username:'synt
 const response = (value:any,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
 function fixture(fetcher:(path:string,init:any)=>Promise<Response>){
     const elements = new Map<string,Element>(), get=(id:string)=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)!;};
-    const document = {getElementById:get,createElement:()=>new Element(),createElementNS:()=>new Element(),head:new Element()};
+    const document = {getElementById:get,createElement:()=>new Element(),createElementNS:()=>new Element(),head:new Element(),body:new Element(),activeElement:null as Element|null};
     const context:any={document,window:{crypto:{randomUUID}},fetch:fetcher,Headers,AbortController,URL,TextDecoder,Uint8Array,atob,Date,Intl,setTimeout,clearTimeout,matchMedia:()=>({matches:false}),location:{origin:'https://synthetic.example.invalid',assign(){}},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}}};
-    const source=readFileSync('account-console/account.js','utf8').replace('  void start();','  globalThis.fixture = {state,applyIntent,loginView,logout,saveHint,captcha};');
+    const source=readFileSync('account-console/account.js','utf8').replace('  void start();','  globalThis.fixture = {state,applyIntent,loginView,logout,saveHint,captcha,openProof,closeFlow};');
     runInNewContext(source,context);
     const api=context.fixture;api.state.config={csrfToken:'synthetic-csrf',providers:[],hasBrowserSession:true};api.state.session=session();
-    return{...api,get,window:context.window};
+    return{...api,get,document,window:context.window};
 }
 
 for(const kind of ['link','unlink']) test(`cancel while validating ${kind} intent prevents a stale mutation or next flow`,async()=>{
@@ -75,4 +76,49 @@ test('narrow proof dialog selects compact CAPTCHA rather than clipping a require
     f.state.config.proof={hcaptchaSiteKey:'synthetic-site-key'};
     const context={sequence:0};f.state.flow=context;await f.captcha(context);
     assert.equal(options.length,1);assert.equal(options[0].size,'compact');
+});
+
+test('provider challenge owns focus without unlocking the account behind it; close and cancel restore the proof and page',async()=>{
+    const f=fixture(async()=>response({})),options:any[]=[],removed:number[]=[];
+    f.window.hcaptcha={render:(_slot:any,value:any)=>{options.push(value);return 1;},remove:(id:number)=>{removed.push(id);options[0]['close-callback']();}};
+    f.state.config.proof={hcaptchaSiteKey:'synthetic-site-key'};
+    let restored=0;const trigger=new Element();trigger.focus=()=>{restored++;};f.document.activeElement=trigger;
+    const context={sequence:0,controller:new AbortController(),credentials:{password:'synthetic-password'}};
+    f.state.flow=context;f.openProof();await f.captcha(context);
+    assert.equal(f.get('proof-dialog').modal,false);
+    assert.equal(f.get('account-app').inert,true);assert.equal(f.get('proof-backdrop').hidden,false);
+    options[0]['open-callback']();
+    assert.equal(f.get('proof-dialog').inert,true);assert.equal(f.get('proof-dialog').attributes.get('aria-modal'),'false');
+    assert.equal(f.get('account-app').inert,true);
+    options[0]['close-callback']();
+    assert.equal(f.get('proof-dialog').inert,false);assert.equal(f.get('proof-dialog').attributes.get('aria-modal'),'true');
+    assert.equal(f.get('account-app').inert,true);
+    await f.get('proof-cancel').fire('click');
+    assert.equal(f.get('account-app').inert,false);assert.equal(f.get('proof-backdrop').hidden,true);
+    assert.equal(f.get('proof-dialog').open,false);assert.equal(restored,1);
+    assert.deepEqual(removed,[1]);assert.equal(context.controller.signal.aborted,true);assert.equal(context.credentials,null);
+});
+
+for(const callback of ['expired-callback','chalexpired-callback','error-callback']) test(`${callback} releases challenge focus and permits retry without approving authentication`,async()=>{
+    let requests=0;const f=fixture(async()=>{requests++;return response({});});let options:any;
+    f.window.hcaptcha={render:(_slot:any,value:any)=>{options=value;return 1;},remove(){}};
+    f.state.config.proof={hcaptchaSiteKey:'synthetic-site-key'};
+    const context={sequence:0};f.state.flow=context;f.openProof();await f.captcha(context);
+    options['open-callback']();options[callback]();
+    assert.equal(f.get('proof-dialog').inert,false);assert.equal(f.get('account-app').inert,true);
+    assert.equal(f.state.flow,context);assert.equal(requests,0);
+    assert.match(f.get('proof-status').textContent,/истекл|Не удалось/);
+    options['open-callback']();assert.equal(f.get('proof-dialog').inert,true);
+});
+
+test('callbacks from a removed CAPTCHA cannot change a newer confirmation or its background isolation',async()=>{
+    const f=fixture(async()=>response({}));const options:any[]=[];
+    f.window.hcaptcha={render:(_slot:any,value:any)=>{options.push(value);return options.length;},remove(){}};
+    f.state.config.proof={hcaptchaSiteKey:'synthetic-site-key'};
+    const previous={sequence:0};f.state.flow=previous;f.openProof();await f.captcha(previous);f.closeFlow(previous);
+    const current={sequence:++f.state.sequence};f.state.flow=current;f.openProof();await f.captcha(current);
+    options[0]['open-callback']();assert.equal(f.get('proof-dialog').inert,false);
+    options[1]['open-callback']();options[0]['close-callback']();options[0]['error-callback']();
+    assert.equal(f.get('proof-dialog').inert,true);assert.equal(f.get('account-app').inert,true);
+    assert.equal(f.get('proof-status').textContent,'Пройди проверку, чтобы продолжить.');
 });
