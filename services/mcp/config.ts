@@ -1,11 +1,15 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { RUNTIME_DATA_DIR } from '../../utils/runtimeData';
+import type { CommerceProvider } from '../commerce/catalog';
+import { nativeCommerceServers } from '../commerce/config';
 
 export type McpEffect = 'read' | 'external';
 export interface McpServerConfig {
     description: string;
-    transport: 'http' | 'jsonrpc' | 'stdio';
+    transport: 'http' | 'jsonrpc' | 'stdio' | 'builtin-commerce';
+    /** Generated only by local code; the operator JSON parser rejects this transport. */
+    commerceProvider?: CommerceProvider;
     url?: string;
     headers?: Record<string, string>;
     oauth?: { tokenUrl: string; clientId: string; clientSecret: string; scope?: string; audience?: string };
@@ -26,17 +30,23 @@ export { parseMcpConfig };
 
 let cache: { stamp: string; servers: McpConfig } | undefined;
 export function readMcpConfig(file = MCP_CONFIG_FILE): McpConfig {
+    const merge = (external: McpConfig): McpConfig => {
+        if (file !== MCP_CONFIG_FILE) return external;
+        const native = nativeCommerceServers();
+        if (Object.keys(native).some(id => Object.prototype.hasOwnProperty.call(external, id))) throw new Error('Reserved native MCP ID');
+        return { ...external, ...native };
+    };
     try {
         const stat = statSync(file);
         if (stat.size > 128_000) throw new Error('MCP: конфигурация слишком велика');
         const stamp = `${file}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
-        if (cache?.stamp === stamp) return cache.servers;
+        if (cache?.stamp === stamp) return merge(cache.servers);
         const servers = parseMcpConfig(JSON.parse(readFileSync(file, 'utf8')));
         cache = { stamp, servers };
-        return servers;
+        return merge(servers);
     } catch (error) {
         cache = undefined;
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return merge({});
         throw new Error('Не удалось прочитать конфигурацию MCP. Проверь mcp.json в каталоге runtime.');
     }
 }

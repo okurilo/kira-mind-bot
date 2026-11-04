@@ -3,6 +3,7 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { assertSafeMcpValue, McpConfig, McpEffect, McpServerConfig, readMcpConfig, mcpServerCatalog } from './config';
 import { connectMcp, secretHeaderValues } from '../../utils/mcpConnection';
+import { nativeCommerceProvider } from '../commerce/config';
 export { mcpResultEvidence } from './evidence';
 
 export class McpInputError extends Error {}
@@ -29,7 +30,10 @@ function redactCredentials<T>(value: T, config: McpServerConfig, connection: Mcp
 
 /** Connections belong to one operation; no stale account credentials or surviving stdio children. */
 export class McpService {
-    constructor(private readonly configuration: () => McpConfig = readMcpConfig, private readonly connector: McpConnector = connectMcp) {}
+    constructor(private readonly configuration: () => McpConfig = readMcpConfig, private readonly connector: McpConnector = async (config, signal) =>
+        nativeCommerceProvider(config) ? (await import('../commerce/native')).connectNativeCommerce(config, signal) : connectMcp(config, signal)) {}
+
+    nativeCommerce(id: string) { const config = this.configuration()[id]; return config && nativeCommerceProvider(config); }
 
     servers() { return mcpServerCatalog(this.configuration()); }
     toolEffect(id: string, name: string): McpEffect | undefined {

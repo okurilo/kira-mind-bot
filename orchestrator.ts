@@ -93,6 +93,7 @@ export interface MessageClassification {
         externalVerification?: 'availability';
         /** Semantic scope of website-task cancellation, assessed in the existing intent call. */
         browserTaskControl?: 'cancel' | 'continue';
+        commerceProvider?: import('./services/commerce/catalog').CommerceProvider;
         browserWorkspace?: { id: string; relation: 'continue'|'new'|'unrelated' };
         /** Server-provided procedural context and confirmed persistence result, never model authority. */
         behaviorContext?: string;

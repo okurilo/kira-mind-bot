@@ -43,6 +43,7 @@ export function tenantEnvironment(env: NodeJS.ProcessEnv, account: Account, cred
     Object.assign(child, {
         NODE_ENV: 'production', TMPDIR: path.join(directory, 'temp'),
         KIRA_TENANT_ID: account.id, KIRA_INSTANCE_NAME: name,
+        KIRA_COMMERCE_STORAGE_KEY: secrets.derive(account.id, 'commerce'),
         DB_NAME: existing?.database || name, DB_USER: name, DB_PASSWORD: secrets.derive(account.id, 'database'),
         KIRA_DATABASE_SYNC: existing ? 'false' : 'true',
         VECTOR_PROVIDER: 'qdrant', KIRA_MEMORY_NAMESPACE: existing?.memoryNamespace || name,

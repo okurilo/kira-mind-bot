@@ -27,11 +27,11 @@ async function publicTarget(host: string): Promise<string> {
 }
 
 /** DNS is resolved here and the TCP connection uses that exact IP, closing the DNS rebinding gap. */
-export function createBrowserProxy(): http.Server {
+export function createBrowserProxy(allowHost: (host: string) => boolean = () => true, allowHttp = true): http.Server {
     const server = http.createServer(async (req, res) => {
         try {
             const url = new URL(req.url || '');
-            if (url.protocol !== 'http:' || (url.port && url.port !== '80') || url.username || url.password) throw new Error('Invalid target');
+            if (!allowHttp || url.protocol !== 'http:' || (url.port && url.port !== '80') || url.username || url.password || !allowHost(url.hostname)) throw new Error('Invalid target');
             const address = await publicTarget(url.hostname);
             const { 'proxy-authorization': unused, 'proxy-connection': unused2, ...headers } = req.headers;
             headers.host = url.host;
@@ -53,7 +53,7 @@ export function createBrowserProxy(): http.Server {
         socket.on('error', () => upstream?.destroy());
         try {
             const url = new URL(`https://${req.url}`);
-            if (url.port && url.port !== '443' || url.username || url.password || url.pathname !== '/') throw new Error('Invalid tunnel');
+            if (url.port && url.port !== '443' || url.username || url.password || url.pathname !== '/' || url.search || url.hash || !allowHost(url.hostname)) throw new Error('Invalid tunnel');
             const address = await publicTarget(url.hostname);
             if (socket.destroyed) return;
             upstream = net.createConnection({ host: address, port: 443 });

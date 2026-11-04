@@ -12,6 +12,7 @@ import { processingOutput } from './domainTools';
 import { contactMemoryConfirmationKey, browserConfirmationKey } from './confirmation';
 import { isBrowserContinuationAnswer } from '../../utils/continuationInput';
 import type { AgentRunRecord, ToolContext, ToolDefinition, ToolOutput } from './types';
+import { COMMERCE_PROVIDERS, commerceProvider, commerceCatalog } from '../../services/commerce/catalog';
 
 const live = new Map<string, { controller: AbortController; context: ToolContext }>();
 const scopedKey = (context: ToolContext, id: string) => `${context.ctx.from?.id}:${context.ctx.sessionStorageKey ?? context.ctx.chat?.id}:${id}`;
@@ -49,7 +50,9 @@ async function run(kind: AgentRunRecord['kind'], task: string, args: Record<stri
     if (kind === 'browser') {
         const pending = context.ctx.session.pendingBrowserTask;
         if (pending && !context.ctx.browserWorkspaceContinuation && context.classification.details.browserTaskControl !== 'cancel' && !isBrowserContinuationAnswer(task, pending.sessionId)) return { status: 'failed', summary: 'Сначала заверши или отмени текущую браузерную задачу.' };
-        const result = await browserAgent(context.ctx, task, context.isForwarded, context.forwardFrom, context.messageHistory, { ...context.classification, intent: 'БРАУЗЕР_ЗАДАЧА' }, context.memoryContext);
+        const provider = commerceProvider(args.commerceProvider) ?? commerceProvider(context.classification.details.commerceProvider);
+        const browserContext = provider ? Object.assign(Object.create(context.ctx), { browserCommerceProvider: provider }) : context.ctx;
+        const result = await browserAgent(browserContext, task, context.isForwarded, context.forwardFrom, context.messageHistory, { ...context.classification, intent: 'БРАУЗЕР_ЗАДАЧА' }, context.memoryContext);
         const output = processingOutput(result, Boolean(context.ctx.session.pendingBrowserTask));
         const sessionId = context.ctx.session.pendingBrowserTask?.sessionId;
         if (output.status === 'needs_input' && sessionId) output.confirmationKey = browserConfirmationKey(sessionId);
@@ -74,9 +77,11 @@ async function run(kind: AgentRunRecord['kind'], task: string, args: Record<stri
 export function agentTools(): ToolDefinition[] {
     const start: ToolDefinition = {
         name: 'agents.start', skill: 'browser-workflows', effect: 'external', ownerOnly: true,
-        description: 'Делегировать самостоятельную задачу: research — изолированное исследование; browser — сайт; negotiation — переговоры; study-chat — изучение большого чата. Исследователи могут работать параллельно. Браузер и переговоры сохраняют свои подтверждения.',
-        inputSchema: objectSchema({ kind: { type: 'string', enum: ['research', 'browser', 'negotiation', 'study-chat'] }, task: textSchema('Одна конкретная цель и её ограничения'), contactId: { type: 'integer' }, period: { type: 'string', enum: ['week', 'month', '3months', 'year'] } }, ['kind', 'task']),
+        description: 'Делегировать самостоятельную задачу: research — исследование; browser — сайт; negotiation — переговоры; study-chat — большой чат. Для покупок в Ozon, Яндекс Маркете, Купере, Лавке и Самокате укажи commerceProvider из commerce.listServices: изолированный браузер магазина, вход и изменения вручную. Браузер и переговоры сохраняют свои подтверждения.',
+        inputSchema: objectSchema({ kind: { type: 'string', enum: ['research', 'browser', 'negotiation', 'study-chat'] }, task: textSchema('Одна конкретная цель и её ограничения'), commerceProvider: { type: 'string', enum: [...COMMERCE_PROVIDERS] }, contactId: { type: 'integer' }, period: { type: 'string', enum: ['week', 'month', '3months', 'year'] } }, ['kind', 'task']),
         async execute(args, context) {
+            if (args.commerceProvider !== undefined && (args.kind !== 'browser' || !commerceProvider(args.commerceProvider)))
+                return { status: 'failed', summary: 'Магазин можно выбрать только для браузерной задачи.' };
             const state = context.ctx.session.agentRuntime;
             if (!state) return { status: 'failed', summary: 'Нет журнала родительского задания.' };
             if (state.agents.filter(agent => agent.parentRunId === context.runId).length >= 4) return { status: 'failed', summary: 'Достигнут лимит делегирования.' };
@@ -153,5 +158,10 @@ export function agentTools(): ToolDefinition[] {
             record.updatedAt = Date.now();
             return output;
         },
+    }, {
+        name: 'commerce.listServices', skill: 'browser-workflows', effect: 'read', ownerOnly: true, privateOnly: true,
+        description: 'Наши покупательские интеграции Ozon, Яндекс Маркета, Купера, Яндекс Лавки и Самоката: возможности и ограничения. Не запрашивает пользовательские секреты.',
+        inputSchema: objectSchema({}),
+        async execute() { return { status: 'ok', summary: 'Магазины доступны через изолированный общий браузер. Вход и изменения выполняет владелец; сессия удаляется при закрытии задачи.', data: commerceCatalog() }; },
     }];
 }

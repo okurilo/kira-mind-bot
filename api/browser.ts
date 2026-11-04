@@ -50,7 +50,7 @@ export class BrowserSessionApi {
         }
         const body = await readBody(req, 12 * 1024);
         const allowed: Record<string, string[]> = {
-            observers: ['observerId'], heartbeat: ['observerId'], commands: ['type','observerId','expectedRevision','leaseId','confirmationId','decision'],
+            observers: ['observerId','presentation'], heartbeat: ['observerId'], commands: ['type','observerId','expectedRevision','leaseId','confirmationId','decision'],
             input: ['observerId','leaseId','expectedRevision','frameSeq','pageId','navigationEpoch','viewportRevision','input'],
             utterances: ['observerId','leaseId','expectedRevision','assistanceRequestId','source','text'],
         };
@@ -59,7 +59,7 @@ export class BrowserSessionApi {
         const key = commandKey(req);
         if (action === 'observers') {
             const ack = await session.receipt(key, body, async () => ({ commandId: key, accepted: true,
-                session: session.registerObserver(body.observerId).session }));
+                session: session.registerObserver(body.observerId, body.presentation).session }));
             return json({ observerId: body.observerId, session: ack.session });
         }
         if (action === 'commands') return json(await session.command(key, body));

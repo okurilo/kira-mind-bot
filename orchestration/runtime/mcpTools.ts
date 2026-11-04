@@ -5,6 +5,7 @@ import { McpHttpError } from '../../services/mcp/jsonRpcTransport';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { objectSchema, textSchema } from './registry';
 import type { ToolDefinition, ToolOutput, ToolContext } from './types';
+import { withCommerceContext } from '../../services/commerce/context';
 
 function argumentsObject(raw: unknown): Record<string, unknown> {
     try {
@@ -38,11 +39,29 @@ export function mcpTools(service: McpService = mcpService): ToolDefinition[] {
         try {
             const parsed = argumentsObject(args.argumentsJson);
             if (service.toolEffect(String(args.server), String(args.tool)) !== effect) throw new McpInputError('MCP-инструмент не разрешён для этого типа операции.');
+            const native = service.nativeCommerce(String(args.server));
             if (effect === 'external' && context.confirmedMcpCall !== approvalKey(args)) {
-                const question = `Подтверди действие MCP ${String(args.server)}/${String(args.tool)} с аргументами ${JSON.stringify(parsed).slice(0, 600)}. Ответь «да» или «отмена».`;
+                let question = `Подтверди действие MCP ${String(args.server)}/${String(args.tool)} с аргументами ${JSON.stringify(parsed).slice(0, 600)}. Ответь «да» или «отмена».`;
+                if (native && args.tool === 'apply_cart') {
+                    const result = await withCommerceContext(context, undefined, () => service.callTool(String(args.server), 'get_cart_draft', { draftId: parsed.draftId }, 'read', context.signal));
+                    const draft = (result.structuredContent as any)?.data?.draft;
+                    if (result.isError || !draft || draft.revision !== parsed.revision) throw new McpInputError('Предложенная корзина не найдена или изменилась.');
+                    const items = draft.items.slice(0, 6).map((line: any) => `${line.quantity} × ${line.product.title}`).join(', ');
+                    const total = draft.estimatedTotal ? `${(draft.estimatedTotal.minor / 100).toFixed(2)} ₽ за товары; доставка и сборы проверяются на сайте` : 'окончательная сумма пока неизвестна';
+                    question = `${draft.mode === 'replace' ? 'Заменить' : 'Обновить'} корзину: ${items}${draft.items.length > 6 ? ` и ещё ${draft.items.length - 6} позиций из предложенного состава` : ''}? ${total}. Заказ и оплата будут отдельным ручным шагом. Ответь «да» или «отмена».`;
+                    return { status: 'needs_input', summary: 'Корзина ожидает одного подтверждения предложенного состава.', question, data: { draft } };
+                }
                 return { status: 'needs_input', summary: 'Действие MCP ожидает подтверждения конкретных аргументов.', question };
             }
-            const result = await service.callTool(String(args.server), String(args.tool), parsed, effect, context.signal);
+            const result = await withCommerceContext(context, effect === 'external' ? approvalKey(args) : undefined,
+                () => service.callTool(String(args.server), String(args.tool), parsed, effect, context.signal));
+            if (native) {
+                const output = result.structuredContent as { version?: string; provider?: string; status?: string; message?: string; interaction?: { prompt?: string } } | undefined;
+                if (output?.version === 'kira_commerce_v1' && output.provider === native) {
+                    if (output.status === 'needs_input') return { status: 'needs_input', summary: output.message ?? 'Магазин ожидает участия владельца.', question: output.interaction?.prompt ?? 'Открой общий браузер и заверши ручной шаг.', data: output };
+                    if (output.status === 'unknown') return { status: 'unknown', summary: output.message ?? 'Результат изменения неизвестен. Автоматический повтор запрещён.', data: output };
+                }
+            }
             const evidence = mcpResultEvidence(result);
             return { status: result.isError ? 'failed' : 'ok',
                 summary: result.isError ? 'MCP-сервис не смог получить запрошенные данные.' : evidence, context: evidence };

@@ -97,7 +97,10 @@ test('each worker has independent storage/identity and never inherits operator p
     first.bot_username = 'synthetic_first_bot'; second.bot_username = 'synthetic_second_bot';
     const a = tenantEnvironment(operator, first, { botToken: 'first-bot' }, '/synthetic/one', secrets);
     const b = tenantEnvironment(operator, second, { botToken: 'second-bot' }, '/synthetic/two', secrets);
-    for (const key of ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'KIRA_API_TOKEN', 'KIRA_RUNTIME_DATA_DIR', 'PERSONALITY_FILE', 'KIRA_MEMORY_NAMESPACE', 'TMPDIR']) assert.notEqual(a[key], b[key], key);
+    for (const key of ['DB_NAME', 'DB_USER', 'DB_PASSWORD', 'KIRA_API_TOKEN', 'KIRA_COMMERCE_STORAGE_KEY', 'KIRA_RUNTIME_DATA_DIR', 'PERSONALITY_FILE', 'KIRA_MEMORY_NAMESPACE', 'TMPDIR']) assert.notEqual(a[key], b[key], key);
+    assert.equal(a.KIRA_COMMERCE_STORAGE_KEY, secrets.derive(first.id, 'commerce'));
+    assert.notEqual(a.KIRA_COMMERCE_STORAGE_KEY, a.KIRA_API_TOKEN);
+    assert.equal(a.KIRA_PLATFORM_MASTER_KEY, undefined);
     assert.equal(a.KIRA_ALLOWED_USER_ID, '10001');
     assert.equal(a.OPENAI_API_KEY, 'shared-provider-key');
     assert.equal(a.KIMI_API_KEY, 'synthetic-shared-kimi-key');

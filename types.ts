@@ -223,6 +223,7 @@ export interface SessionData {
     };
     /** Ожидает уточнения пользователя для продолжения браузерной Playwright-задачи */
     pendingBrowserTask?: {
+        commerceProvider?: import('./services/commerce/catalog').CommerceProvider;
         originalTask: string;
         question: string;
         sessionId?: string;
@@ -373,6 +374,8 @@ export type BotContext = Context & SessionFlavor<SessionData> & {
     liveBrowserRequest?: { operationId: string };
     /** Validated by the existing semantic intake, never taken from an API request body. */
     browserWorkspaceContinuation?: string;
+    /** Narrows the browser to a first-party storefront policy; never grants write authority. */
+    browserCommerceProvider?: import('./services/commerce/catalog').CommerceProvider;
     /** Raw owner-authored turn, set by intake; never supplied by tool arguments or page content. */
     browserOwnerText?: string;
     browserOwnerTextBound?: boolean;

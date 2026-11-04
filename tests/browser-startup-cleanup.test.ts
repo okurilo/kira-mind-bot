@@ -49,6 +49,7 @@ function fixture(t: TestContext, persistent: boolean, fault?: Fault, closeFailur
         setDefaultNavigationTimeout: () => {},
         pages: () => reusePage ? [page] : [],
         newPage: async () => { if (fault === 'page') throw failure; return page; },
+        route: async () => {}, routeWebSocket: async () => {},
     });
     const profile = path.join(process.env.BROWSER_PROFILE_DIR!, '94041_94041');
     fs.mkdirSync(profile, { recursive: true });
@@ -77,6 +78,50 @@ function fixture(t: TestContext, persistent: boolean, fault?: Fault, closeFailur
     const start = () => createBrowserRun(ctx, 94041, 'Открой синтетическую тестовую страницу');
     return { ctx, page, browser, context, failure, closes, launches, start, marker };
 }
+
+test('commerce public startup forces a fresh context, scopes the proxy before launch and never reads saved credentials', async t => {
+    const f = fixture(t, true, 'credentials'); // The ordinary credential path would fail this run.
+    f.ctx.browserCommerceProvider = 'ozon';
+    const policy = require('../services/commerce/browserPolicy') as typeof import('../services/commerce/browserPolicy');
+    let proxyCloses = 0, installed = false;
+    t.mock.method(policy, 'startCommerceProxy', async (provider: string) => {
+        assert.equal(provider, 'ozon');
+        return { url: 'http://127.0.0.1:19501', close: async () => { proxyCloses++; } };
+    });
+    t.mock.method(policy, 'installCommercePolicy', async (context: unknown, provider: string, human: () => boolean) => {
+        assert.equal(context, f.context); assert.equal(provider, 'ozon'); assert.equal(human(), false); installed = true;
+    });
+    const launch = chromium.launch;
+    t.mock.method(chromium, 'launch', async (options: import('playwright').LaunchOptions | undefined) => {
+        assert.equal(options?.proxy?.server, 'http://127.0.0.1:19501');
+        assert.ok(options?.args?.includes('--disable-quic'));
+        assert.ok(options?.args?.includes('--proxy-bypass-list=<-loopback>'));
+        return launch(options);
+    });
+    t.mock.method(f.browser, 'newContext', async (options: import('playwright').BrowserContextOptions) => {
+        assert.equal(options.serviceWorkers, 'block'); assert.equal(options.acceptDownloads, false);
+        assert.equal(options.storageState, undefined);
+        return f.context;
+    });
+    const session = new LiveBrowserSession(94041, 'synthetic-commerce', 'synthetic-commerce-operation');
+    t.after(() => session.dispose());
+    const state = await session.runAgent(f.start);
+    assert.equal(installed, true); assert.equal(state.persistentProfile, false); assert.equal(state.profileDir, undefined);
+    assert.equal(state.commerceProvider, 'ozon'); assert.equal(state.workspace?.commerceProvider, 'ozon');
+    assert.deepEqual(state.credentialCandidates, []); assert.equal(state.memoryCredentials, null);
+    assert.deepEqual(f.launches, ['ephemeral']);
+    await cancelBrowserRunForContext(f.ctx);
+    assert.equal(proxyCloses, 1); assert.equal(fs.readFileSync(f.marker, 'utf8'), 'synthetic persisted session');
+});
+
+test('commerce cannot resume with another merchant or silently drop its policy', async t => {
+    const f = fixture(t, false);
+    f.ctx.browserCommerceProvider = 'kuper';
+    f.ctx.session.pendingBrowserTask = { originalTask: 'Synthetic', question: 'Synthetic', commerceProvider: 'ozon', createdAt: Date.now(), expiresAt: Date.now() + 60000 };
+    const result = await browserAgent(f.ctx, 'Продолжи');
+    assert.equal(result.operationStatus, 'failed'); assert.match(result.responseText!, /другой/);
+    assert.deepEqual(f.launches, []);
+});
 
 for (const persistent of [true, false]) {
     const mode = persistent ? 'persistent' : 'ephemeral';

@@ -60,6 +60,79 @@ test('account and channel scopes cannot discover or control another session; one
     session.dispose();
 });
 
+test('hidden browser keeps the task and text/voice control alive without producing screenshot frames', async t => {
+    const f = await fixture(t);
+    f.session.registerObserver(f.observer, 'background');
+    const frames = f.events.filter(event => event.event === 'frame').length;
+    for (let step = 0; step < 3; step++) {
+        f.advance(1001); f.session.heartbeat(f.observer); await f.session.tick();
+    }
+    assert.equal(f.events.filter(event => event.event === 'frame').length, frames);
+    assert.equal(f.session.state, 'running');
+    assert.equal(f.session.agentCall(f.session.generation, () => 'same task'), 'same task');
+    await f.session.needsUser('Какую жирность молока выбрать?', 'information');
+    assert.equal(f.events.at(-1).session.assistanceRequest.prompt, 'Какую жирность молока выбрать?');
+    let answer = '';
+    f.session.resume = async value => { answer = value; };
+    const snapshot = f.session.snapshot();
+    const ack = await browserUtterance(f.session, randomUUID(), { observerId: f.observer, expectedRevision: snapshot.revision,
+        assistanceRequestId: snapshot.assistanceRequest!.requestId, source: 'voice', text: 'Два с половиной процента' },
+        async () => ({ intent: 'answer', evidence: 'Два с половиной процента', confidence: 1, reply: 'Выберу молоко 2,5%.' }));
+    assert.equal(ack.session.sessionId, f.session.id); assert.equal(ack.session.state, 'running');
+    assert.match(answer, /Два с половиной процента/);
+    assert.equal(f.events.filter(event => event.event === 'frame').length, frames);
+});
+
+test('payment, login, OTP and CAPTCHA refuse voice/text answers, while hidden results remain observable', async t => {
+    const f = await fixture(t);
+    f.session.registerObserver(f.observer, 'background');
+    for (const kind of ['payment', 'login', 'otp', 'captcha'] as const) {
+        await f.session.needsUser('Продолжи непосредственно на сайте.', kind);
+        const s = f.session.snapshot();
+        assert.equal(s.assistanceRequest?.responseActions.includes('answer'), false);
+        await assert.rejects(f.session.answerAssistance(randomUUID(), { observerId: f.observer, expectedRevision: s.revision, assistanceRequestId: s.assistanceRequest!.requestId }, 'synthetic-private-input'), /непосредственно на сайте/);
+    }
+    f.session.publishResult('Фактическая корзина подготовлена, заказ не оформлен.', 'ok');
+    const result = f.session.snapshot().result!;
+    assert.ok(result.id); assert.equal(result.status, 'ok');
+    assert.equal(f.events.at(-1).session.result.id, result.id);
+    f.session.heartbeat(f.observer); assert.equal(f.session.snapshot().result?.id, result.id);
+    assert.doesNotMatch(JSON.stringify(f.events), /synthetic-private-input/);
+});
+
+test('manual login/captcha assistance survives subframe loads and resize; main navigation still invalidates its request', async t => {
+    const f = await fixture(t);
+    for (const kind of ['login', 'otp', 'captcha', 'payment'] as const) {
+        await f.session.needsUser('Ручной шаг на сайте.', kind);
+        const requestId = f.session.snapshot().assistanceRequest!.requestId, revision = f.session.snapshot().revision;
+        f.session.pageChanged('subframe'); f.session.pageChanged('viewport');
+        assert.equal(f.session.state, 'needs_user'); assert.equal(f.session.snapshot().assistanceRequest!.requestId, requestId);
+        assert.ok(f.session.snapshot().revision > revision); assert.equal(f.session.snapshot().assistanceRequest!.responseActions.includes('answer'), false);
+        f.session.pageChanged(); assert.equal(f.session.state, 'paused'); assert.equal(f.session.snapshot().assistanceRequest, null);
+    }
+    await f.session.requireConfirmation({ target: 'synthetic-effect' }, 'Подтвердить?');
+    f.session.pageChanged('subframe'); assert.equal(f.session.snapshot().pendingConfirmation, null);
+});
+
+test('background viewers never receive another device screenshot and must show the page before taking control', async t => {
+    const f = await fixture(t), visible: any[] = [];
+    f.session.registerObserver(f.observer, 'background');
+    f.session.subscribe(f.other, event => { visible.push(event); return true; }, () => {});
+    f.pixels('changed synthetic visible page');
+    const before = f.events.filter(event => event.event === 'frame').length;
+    await f.refresh();
+    assert.ok(visible.some(event => event.event === 'frame'));
+    assert.equal(f.events.filter(event => event.event === 'frame').length, before);
+    await assert.rejects(f.command('take_control'), /Открой страницу/);
+    assert.equal(f.session.state, 'running');
+    f.session.registerObserver(f.observer, 'visible');
+    const lease = await f.take(); assert.ok(lease);
+    assert.throws(() => f.session.registerObserver(f.observer, 'background'), /ручное управление/);
+    await f.command('pause', { leaseId: lease });
+    f.session.registerObserver(f.observer, 'background');
+    assert.equal(f.session.state, 'paused');
+});
+
 test('takeover revokes future agent operations before granting user control and drains the operation already in flight', async t => {
     const f = await fixture(t), pending = deferred();
     const generation = f.session.generation;
