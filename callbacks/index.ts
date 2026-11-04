@@ -6,6 +6,7 @@ import { Reminder, ReminderStatus, cancelReminder, markReminderAsCompleted, post
 import { reminderAgent } from "../agents/reminderAgent";
 import { ReminderRepository } from "../services/ReminderRepository";
 import { hasFreshPendingReminder } from "../utils/implicitReminderDetector";
+import { handleTelegramReminderProposalCallback } from '../services/telegramReminderProposals';
 import {
     REMINDERS_PAGE_SIZE,
     ReminderListFilter,
@@ -239,6 +240,7 @@ export function registerCallback(bot: Bot<BotContext>): void {
     bot.on("callback_query:data", async (ctx, next) => {
         try {
             const callbackData = ctx.callbackQuery.data;
+            if (await handleTelegramReminderProposalCallback(ctx, callbackData)) return;
             if (await handleLiveBrowserCallback(ctx, callbackData)) return;
 
             if (await handleRecurringTaskCallback(ctx, callbackData)) {

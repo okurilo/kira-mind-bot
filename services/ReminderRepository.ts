@@ -49,6 +49,10 @@ function repo() {
 }
 
 export const ReminderRepository = {
+    async findById(id: string): Promise<Reminder | undefined> {
+        const entity = await repo().findOneBy({ id, profile: getActiveBotProfile() });
+        return entity ? fromEntity(entity) : undefined;
+    },
     async save(reminder: Reminder): Promise<void> {
         await repo().save(toEntity(reminder));
     },

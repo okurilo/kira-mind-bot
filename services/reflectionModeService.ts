@@ -19,9 +19,9 @@
  *  - Это позволяет LLM понимать о чём идёт речь даже при коротких батчах.
  *
  * Экономия токенов:
- *  - Pre-filter: сообщения < 8 символов, чистые emoji/знаки — в корзину.
- *  - Батчинг: от 5 сообщений или через 30 мин.
- *  - Rate-limit: не более 6 полных анализов в час.
+ *  - Короткие подтверждения и время сохраняются для контекста договорённости.
+ *  - Батчинг: от 5 сообщений, после паузы 2 минуты в серии или через 30 мин.
+ *  - Rate-limit: не более 6 батчей в час, включая pre-screen без фактов.
  */
 
 import { Bot } from 'grammy';
@@ -48,6 +48,9 @@ import {
 } from '../utils/reflectionMemoryFilter';
 import { isForwardOnlyEvidence, type ExtractedFactAboutUser } from '../utils/studyChatFlow';
 import { sendDaytimeReflection } from './inboxGuardianScheduler';
+import { USER_TIMEZONE } from '../constants';
+import { reflectionPrescreenMessages, normalizeReminderReview, type TelegramReminderReview } from '../ai/telegramReminderReview';
+import { telegramReminderProposals } from './telegramReminderProposals';
 
 // ── Настройки ─────────────────────────────────────────────────────────────────
 
@@ -65,10 +68,11 @@ const STATS_LAST_ACTIVITY_KEY = 'reflection_stats_last_activity';
 
 const BATCH_MIN_MESSAGES = 5;
 const BATCH_MAX_AGE_MS = 30 * 60 * 1000;
+const AGREEMENT_QUIET_MS = 2 * 60 * 1000;
 const MAX_BUFFER_SIZE = 50;
 const HOURLY_ANALYSIS_LIMIT = 6;
 const PRESCREEN_MAX_MESSAGES = 20;
-const MIN_TEXT_LENGTH = 8;
+const MIN_TEXT_LENGTH = 1;
 /** Сколько предыдущих сообщений из MessageStore добавляем как контекст */
 const CONTEXT_MAX_MESSAGES = 15;
 const REFLECTION_EPISODE_NAMESPACE = 'b0a1661e-f470-41f6-a7f8-65741db7f9c7';
@@ -229,7 +233,9 @@ export async function queueMessage(
     const trimmed = text?.trim();
     if (!trimmed || trimmed.length < MIN_TEXT_LENGTH) return;
     // Для исходящих не фильтруем по emoji — владелец может писать важные вещи коротко
-    if (!isOwn && /^[\p{Emoji}\p{P}\d\s]+$/u.test(trimmed)) return;
+    // Short confirmations, negations and a separate "10:30" can complete or
+    // cancel an agreement. Keep them in the bounded conversational batch.
+    if (!isOwn && !/[\p{L}\p{N}]/u.test(trimmed)) return;
 
     // Синхронная проверка: сообщение уже было проанализировано?
     const lastAt = chatLastAnalyzedMap.get(chatId);
@@ -407,6 +413,10 @@ function isBufferReady(buf: ChatBuffer): boolean {
     // Fix 3: Немедленный анализ при жизненно важном событии
     if (buf.highPriority) return true;
 
+    // Let a short multi-turn agreement settle before evaluating it. The global
+    // hourly batch budget also covers prescreens that find no durable facts.
+    if (buf.messages.length >= 2 && buf.lastMessageAt && now - buf.lastMessageAt.getTime() >= AGREEMENT_QUIET_MS) return true;
+
     // Fix 2: Конец разговорной сессии — пауза > 2 часов после последнего сообщения
     if (buf.lastMessageAt && now - buf.lastMessageAt.getTime() >= SESSION_GAP_MS) return true;
 
@@ -446,52 +456,28 @@ async function saveLastAnalyzedMessageAt(chatId: string, date: Date): Promise<vo
     await setSetting(`${LAST_ANALYZED_KEY_PREFIX}${chatId}`, String(date.getTime()));
 }
 
-function formatForPrescreen(messages: BufferedMessage[]): string {
-    return messages
-        .slice(-PRESCREEN_MAX_MESSAGES)
-        .map(m => {
-            const time = m.date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-            return `[${time}] ${m.senderName}: ${m.text}`;
-        })
-        .join('\n');
-}
-
 type EmotionTag = 'neutral' | 'stress' | 'conflict' | 'grief' | 'joy' | 'anxiety';
 
 interface PrescreenResult {
     useful: boolean;
     emotion: EmotionTag;
+    reminderReview?: TelegramReminderReview;
 }
 
-async function prescreen(chatTitle: string, messages: BufferedMessage[]): Promise<PrescreenResult> {
-    const snippet = formatForPrescreen(messages);
-    const ownerName = config.ownerName || 'пользователь';
-    const prompt = `Сообщения от "${chatTitle}" к ${ownerName}:
-
-${snippet}
-
-Есть ли здесь факты, заслуживающие запоминания?
-ЗАСЛУЖИВАЮТ: устойчивые предпочтения, роли, отношения, важные решения, долгосрочные планы, переезд, здоровье, финансы, семейные/рабочие события.
-НЕ ЗАСЛУЖИВАЮТ: "ок", "понял", приветствия, реакции, мелкий чат, одноразовые рабочие статусы, детали инструментов/ChatGPT/файлов, временные проблемы обработки, просьбы распознать/объединить материалы без результата.
-Эмоция сама по себе НЕ делает переписку полезной: стресс из-за текущей задачи или инструмента — useful=false, если нет долговременного факта.
-
-Определи эмоциональный тон переписки: neutral / stress / conflict / grief / joy / anxiety.
-
-JSON: {"useful": true/false, "emotion": "neutral|stress|conflict|grief|joy|anxiety"}`;
-
+async function prescreen(chatId: string, chatTitle: string, messages: BufferedMessage[], context: BufferedMessage[]): Promise<PrescreenResult> {
     try {
+        const pending = await telegramReminderProposals.context(chatId).catch(() => []);
+        if (!await isBackgroundFeatureEnabled('reflection')) return { useful: false, emotion: 'neutral' };
         const resp = await createChatCompletionForTask('lightweightText', {
-            messages: [
-                { role: 'system', content: 'Отвечай только валидным JSON.' },
-                { role: 'user', content: prompt },
-            ],
+            messages: reflectionPrescreenMessages({ now: new Date(), timeZone: USER_TIMEZONE, messages, context, pending }, chatTitle, config.ownerName || 'владелец'),
             temperature: 0,
-            max_completion_tokens: 30,
+            max_completion_tokens: 1200,
         });
         const text = resp.choices[0]?.message?.content?.trim() || '';
-        const data = parseLLMJson<{ useful?: boolean; emotion?: string }>(text);
+        const data = parseLLMJson<{ useful?: boolean; emotion?: string; reminderReview?: unknown }>(text);
         const emotion = (data?.emotion as EmotionTag) || 'neutral';
-        return { useful: data?.useful === true, emotion };
+        return { useful: data?.useful === true, emotion, reminderReview: normalizeReminderReview(data?.reminderReview,
+            [...context.slice(-15), ...messages.slice(-PRESCREEN_MAX_MESSAGES)], new Set(messages.slice(-PRESCREEN_MAX_MESSAGES).map(m => m.messageId!)), Date.now()) };
     } catch {
         return { useful: false, emotion: 'neutral' };
     }
@@ -833,7 +819,15 @@ async function analyzeBatch(
 
         // ── Шаг 2: Pre-screen ────────────────────────────────────────────────
         prescreenTotal++;
-        const { useful, emotion } = await prescreen(buf.chatTitle, sessionToAnalyze);
+        analysesThisHour++;
+        chatAnalysesThisHour.set(chatId, (chatAnalysesThisHour.get(chatId) ?? 0) + 1);
+        const contextMessages = getContextMessages(chatId, sessionToAnalyze[0].date);
+        const { useful, emotion, reminderReview } = await prescreen(chatId, buf.chatTitle, sessionToAnalyze, contextMessages);
+        if (reminderReview) {
+            await telegramReminderProposals.applyReview(bot, chatId, buf.chatTitle,
+                Math.max(...sessionToAnalyze.map(m => m.messageId ?? 0)), reminderReview)
+                .catch(() => console.warn('[telegram-reminders] Proposal review unavailable'));
+        }
         if (!useful) {
             devLog(`[reflection] Pre-screen: not useful — "${buf.chatTitle}"`);
             // Помечаем как проанализированные, чтобы не проверять повторно
@@ -847,13 +841,10 @@ async function analyzeBatch(
 
         prescreenPassed++;
         devLog(`[reflection] Pre-screen: USEFUL (emotion=${emotion}) — extracting from "${buf.chatTitle}"`);
-        analysesThisHour++;
-        chatAnalysesThisHour.set(chatId, (chatAnalysesThisHour.get(chatId) ?? 0) + 1);
 
         // ── Шаг 3: Формируем текст переписки с контекстом и доменом ────────
         const ctx = makeFakeCtx();
         const chatDomain = await classifyChat(chatId, buf.chatTitle, sessionToAnalyze);
-        const contextMessages = getContextMessages(chatId, sessionToAnalyze[0].date);
 
         let convText = `[домен чата: ${chatDomain}]\n`;
 

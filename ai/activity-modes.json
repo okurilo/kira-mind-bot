@@ -16,7 +16,7 @@
   "proactive": {
     "title": "Помогает заранее",
     "description": "Добавляет полезные подсказки, обзоры и выполнение сохранённых задач по расписанию.",
-    "benefits": ["Всё из режима «Помнит важное»", "Подсказки из памяти, утренний дайджест и сохранённые регулярные задачи", "После подключения личного Telegram — важные события и обзоры переписок"],
+    "benefits": ["Всё из режима «Помнит важное»", "Подсказки из памяти, утренний дайджест и сохранённые регулярные задачи", "После подключения Telegram — обзоры переписок и предложения напоминаний с вашим подтверждением"],
     "costNote": "Фоновые AI-вызовы зависят от сообщений, расписания и выбранных моделей.",
     "features": ["deferredFacts", "memoryConsolidation", "dialogueDeepReview", "memoryInsight", "recurringTasks", "morningDigest", "morningDigestAi", "telegramReading", "reflection", "daytimeReflection", "inboxGuardian", "dmReport", "chatGroupTracking", "chatPromptWatchers"]
   },
