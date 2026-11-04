@@ -202,7 +202,7 @@ test('existing API accounts login, public password signup is closed, and paired 
                 replace: async (k, old, value) => { if (profiles.get(k) !== old) return false; profiles.set(k, value); return true; },
             }, async () => ({}));
             const internalToken = secrets.derive(id, 'api');
-            let settings: ApiSettings = { budgetMode: 'normal', budgetModes: [], telegram: { personalSessionConfigured: false }, features: [] };
+            let settings: ApiSettings = { budgetMode: 'normal', budgetModes: [], activityMode: 'custom', activityModes: [], telegram: { personalSessionConfigured: false }, features: [] };
             const worker = createExternalApiServer({ token: internalToken, ownerId: Number(store.accounts.get(id)!.owner_id), host: '127.0.0.1', port: 0 }, {
                 status: async () => ({ accountId: id }), history: async () => ({ messages: [{ text: id }] }),
                 capabilities: async () => ({}), reminders: async () => ({ reminders: [id] }), tasks: async () => ({ tasks: [id] }),

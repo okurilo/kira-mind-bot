@@ -22,6 +22,7 @@ import type {
   RecurringTaskStatus,
 } from './types';
 import type { BudgetMode } from '../../ai/budgetMode';
+import type { ActivityMode, ActivityModeDescriptor, ActivityPreset } from '../../ai/activityModes';
 import type { BackgroundFeature, BackgroundFeatureState } from '../../ai/backgroundFeatures';
 
 export const AUTH_REQUIRED_EVENT = 'kira:auth-required';
@@ -189,10 +190,19 @@ export async function fetchBudgetMode(): Promise<{ mode: BudgetMode }> {
   return body;
 }
 
-export async function fetchBackgroundFeatures(): Promise<{ mode: BudgetMode; features: BackgroundFeatureState[] }> {
+export async function fetchBackgroundFeatures(): Promise<{ mode: BudgetMode; features: BackgroundFeatureState[]; activityMode: ActivityMode; activityModes: ActivityModeDescriptor[] }> {
   const response = await apiFetch('/api/background-features');
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Не удалось загрузить фоновые функции');
+  return body;
+}
+
+export async function saveActivityMode(activityMode: ActivityPreset): Promise<{ message: string }> {
+  const response = await apiFetch('/api/background-features', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activityMode }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось сохранить режим активности');
   return body;
 }
 

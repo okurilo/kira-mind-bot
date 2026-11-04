@@ -80,6 +80,13 @@ test('settings require authentication, validate the entire patch and accept idem
     assert.equal(response.status, 200);
     assert.equal((await response.json() as any).budgetMode, 'maximum');
     assert.equal(calls, 1);
+    const activity = await f.request('/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activityMode: 'memory' }) });
+    assert.equal(activity.status,200);
+    const selected:any = await activity.json(); assert.equal(selected.activityMode,'memory');assert.equal(selected.budgetMode,'normal');
+    assert.equal(selected.background.deferredFacts,true);assert.equal(selected.background.telegramReading,false);assert.equal(selected.background.kiraLife,false);
+    assert.equal(calls,2);
+    assert.equal((await f.request('/settings',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({activityMode:'maximum',background:{reflection:false}})})).status,400);
+    assert.equal(calls,2);
     const disallowed = await f.request('/settings', { method: 'DELETE' });
     assert.equal(disallowed.status, 405);
     assert.equal(disallowed.headers.get('allow'), 'GET, PATCH');

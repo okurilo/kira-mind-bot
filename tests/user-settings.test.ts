@@ -6,6 +6,7 @@ import { readUserSettings, updateUserSettings } from '../services/userSettingsSe
 import { cacheBackgroundFeaturePreferences, getBackgroundFeaturePreference, isBackgroundFeatureEnabled } from '../services/backgroundFeatureService';
 import { cacheBudgetMode, getBudgetMode } from '../services/budgetModeService';
 import { BACKGROUND_FEATURE_KEYS, defaultBackgroundFeatureEnabled } from '../ai/backgroundFeatures';
+import { activityModes, activityPreferences } from '../ai/activityModes';
 const { readTelegramUserCredentials } = require('../utils/telegramAccess');
 const { requiresTelegramSession } = require('../ai/backgroundFeatureState');
 
@@ -113,4 +114,27 @@ test('settings reject unknown keys, identity overrides, credentials and non-bool
         assert.throws(() => parseSettingsPatch(body), { status: 400, code: 'invalid_settings' });
     }
     assert.deepEqual(parseSettingsPatch({ background: { reflection: false } }), { background: { reflection: false } });
+});
+
+test('activity presets persist the complete selection atomically and actual runtime gates still require personal Telegram', async t => {
+    const f = fixture(t);
+    const initial = await readUserSettings(); assert.equal(f.writes(),0); assert.deepEqual(initial.activityModes,activityModes());
+    let saved = await updateUserSettings(parseSettingsPatch({ activityMode:'maximum' }));
+    assert.equal(f.writes(),1);assert.equal(saved.activityMode,'maximum');
+    assert.ok(saved.features.every(feature=>feature.enabled));
+    assert.equal(saved.features.find(feature=>feature.key==='reflection')!.blockedBy,'telegram');
+    assert.equal(await isBackgroundFeatureEnabled('reflection'),false);
+    assert.equal(await isBackgroundFeatureEnabled('deferredFacts'),true);
+    assert.ok([...f.rows.keys()].every(key=>key==='BUDGET_MODE'||key.startsWith('background:')),'a mode grants neither credentials nor account/AI consent');
+    saved = await updateUserSettings(parseSettingsPatch({ activityMode:'memory' }));
+    assert.equal(saved.activityMode,'memory');assert.equal(saved.features.find(feature=>feature.key==='kiraLife')!.enabled,false);
+    assert.deepEqual(Object.fromEntries(saved.features.map(feature=>[feature.key,feature.enabled])),activityPreferences('memory'));
+    saved = await updateUserSettings(parseSettingsPatch({ budgetMode:'maximum' }));
+    assert.equal(saved.activityMode,'memory');assert.equal(saved.features.find(feature=>feature.key==='deferredFacts')!.blockedBy,'budget');
+    saved = await updateUserSettings(parseSettingsPatch({ activityMode:'on_demand' }));
+    assert.equal(saved.activityMode,'on_demand');assert.equal(saved.budgetMode,'normal');assert.ok(saved.features.every(feature=>!feature.enabled));
+    saved = await updateUserSettings(parseSettingsPatch({ background:{kiraLife:true} }));assert.equal(saved.activityMode,'custom');
+    const previous = [...f.rows];f.failWrite();
+    await assert.rejects(updateUserSettings(parseSettingsPatch({ activityMode:'maximum' })),{code:'settings_unavailable'});
+    assert.deepEqual([...f.rows],previous);assert.equal(await getBackgroundFeaturePreference('deferredFacts'),false);
 });

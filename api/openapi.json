@@ -551,7 +551,7 @@
       },
       "patch": {
         "operationId": "updateUserSettings",
-        "summary": "Atomically change budget mode and selected background functions; no Idempotency-Key required",
+        "summary": "Atomically apply an activity preset or change AI pause and selected background functions",
         "requestBody": {
           "required": true,
           "content": {
@@ -624,8 +624,15 @@
                       },
                       "morningDigestAi": {
                         "type": "boolean"
+                      },
+                      "dialogueDeepReview": {
+                        "type": "boolean"
                       }
                     }
+                  },
+                  "activityMode": {
+                    "$ref": "#/components/schemas/ActivityMode",
+                    "description": "A preset replaces the complete background selection and resumes AI (budgetMode=normal unless explicitly supplied). custom requires a nonempty background patch. Do not combine a preset with background."
                   }
                 },
                 "minProperties": 1,
@@ -2216,7 +2223,8 @@
                     "kiraLifeWebSearch",
                     "recurringTasks",
                     "morningDigest",
-                    "morningDigestAi"
+                    "morningDigestAi",
+                    "dialogueDeepReview"
                   ]
                 },
                 "title": {
@@ -2256,6 +2264,7 @@
                     "recurringTasks",
                     "morningDigest",
                     "morningDigestAi",
+                    "dialogueDeepReview",
                     "budget",
                     "telegram",
                     null
@@ -2272,13 +2281,24 @@
                 "blockedBy"
               ]
             }
+          },
+          "activityMode": {
+            "$ref": "#/components/schemas/ActivityMode"
+          },
+          "activityModes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActivityModeDescriptor"
+            }
           }
         },
         "required": [
           "budgetMode",
           "budgetModes",
           "telegram",
-          "features"
+          "features",
+          "activityMode",
+          "activityModes"
         ]
       },
       "ModelSettings": {
@@ -3000,6 +3020,76 @@
                 "format": "date-time",
                 "nullable": true
               }
+            }
+          }
+        }
+      },
+      "ActivityMode": {
+        "type": "string",
+        "enum": [
+          "on_demand",
+          "memory",
+          "proactive",
+          "maximum",
+          "custom"
+        ]
+      },
+      "ActivityModeDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "title",
+          "description",
+          "benefits",
+          "costNote",
+          "featureKeys"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/ActivityMode"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "benefits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "costNote": {
+            "type": "string"
+          },
+          "featureKeys": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "telegramReading",
+                "reflection",
+                "personalChatMemory",
+                "daytimeReflection",
+                "inboxGuardian",
+                "dmReport",
+                "chatGroupTracking",
+                "chatPromptWatchers",
+                "deferredFacts",
+                "memoryConsolidation",
+                "memoryInsight",
+                "kiraLife",
+                "kiraInnerDevelopment",
+                "kiraSelfEvolution",
+                "kiraLifeWebSearch",
+                "recurringTasks",
+                "morningDigest",
+                "morningDigestAi",
+                "dialogueDeepReview"
+              ]
             }
           }
         }

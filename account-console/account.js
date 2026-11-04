@@ -157,19 +157,70 @@
   }
   async function settingsView(expected) {
     const data = await own('settings'); await session(expected);
+    const view = state.view;
     const box = node('section', undefined, 'card'), form = node('form', undefined, 'stack'); box.append(title('Настройки Киры'));
-    const budget = document.createElement('select'); budget.setAttribute('aria-label', 'Экономия AI');
-    for (const option of data.budgetModes || []) { const value = node('option', option.title); value.value = option.key; budget.append(value); } budget.value = data.budgetMode;
-    form.append(field('Экономия AI', budget)); const checks = [];
-    for (const feature of data.features || []) {
-      const input = document.createElement('input'); input.type = 'checkbox'; input.checked = feature.enabled; const key = feature.key || feature.id;
-      if (!key) continue;
-      checks.push([key,input]); const label = node('label', undefined, 'checkbox'); label.append(input,node('span',feature.title || feature.name || key)); form.append(label);
+    const catalog = data.activityModes || [], features = data.features || [], checks = new Map(), radios = new Map(), touched = new Set();
+    let selected = data.activityMode || 'custom', presetChanged = false, replacing = false;
+    box.append(node('p', 'Выберите, что Кира делает автоматически. Общение, ручные поручения, сохранённая память и обычные напоминания доступны в любом режиме.', 'secondary'));
+    box.append(node('p', 'Сейчас: ' + (catalog.find(item => item.key === selected)?.title || 'Настроить под себя')));
+    const choices = node('fieldset', undefined, 'activity-modes'); choices.append(node('legend', 'Активность Киры'));
+    const benefits = node('div', undefined, 'activity-benefits'); benefits.setAttribute('aria-live', 'polite');
+    const advanced = node('details'); advanced.append(node('summary', 'Настроить под себя'));
+    const pause = document.createElement('input'); pause.type = 'checkbox'; pause.checked = data.budgetMode === 'maximum';
+    const pauseLabel = node('label', undefined, 'checkbox'); pauseLabel.append(pause, node('span', 'Приостановить фоновый AI'));
+    const draftNotice = node('p', 'Изменения применяются после сохранения.', 'secondary');
+    function describe() {
+      for (const [key, radio] of radios) radio.checked = key === selected;
+      benefits.replaceChildren(); const item = catalog.find(value => value.key === selected);
+      if (item) { const list = node('ul'); for (const text of item.benefits) list.append(node('li', text)); benefits.append(list, node('p', item.costNote, 'secondary')); }
     }
+    for (const item of catalog) {
+      const input = document.createElement('input'); input.type = 'radio'; input.name = 'activity-mode'; input.value = item.key; input.checked = selected === item.key;
+      input.setAttribute('aria-label', item.title); radios.set(item.key, input);
+      const label = node('label', undefined, 'activity-option'), copy = node('span'); copy.append(node('strong', item.title), node('span', item.description, 'secondary')); label.append(input, copy); choices.append(label);
+      input.addEventListener('change', () => {
+        selected = item.key; presetChanged = selected !== 'custom';
+        if (selected === 'custom') advanced.open = true;
+        else {
+          replacing = true; pause.checked = false;
+          const enabled = new Set(item.featureKeys); for (const [key, control] of checks) { control.checked = enabled.has(key); touched.add(key); }
+        }
+        describe(); draftNotice.textContent = 'Выбранный режим и функции будут применены после сохранения.';
+      });
+    }
+    for (const group of new Set(features.map(feature => feature.group))) {
+      const section = node('details'); section.append(node('summary', group));
+      for (const feature of features.filter(value => value.group === group)) {
+        const key = feature.key, input = document.createElement('input'); input.type = 'checkbox'; input.checked = feature.enabled; input.setAttribute('aria-label', feature.title); checks.set(key, input);
+        const label = node('label', undefined, 'checkbox'), copy = node('span'); copy.append(node('span', feature.title), node('span', feature.description, 'secondary'));
+        const reason = !feature.enabled ? 'выключено' : feature.effective ? 'включено' : feature.blockedBy === 'telegram' ? 'нужна личная Telegram-сессия' : feature.blockedBy === 'budget' ? 'фоновый AI на паузе' : 'нужна функция «' + (features.find(value => value.key === feature.blockedBy)?.title || 'зависимость') + '»';
+        copy.append(node('span', 'Сейчас: ' + reason, 'secondary')); label.append(input, copy); section.append(label);
+        input.addEventListener('change', () => { selected = 'custom'; presetChanged = false; touched.add(key); describe(); draftNotice.textContent = 'Изменённые функции будут применены после сохранения.'; });
+      }
+      advanced.append(section);
+    }
+    form.append(choices, benefits, pauseLabel, node('p', 'Пауза сохраняет выбранные функции. Обычные напоминания, включённый дайджест и напоминания о непрочитанных продолжают работать без AI.', 'secondary'), advanced);
+    form.append(node('p', 'Качество ответов выбирается в разделе «Модели». Для работы функций нужны согласие на AI, разрешения аккаунта и соответствующие подключения.', 'secondary'));
+    if (state.session.account.autonomousAiEnabled === false) form.append(node('p', 'Самостоятельные AI-задачи для аккаунта выключены. Набор функций можно сохранить; ограничения аккаунта сохраняют приоритет.', 'secondary'));
+    describe();
     const save = node('button', 'Сохранить настройки'); save.type = 'submit'; form.append(save);
-    form.addEventListener('submit', async event => { event.preventDefault(); save.disabled = true; try { await session(expected);
-      const background = Object.fromEntries(checks.map(([key,input]) => [key,input.checked])); await own('settings', { method: 'PATCH', body: { budgetMode: budget.value, ...(checks.length ? { background } : {}) } }); notice('Настройки сохранены.'); }
-      catch (error) { report(error); } finally { save.disabled = false; } }); box.append(form); return box;
+    form.addEventListener('submit', async event => { event.preventDefault();
+      const controls = [...form.elements].map(control => [control, control.disabled]);
+      for (const [control] of controls) control.disabled = true; form.setAttribute('aria-busy', 'true');
+      try {
+      const body = {};
+      if (presetChanged && selected !== 'custom') body.activityMode = selected;
+      else {
+        const background = Object.fromEntries([...checks].filter(([key, input]) => touched.has(key) && (replacing || input.checked !== features.find(feature => feature.key === key)?.enabled)).map(([key,input]) => [key,input.checked]));
+        if (Object.keys(background).length) { body.activityMode = 'custom'; body.background = background; }
+      }
+      const budgetMode = pause.checked ? 'maximum' : 'normal';
+      if (presetChanged || budgetMode !== data.budgetMode) body.budgetMode = budgetMode;
+      if (!Object.keys(body).length) { notice('Настройки уже соответствуют выбранному набору.'); return; }
+      await session(expected);
+      await own('settings', { method: 'PATCH', body }); notice('Настройки сохранены.');
+      if (state.page === 'settings' && state.view === view && state.session?.account.id === expected) await render('settings'); }
+      catch (error) { report(error); } finally { for (const [control, disabled] of controls) control.disabled = disabled; form.setAttribute('aria-busy', 'false'); } }); form.append(draftNotice); box.append(form); return box;
   }
   async function modelsView(expected) {
     const data = await own('model-preferences'); await session(expected);

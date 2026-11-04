@@ -8,6 +8,7 @@ import { ApiSettings, ApiSettingsPatch } from '../api/settings';
 import { scopedBotKey } from '../utils/botIdentity';
 import { cacheBackgroundFeaturePreferences } from './backgroundFeatureService';
 import { cacheBudgetMode } from './budgetModeService';
+import { activityModes, inferActivityMode } from '../ai/activityModes';
 const { buildFeatureStates } = require('../ai/backgroundFeatureState');
 const { readTelegramUserCredentials } = require('../utils/telegramAccess');
 
@@ -28,6 +29,8 @@ export async function readUserSettings(): Promise<ApiSettings> {
         const personalSessionConfigured = Boolean(readTelegramUserCredentials(process.env));
         return {
             budgetMode,
+            activityMode: inferActivityMode(preferences),
+            activityModes: activityModes(),
             budgetModes: Object.entries(BUDGET_MODES).map(([key, mode]) => ({ key: key as BudgetMode, title: mode.title })),
             telegram: { personalSessionConfigured },
             features: buildFeatureStates(preferences, budgetMode, personalSessionConfigured).map(

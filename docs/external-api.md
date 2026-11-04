@@ -50,8 +50,8 @@ SERVER_COMPOSE_OVERRIDE=docker-compose.api.yml make deploy
 | GET | `/history?limit=20` | Последние 1–20 реплик мобильной сессии в хронологическом порядке |
 | GET | `/reminders` | Активные личные напоминания владельца из общего реестра |
 | GET | `/tasks` | До 100 регулярных задач владельца; `hasMore` сообщает об ограничении |
-| GET | `/settings` | Режим экономии, фоновые функции и фактическая доступность личного Telegram |
-| PATCH | `/settings` | Изменить `budgetMode` и булевы переключатели `background` атомарно, без `Idempotency-Key` |
+| GET | `/settings` | Режим активности с описаниями, пауза AI, фоновые функции и доступность личного Telegram |
+| PATCH | `/settings` | Применить `activityMode` либо изменить `budgetMode`/`background` атомарно, без `Idempotency-Key`; [контракт](activity-modes.md) |
 | POST | `/messages` | Текстовый запрос или команда бота |
 | POST | `/photos` | Одно фото JPEG с необязательным вопросом, общий с Telegram конвейер |
 | POST | `/actions` | Нажатие кнопки из ответа API |

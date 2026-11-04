@@ -11,6 +11,7 @@ Object.assign(process.env, {
 const configModule = require("../dist/config.js");
 const sanitizerModule = require("../dist/utils/legacyPersonalitySanitizer.js");
 const localModels = require('../dist/ai/localModelRouting.js');
+assert.equal(require('../dist/ai/activityModeCatalog.js').activityModes()[0].title, 'По моей инициативе', 'Packaged runtime includes the shared activity catalog');
 assert.equal(require('../dist/utils/telegramAccess.js').readTelegramUserCredentials({ KIRA_BOT_TOKEN: 'synthetic-bot-token' }), null);
 assert.equal(require('../dist/utils/telegramAccess.js').readTelegramUserCredentials(process.env), null, 'Smoke tests cannot use an operator Telegram session');
 assert.equal(require('../dist/ai/backgroundFeatureState.js').requiresTelegramSession('reflection'), true);
