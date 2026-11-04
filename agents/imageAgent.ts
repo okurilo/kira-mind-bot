@@ -7,6 +7,8 @@ import { ChatCompletionContentPart } from "openai/resources/chat";
 import { getBotGenderedText, getBotPersona, getCommunicationStyle } from "../persona";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import { formatPromptDateTime } from "../utils/time";
+import { accountPolicyError } from '../ai/accountPolicy';
+import { isAiContentSafetyError } from '../ai/contentSafety';
 
 // Загрузка переменных окружения
 dotenv.config({ path: `.env.${process.env.NODE_ENV}` });
@@ -220,6 +222,7 @@ export async function imageAgent(
         };
 
     } catch (error) {
+        if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
         console.error('[image] analysis failed');
         // В случае ошибки возвращаем запасной ответ
         const errorMessage = additionalImages && additionalImages.length > 0

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { ApiError } from '../api/contracts';
 import { createHash } from 'node:crypto';
 import type { IncomingMessage,ServerResponse } from 'node:http';
+import { AI_CONTENT_SAFETY_REPLY } from './contentSafety';
 
 export interface AccountAiOperation { id: string; background: boolean }
 interface Scope extends AccountAiOperation { active: boolean }
@@ -111,4 +112,22 @@ export function accountPolicyError(error:unknown):ApiError|undefined{
         current=(current as {cause?:unknown}).cause;
     }
     return undefined;
+}
+
+/** Only trusted policy codes determine the reply; SDK messages may contain private payloads. */
+export function accountPolicyReply(error: unknown): string | undefined {
+    const policy = accountPolicyError(error);
+    if (!policy) return undefined;
+    switch (policy.code) {
+        case 'quota_exhausted': return 'Дневной лимит AI для этой операции исчерпан. Проверь лимиты в аккаунте или повтори запрос после их обновления.';
+        case 'consent_required': return 'Для этого запроса нужно согласие на обработку данных выбранными AI-сервисами. Проверь согласие в настройках аккаунта.';
+        case 'activation_required': return 'Для AI-запросов сначала нужно активировать аккаунт.';
+        case 'account_restricted': return 'AI-запросы для этого аккаунта ограничены. Проверь состояние аккаунта.';
+        case 'account_deleting': return 'Аккаунт удаляется, поэтому новые AI-запросы недоступны.';
+        case 'autonomous_ai_disabled': return 'Самостоятельные AI-задачи выключены в настройках аккаунта.';
+        case 'content_policy_violation': return AI_CONTENT_SAFETY_REPLY;
+        case 'moderation_unavailable': return 'Сервис проверки AI-запросов временно недоступен. Попробуй позже.';
+        case 'operation_closed': return 'Обработка этого запроса уже завершена. Отправь новый запрос, чтобы продолжить.';
+        default: return 'Не удалось проверить доступность AI для аккаунта. Попробуй позже.';
+    }
 }

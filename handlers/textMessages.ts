@@ -666,7 +666,9 @@ export function registerTextMessageHandler(bot: Bot<BotContext>, options: { imme
                     await checkLastFactSaveError(ctx);
 
                     // Reconsolidation
-                    if (!result.fastResponse) reconsolidateAfterResponse(ctx, message, result.responseText, result.recalledMemories, turn).catch(() => {});
+                    if (!result.fastResponse && result.operationStatus !== 'failed' && result.operationStatus !== 'unknown') {
+                        reconsolidateAfterResponse(ctx, message, result.responseText, result.recalledMemories, turn).catch(() => {});
+                    }
                 }
                 } catch (timerError) {
                     console.error("Ошибка при обработке сообщения в setTimeout:", timerError);

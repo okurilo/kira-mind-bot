@@ -31,6 +31,8 @@ import { USER_TIMEZONE } from '../constants';
 import { addZonedDays, formatPromptDateTime, getZonedDateKey } from '../utils/time';
 import { isSilentInternalKnowledgePipeline, SILENT_STEPS } from './progressPolicy';
 import { isTodayImportanceRequest } from '../utils/todayImportanceIntent';
+import { accountPolicyError } from '../ai/accountPolicy';
+import { isAiContentSafetyError } from '../ai/contentSafety';
 import {
     buildTodayImportanceBlocks,
     buildTodayImportanceSnapshot,
@@ -360,10 +362,12 @@ async function safeStep<T>(agentId: string, fn: () => Promise<T>): Promise<T | n
     try {
         return await fn();
     } catch (firstErr) {
+        if (accountPolicyError(firstErr) || isAiContentSafetyError(firstErr)) throw firstErr;
         console.error(`[ORCH] step "${agentId}" failed, retrying once:`, firstErr);
         try {
             return await fn();
         } catch (secondErr) {
+            if (accountPolicyError(secondErr) || isAiContentSafetyError(secondErr)) throw secondErr;
             console.error(`[ORCH] step "${agentId}" failed twice, giving up:`, secondErr);
             return null;
         }
@@ -722,7 +726,8 @@ export async function executePlan(params: ExecutePlanParams): Promise<Processing
                     responseText: getBotGenderedText("Не смогла уточнить запрос.", "Не смог уточнить запрос.") + " Попробуй сформулировать иначе 🙏",
                     botReaction: classification.details?.botReaction,
                 };
-                const keyboard = buildQuickChoiceKeyboard(ctx, message, unclearRes.responseText, classification);
+                const keyboard = unclearRes.operationStatus === 'failed' || unclearRes.operationStatus === 'unknown' ? undefined
+                    : buildQuickChoiceKeyboard(ctx, message, unclearRes.responseText, classification);
                 if (keyboard) unclearRes.keyboard = keyboard;
                 unclearRes.botReaction = classification.details?.botReaction;
                 return unclearRes;

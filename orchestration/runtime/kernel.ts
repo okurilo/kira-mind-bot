@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { AI_CONTENT_SAFETY_REPLY, isAiContentSafetyError } from '../../ai/contentSafety';
+import { accountPolicyReply } from '../../ai/accountPolicy';
 import { looksLikeIndependentRequest } from '../../utils/continuationInput';
 import { continueTelegramProfileLookup, telegramProfileCandidates } from '../../services/telegramProfileService';
 import { createJsonChatCompletionForTask } from '../../ai/chatCompletion';
@@ -237,7 +238,9 @@ export async function runKiraRuntime(input: KiraRuntimeInput, dependencies: Runt
     const requiresWeb = classification.details.knowledgeSource === 'external_current';
     if (!mcpRequested && !dependencies.forceLoop && !dependencies.continuation && classification.intent === 'НЕОПРЕДЕЛЕНО') {
         const result = await unclearIntentAgent(input.message, input.isForwarded, input.forwardFrom, input.messageHistory, classification, input.enrichedContextFromMemory ?? '');
-        result.keyboard = buildQuickChoiceKeyboard(input.ctx, input.message, result.responseText, classification) ?? result.keyboard;
+        if (result.operationStatus !== 'failed' && result.operationStatus !== 'unknown') {
+            result.keyboard = buildQuickChoiceKeyboard(input.ctx, input.message, result.responseText, classification) ?? result.keyboard;
+        }
         return result;
     }
     if (!mcpRequested && !dependencies.forceLoop && !dependencies.continuation && classification.intent === 'ВОЗМОЖНОСТИ_БОТА' && !classification.subIntents?.length && !hasCompoundActionRequest(input.message)) return { responseText: await answerCapabilitiesQuestion(input.message, { publicMode: input.ctx.from?.id !== config.allowedUserId }) };
@@ -477,9 +480,10 @@ export async function runKiraRuntime(input: KiraRuntimeInput, dependencies: Runt
         state.status = 'failed';
         const done = mergeRuntimeResults(results);
         done.operationStatus = state.receipts.some(receipt => receipt.status === 'running' || receipt.status === 'unknown') ? 'unknown' : 'failed';
-        done.responseText = [done.responseText, state.receipts.some(receipt => receipt.status === 'running' || receipt.status === 'unknown')
+        const failureReply = accountPolicyReply(error) ?? (isAiContentSafetyError(error) ? AI_CONTENT_SAFETY_REPLY : undefined);
+        done.responseText = [done.responseText, failureReply, state.receipts.some(receipt => receipt.status === 'running' || receipt.status === 'unknown')
             ? 'Выполнение остановилось. Результат части действий неизвестен; я не повторяла их автоматически.'
-            : isAiContentSafetyError(error) ? AI_CONTENT_SAFETY_REPLY : 'Не удалось завершить задачу. Уже выполненные действия сохранены.'].filter(Boolean).join('\n\n');
+            : failureReply ? undefined : 'Не удалось завершить задачу. Уже выполненные действия сохранены.'].filter(Boolean).join('\n\n');
         done.skipOptionalFollowups = true;
         return done;
     } finally {

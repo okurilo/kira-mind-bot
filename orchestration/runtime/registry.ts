@@ -1,5 +1,7 @@
 import type { JsonSchema, ToolContext, ToolDefinition, ToolOutput } from './types';
 import { isDialogueReadTool } from './authorization';
+import { accountPolicyError } from '../../ai/accountPolicy';
+import { isAiContentSafetyError } from '../../ai/contentSafety';
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
@@ -75,7 +77,8 @@ export class ToolRegistry {
         // No implicit retries here: even a state operation may have committed before an error.
         try {
             return await tool.execute(args, context);
-        } catch {
+        } catch (error) {
+            if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
             return {
                 status: tool.effect === 'read' ? 'failed' : 'unknown',
                 summary: tool.effect === 'read'

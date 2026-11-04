@@ -9,6 +9,7 @@ import * as groupSettings from '../services/groupChatFeatureSettings';
 import type { BotContext } from '../types';
 import { buildConversationFailureReply } from '../utils/conversationFailureReply';
 import { AI_CONTENT_SAFETY_REPLY, AiContentSafetyError } from '../ai/contentSafety';
+import { ApiError } from '../api/contracts';
 
 test('conversation reports context overflow safely and recovers on the next turn', async t => {
     t.mock.method(groupSettings, 'isGroupChatContextEnabled', async () => false);
@@ -65,4 +66,18 @@ test('structured provider errors and escaped LM Studio engine errors identify co
     ]) {
         assert.match(buildConversationFailureReply(error), /увеличь окно контекста/iu);
     }
+});
+
+test('conversation preserves account policy refusal for the common turn boundary', async t => {
+    t.mock.method(groupSettings, 'isGroupChatContextEnabled', async () => false);
+    t.mock.method(selfMemory, 'getRecentKiraSelfEvents', async () => []);
+    t.mock.method(selfMemory, 'searchKiraSelfEventsByQuery', async () => []);
+    t.mock.method(selfMemory, 'getKiraSelfMemoryState', async () => null as any);
+    t.mock.method(residence, 'getKiraResidence', async () => ({ city: 'Синтетический город' }) as any);
+    const evolve = t.mock.method(evolution, 'maybeEvolveKiraSelfFromConversation', async () => undefined);
+    const refusal = new ApiError(429, 'quota_exhausted', 'Synthetic quota');
+    const completion = t.mock.method(completions, 'createChatCompletionForTask', async () => { throw refusal; });
+    const ctx = { from: { id: -100 }, chat: { id: -100, type: 'private' }, session: { messageHistory: [] } } as unknown as BotContext;
+    await assert.rejects(conversationAgent(ctx, 'Объясни учебную теорему.', false, '', [], undefined, { domain: 'personal', context: '' }), error => error === refusal);
+    assert.equal(completion.mock.callCount(), 1); assert.equal(evolve.mock.callCount(), 0);
 });

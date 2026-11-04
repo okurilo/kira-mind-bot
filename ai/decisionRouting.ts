@@ -3,6 +3,7 @@ import type { MessageClassification } from '../orchestrator';
 import { resolveModelForTaskAsync } from './modelResolver';
 import { getAiProviderAdapter } from './providers/registry';
 import { logAiUsage } from '../services/aiUsageLogService';
+import { accountPolicyError } from './accountPolicy';
 import { AVAILABILITY_CLASSIFICATION, BEHAVIOR_FEEDBACK_CLASSIFICATION, BROWSER_TASK_CLASSIFICATION, WORKOUT_CLASSIFICATION } from '../orchestration/intentPrompt';
 
 const INTENTS: MessageClassification['intent'][] = ['НАПОМИНАНИЕ', 'РАЗГОВОР', 'НЕОПРЕДЕЛЕНО', 'ГЕНЕРАЦИЯ_ИЗОБРАЖЕНИЯ', 'КАРТЫ_ЛОКАЦИИ', 'ПРОВЕРКА_СООБЩЕНИЙ', 'ВЕБ_ПОИСК', 'ОТПРАВКА_СООБЩЕНИЯ', 'ДЕЛЕГИРОВАНИЕ_ЗАДАЧИ', 'ВОЗМОЖНОСТИ_БОТА', 'САМОИЗУЧЕНИЕ', 'БРАУЗЕР_ЗАДАЧА', 'ЗДОРОВЬЕ'];
@@ -68,7 +69,8 @@ export async function classifyWithDecisions(prompt: string): Promise<MessageClas
                 ...(mcp?.type === 'choice' && ['read', 'write'].includes(String(mcp.choice)) ? { mcpAllowWeb: (get('mcp_allow_web')?.probability ?? 0) >= 0.8 } : {}),
                 ...(intent === 'НАПОМИНАНИЕ' && reminderAction ? { reminderAction } : {}) },
         };
-    } catch {
+    } catch (error) {
+        if (accountPolicyError(error)) throw error;
         void logAiUsage({ taskKey: 'intentClassification', provider: route.modelRef.provider, model, preset: route.presetName, operation: 'decisions', traceId, success: false,
             errorMessage: 'Decisions unavailable; using the configured classifier', latencyMs: Date.now() - startedAt });
         return null;

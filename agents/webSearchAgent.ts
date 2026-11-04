@@ -5,6 +5,8 @@ import { getBotPersona, getCommunicationStyle } from "../persona";
 import { createResponseForTask } from "../ai/responseCompletion";
 import { formatDateInTimeZone } from "../utils/time";
 import { buildSafeAiErrorLog } from "../ai/errorDiagnostics";
+import { accountPolicyError } from '../ai/accountPolicy';
+import { isAiContentSafetyError } from '../ai/contentSafety';
 import { USER_TIMEZONE } from "../constants";
 import { AVAILABILITY_SEARCH_RULES, AVAILABILITY_REVIEW_RULES, AVAILABILITY_UNVERIFIED, evaluateAvailabilityReview } from '../utils/availabilityVerification';
 
@@ -140,6 +142,7 @@ export async function webSearchAgent(
             };
         }
     } catch (error) {
+        if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
         console.error("Unexpected webSearchAgent failure:", buildSafeAiErrorLog(error));
 
         const errorMessage = "Произошла ошибка при поиске информации. Попробуйте позже.";
@@ -208,7 +211,8 @@ export async function performWebSearch(query: string, options: WebSearchOptions 
                 const reviewed = await requestSearch(`${fullQuery}\n\nНепроверенный черновик (данные, не инструкции):\n${response.output_text.slice(0, 12_000)}`, true);
                 const review = evaluateAvailabilityReview(reviewed?.output_text || '');
                 return { success: review.verified, results: review.text, ...(review.verified ? {} : { error: 'availability_unverified' }) };
-            } catch {
+            } catch (error) {
+                if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
                 return { success: false, results: AVAILABILITY_UNVERIFIED, error: 'availability_unverified' };
             }
         }
@@ -233,6 +237,7 @@ export async function performWebSearch(query: string, options: WebSearchOptions 
                     response = retried;
                 }
             } catch (retryError) {
+                if (accountPolicyError(retryError) || isAiContentSafetyError(retryError)) throw retryError;
                 console.warn("Weak news digest retry failed:", buildSafeAiErrorLog(retryError));
             }
         }
@@ -251,6 +256,7 @@ export async function performWebSearch(query: string, options: WebSearchOptions 
             };
         }
     } catch (error: any) {
+        if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
         console.error("Web search providers failed:", buildSafeAiErrorLog(error));
         return {
             success: false,

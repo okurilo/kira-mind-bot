@@ -1,5 +1,7 @@
 import * as dotenv from "dotenv";
 import { AI_CONTENT_SAFETY_REPLY, isAiContentSafetyError } from './ai/contentSafety';
+import { accountPolicyReply } from './ai/accountPolicy';
+import { buildSafeAiErrorLog } from './ai/errorDiagnostics';
 import { BotContext, ConversationReplyContext, ConversationTurn, KnowledgeSource, KnowledgeSourceDecision, MessageHistory } from "./types";
 import { reminderAgent } from "./agents/reminderAgent";
 import { imageAgent } from "./agents/imageAgent";
@@ -625,14 +627,9 @@ export async function classifyMessage(
         return normalizedClassification;
 
     } catch (error) {
-        if (isAiContentSafetyError(error)) throw error;
-        console.error("Error classifying message:", error);
-        // Возвращаем стандартный результат в случае ошибки
-        return {
-            intent: "НЕОПРЕДЕЛЕНО",
-            confidenceLevel: "НИЗКИЙ",
-            details: {}
-        };
+        // A failed model call says nothing about the user's intent. Preserve the
+        // failure for the turn boundary instead of invoking a clarification model.
+        throw error;
     }
 }
 
@@ -1256,12 +1253,15 @@ async function processMessageInternal(
         saveSessionDedupSnapshot(ctx, { message, classification, plan, result });
         return result;
     } catch (error) {
+        const policyReply = accountPolicyReply(error);
+        if (policyReply) return { responseText: policyReply, operationStatus: 'failed', skipOptionalFollowups: true };
         if (isAiContentSafetyError(error)) return { responseText: AI_CONTENT_SAFETY_REPLY, operationStatus: 'failed', skipOptionalFollowups: true };
-        console.error("Error in message processing:", error);
+        console.error('Error in message processing:', buildSafeAiErrorLog(error));
         // В случае ошибки возвращаем простой ответ
         return {
-            responseText: "Произошла ошибка при обработке вашего сообщения. Пожалуйста, попробуйте еще раз или сформулируйте по-другому. 🙏",
+            responseText: 'Не удалось обработать запрос из-за технической ошибки. Попробуй повторить его чуть позже.',
             operationStatus: 'failed',
+            skipOptionalFollowups: true,
         };
     }
 }
@@ -1279,7 +1279,9 @@ async function processRuntimeImages(ctx: any, images: Buffer[], caption: string,
             classification, enrichedContextFromMemory: [buildMemoryContextBlock(memory), buildKnowledgeSourcePrompt(source), ctx?.arRoom?.context].filter(Boolean).join('\n\n') });
         result.recalledMemories = memory.recalledMemories ?? [];
         return result;
-    } catch {
+    } catch (error) {
+        const reply = accountPolicyReply(error) ?? (isAiContentSafetyError(error) ? AI_CONTENT_SAFETY_REPLY : undefined);
+        if (reply) return { responseText: reply, operationStatus: 'failed', skipOptionalFollowups: true };
         return { responseText: 'Не удалось обработать изображение. Попробуй ещё раз.', operationStatus: 'failed' };
     }
 }
@@ -1342,6 +1344,8 @@ export async function processImage(
         }
         return imgResult;
     } catch (error) {
+        const reply = accountPolicyReply(error) ?? (isAiContentSafetyError(error) ? AI_CONTENT_SAFETY_REPLY : undefined);
+        if (reply) return { responseText: reply, operationStatus: 'failed', skipOptionalFollowups: true };
         console.error("Error processing image:", error);
         // В случае ошибки возвращаем простой ответ
         return {
@@ -1417,6 +1421,8 @@ export async function processImageGroup(
         }
         return groupResult;
     } catch (error) {
+        const reply = accountPolicyReply(error) ?? (isAiContentSafetyError(error) ? AI_CONTENT_SAFETY_REPLY : undefined);
+        if (reply) return { responseText: reply, operationStatus: 'failed', skipOptionalFollowups: true };
         console.error("Error processing image group:", error);
         // В случае ошибки возвращаем простой ответ
         return {

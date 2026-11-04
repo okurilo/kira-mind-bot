@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { classifyWithDecisions } from '../ai/decisionRouting';
 import * as resolver from '../ai/modelResolver';
+import { ApiError } from '../api/contracts';
 import { openaiProviderAdapter } from '../ai/providers/openai';
 const decisionAdapter = openaiProviderAdapter as typeof openaiProviderAdapter & { createDecision: NonNullable<typeof openaiProviderAdapter.createDecision> };
 
@@ -12,6 +13,13 @@ function enabled(work: () => Promise<void>) {
 }
 
 describe('optional Decisions routing adapter', () => {
+    test('account quota refusal is terminal instead of trying the configured classifier again', async t => {
+        t.mock.method(resolver, 'resolveModelForTaskAsync', async () => ({ presetName: 'gpt-balanced', modelRef: { provider: 'openai', model: 'synthetic-classifier' } }) as any);
+        const refusal = new ApiError(429, 'quota_exhausted', 'Synthetic quota');
+        const call = t.mock.method(decisionAdapter, 'createDecision', async () => { throw refusal; });
+        await enabled(async () => { await assert.rejects(classifyWithDecisions('Объясни учебную теорему.'), error => error === refusal); });
+        assert.equal(call.mock.callCount(), 1);
+    });
     test('feedback and availability predicates request the evidence-capable JSON classifier', async t => {
         t.mock.method(resolver, 'resolveModelForTaskAsync', async () => ({ presetName: 'gpt-balanced', modelRef: { provider: 'openai', model: 'synthetic-classifier' } }) as any);
         let name = 'behavior_feedback';

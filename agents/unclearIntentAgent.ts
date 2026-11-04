@@ -4,6 +4,9 @@ import { getBotPersona, getCommunicationStyle } from "../persona";
 import { config } from "../config";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import { formatPromptDateTime } from "../utils/time";
+import { accountPolicyError } from '../ai/accountPolicy';
+import { isAiContentSafetyError } from '../ai/contentSafety';
+import { buildSafeAiErrorLog } from '../ai/errorDiagnostics';
 
 const INTENT_LABELS: Partial<Record<MessageClassification["intent"], string>> = {
     "НАПОМИНАНИЕ": "поставить напоминание",
@@ -153,10 +156,12 @@ export async function unclearIntentAgent(
         };
 
     } catch (error) {
-        console.error("Error in unclear intent agent:", error);
-        // В случае ошибки возвращаем стандартный ответ с уточнением
+        if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
+        console.error('Error in unclear intent agent:', buildSafeAiErrorLog(error));
         return {
-            responseText: "Я вижу твое сообщение и хочу помочь. Не мог бы ты уточнить, что именно тебе нужно? Я могу установить напоминание, ответить на вопрос или просто поддержать разговор. 💫"
+            responseText: 'Сейчас не удалось обработать запрос из-за технической ошибки. Попробуй повторить его чуть позже.',
+            operationStatus: 'failed',
+            skipOptionalFollowups: true,
         };
     }
 }

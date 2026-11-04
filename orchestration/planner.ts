@@ -4,6 +4,8 @@ import { createChatCompletionForTask } from '../ai/chatCompletion';
 import { buildSafeAiErrorLog } from '../ai/errorDiagnostics';
 import { llmCache, LLM_CACHE_TTL } from '../utils/llmCache';
 import { isTodayImportanceRequest } from '../utils/todayImportanceIntent';
+import { accountPolicyError } from '../ai/accountPolicy';
+import { isAiContentSafetyError } from '../ai/contentSafety';
 
 const AVAILABLE_STEPS = `
 ВАЖНО: контекст из долговременной памяти (факты о пользователе) подтягивается АВТОМАТИЧЕСКИ ко всем шагам. НЕ нужно добавлять отдельный шаг memory — все агенты уже получают память.
@@ -268,6 +270,7 @@ ${AVAILABLE_STEPS}
         llmCache.set(cacheKey, plan, LLM_CACHE_TTL.PLAN);
         return plan;
     } catch (e) {
+        if (accountPolicyError(e) || isAiContentSafetyError(e)) throw e;
         console.error('Planner failed, using deterministic fallback:', buildSafeAiErrorLog(e));
         return postProcessPlan(fallbackPlan(intent, message), classification);
     }

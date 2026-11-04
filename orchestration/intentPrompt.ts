@@ -1,5 +1,7 @@
 import type { MessageClassification } from '../orchestrator';
 import { commerceProvider } from '../services/commerce/catalog';
+import { accountPolicyError } from '../ai/accountPolicy';
+import { isAiContentSafetyError } from '../ai/contentSafety';
 export const WORKOUT_CLASSIFICATION = 'Для личных тренировок и показателей Apple Health верни details.workoutAccess=read (шаги за день, пульс своей тренировки, результаты, история, сравнение занятий) либо write (явно начать, поставить на паузу, продолжить, завершить занятие, записать подход/отдых/заметку, создать или сохранить план). Подготовка конкретной программы или плана занятия для владельца является созданием структурированного плана в модуле: write, даже без отдельного слова о сохранении. Объяснение принципов планирования и общая спортивная справка — none. Используй ЗДОРОВЬЕ, memoryNeed=none, memoryTask=none и fastReply.mode=route: источник — структурированный модуль тренировок, не векторная память и не веб. Общее обсуждение спорта, цитата команды, отрицание, гипотеза и вопрос о возможностях сами по себе не разрешают write; workoutAccess=none. При уточнении сохраняй исходный запрос и реальные найденные объекты; смена темы не наследует право управления. В составной просьбе сохрани остальные действия. Это поле определяется в этом же вызове, не отдельным классификатором.';
 
 export const BROWSER_TASK_CLASSIFICATION = `БРАУЗЕР_ЗАДАЧА — поручение реально открыть/осмотреть страницу, взаимодействовать с сайтом, оставить страницу открытой или передать ручное управление, даже без заполнения и отправки формы. Для такой задачи fastReply.mode=route, details.browserTaskControl="continue". Запрет отдельного действия («не бронируй», «ничего не отправляй») ограничивает исполнение, но не отменяет разрешённые открытие, просмотр и продолжение. Только отказ от ВСЕЙ браузерной задачи/просьба остановить её — details.browserTaskControl="cancel", intent=БРАУЗЕР_ЗАДАЧА, mode=route. Обсуждение без поручения работать с сайтом, вопрос о возможностях, цитата и обычный информационный поиск сами по себе не запускают браузер. «Не бронируй, просто расскажи, как это устроено» — разговор; «не бронируй, открой страницу, дальше я сам» — браузер с ограничением. Сохраняй исходную цель и все ограничения в одном поручении. При поручении работать с конкретным магазином выбери в этом же вызове details.commerceProvider: ozon (Ozon), yandex-market (Яндекс Маркет), kuper (Купер/СберМаркет), yandex-lavka (Яндекс Лавка), samokat (Самокат). Это сужение браузера до магазина, не доступ к аккаунту и не разрешение оплаты. Для сравнения магазинов выбирай их отдельно в зависимых шагах; не подставляй магазин при обсуждении без действия или неоднозначном названии.`;
@@ -62,7 +64,10 @@ export async function completeClassificationContract(complete: (repair?: string)
                 (workspace ? ` details.browserWorkspace обязательно даже при смене темы: {"id":${JSON.stringify(workspace.id)},"relation":"continue"|"new"|"unrelated"}. Реши по смыслу новой реплики, не по ключевым словам.` : ''));
             if (repaired) result = normalizeClassificationEnvelope(repaired);
         }
-        catch { /* Keep the bound question when repairing a malformed answer fails. */ }
+        catch (error) {
+            if (accountPolicyError(error) || isAiContentSafetyError(error)) throw error;
+            // Keep the bound question on an ordinary malformed-output repair failure.
+        }
     }
     if (!validWorkspace()) return {intent:'НЕОПРЕДЕЛЕНО',confidenceLevel:'НИЗКИЙ',clarificationQuestion:'Это продолжение прежней браузерной задачи или новое поручение?',details:{},fastReply:{mode:'route'}};
     if (!validProfile()) return { ...result, details: { ...result.details, telegramProfileSelection: { action: 'clarify' } }, fastReply: { mode: 'route' } };
