@@ -35,6 +35,10 @@ export async function runReviewedBrowserAction<T>(proposal: unknown, context: un
         throw new BrowserInterrupted();
     }
     if (risk.kind === 'commitment') {
+        if (current.session.commerceProvider) {
+            await current.session.needsUser(`${risk.summary} Выполни этот шаг самостоятельно в общем браузере магазина.`, 'blocked');
+            throw new BrowserInterrupted();
+        }
         if (!await current.session.requireConfirmation(proposal, risk.summary)) throw new BrowserInterrupted();
     } else if (risk.kind === 'uncertain') {
         throw new BrowserActionValidationError('unverifiable_action');

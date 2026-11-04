@@ -9,6 +9,7 @@ import { mapsAgent } from '../../agents/googleMapsAgent';
 import { unclearIntentAgent } from '../../agents/unclearIntentAgent';
 import { answerCapabilitiesQuestion } from '../../capabilities';
 import { config } from '../../config';
+import { isValidRuntimeOwnerId } from '../../utils/runtimeIdentity';
 import { USER_TIMEZONE } from '../../constants';
 import { formatPromptDateTime } from '../../utils/time';
 import { isTodayImportanceRequest } from '../../utils/todayImportanceIntent';
@@ -16,6 +17,8 @@ import { buildTodayImportanceSnapshot, buildTodayImportanceText, buildTodayImpor
 import { buildQuickChoiceKeyboard } from '../../utils/quickChoice';
 import { looksLikeKiraRelocationRequest } from '../../utils/kiraResidence';
 import { persistAgentRuntime } from '../../services/SessionStorage';
+import { liveBrowserSessions } from '../../services/liveBrowserSession';
+import { browserContextScopeKey } from '../../utils/browserRuntimeScope';
 import { ToolRegistry, objectSchema, textSchema } from './registry';
 import { SkillLoader, KIRA_SKILLS } from './skills';
 import { domainTools, processingOutput } from './domainTools';
@@ -44,7 +47,7 @@ export function createKiraToolRegistry(): ToolRegistry {
         privateOnly: tool.privateOnly || /^(?:memory\.|portraits\.|contacts\.|people\.|health\.|settings\.|agents\.|self\.(?:getState|searchEvents|runStudy|getStudyReports))/.test(tool.name),
     }));
     return new ToolRegistry(definitions, context =>
-        Number.isSafeInteger(config.allowedUserId) && config.allowedUserId > 0 && context.ctx.from?.id === config.allowedUserId);
+        isValidRuntimeOwnerId(config.allowedUserId) && context.ctx.from?.id === config.allowedUserId);
 }
 
 function canonical(value: unknown): string {
@@ -256,7 +259,7 @@ export async function runKiraRuntime(input: KiraRuntimeInput, dependencies: Runt
         return { responseText: uncertain ? 'Этот запрос уже начал выполняться, но результат части действий неизвестен. Я не повторяла их автоматически.'
             : previous.receipts.map(receipt => receipt.summary).filter(Boolean).join('\n\n') || 'Этот запрос уже обработан; действия не повторялись.', operationStatus: uncertain ? 'unknown' : previous.status === 'waiting' ? 'needs_input' : previous.status === 'failed' ? 'failed' : 'ok', skipOptionalFollowups: true };
     }
-    const state: RuntimeSessionState = { version: 1, analyticsTaskId: input.ctx.productAnalytics?.id, runId: randomUUID(), requestKey, startedAt: Date.now(), updatedAt: Date.now(), status: 'running',
+    const state: RuntimeSessionState = { version: 1, analyticsTaskId: continuation?.analyticsTaskId ?? input.ctx.productAnalytics?.id, runId: continuation?.runId ?? randomUUID(), requestKey, startedAt: continuation?.startedAt ?? Date.now(), updatedAt: Date.now(), status: 'running',
         receipts: continuation?.receipts.map(receipt => ({ ...receipt })) ?? [], agents: (previous?.agents ?? []).slice(-12), skills: [], toolNames: [], goal: input.message.slice(0, 8000), classification,
         backgroundRun: input.recurringTaskRun, ledgerKey: continuation?.ledgerKey ?? input.ctx.agentRuntimeStorageKey };
     const observations: ToolObservation[] = continuation?.observations?.filter(observation => !input.continuationAnswer || observation.id !== continuation.parameterCall?.id).map(observation => ({ ...observation })) ?? [];
@@ -465,6 +468,9 @@ export async function runKiraRuntime(input: KiraRuntimeInput, dependencies: Runt
         result.operationStatus = state.status === 'waiting' ? 'needs_input' : state.status === 'failed' ? (stopped ? 'unknown' : 'failed') : 'ok';
         result.botReaction = classification.details.botReaction;
         result.skipOptionalFollowups = true;
+        const shared = ctx.from && liveBrowserSessions.active(ctx.from.id, browserContextScopeKey(ctx));
+        if (result.operationStatus === 'needs_input' && state.question && shared?.commercePersistentLogin && ['starting', 'running'].includes(shared.state))
+            await shared.needsUser(state.question, 'clarification');
         return result;
     } catch (error) {
         console.warn('[KIRA runtime] stopped', { runId: state.runId, errorType: error instanceof Error ? error.name : 'unknown', completedCalls: observations.length });
@@ -584,7 +590,7 @@ export async function continueQuestionRuntime(ctx: KiraRuntimeInput['ctx'], answ
     ctx.session.agentRuntimePending = ctx.session.agentRuntimePending?.filter(run => run.runId !== state.runId);
     if (cancellation) {
         state.status = 'failed'; state.pendingCalls = []; state.question = undefined; state.parameterCall = undefined; state.updatedAt = Date.now();
-        if (ctx.from) await recordDeferredOutcome(state.analyticsTaskId, ctx.from.id, status === 'unknown' ? 'unknown' : 'cancelled');
+        if (ctx.from) await recordDeferredOutcome(state.analyticsTaskId, ctx.from.id, 'cancelled');
         await persistTransition(ctx, state).catch(() => undefined);
         return { responseText: 'Задача отменена. Уже выполненные действия сохранены.', operationStatus: 'failed', skipOptionalFollowups: true };
     }

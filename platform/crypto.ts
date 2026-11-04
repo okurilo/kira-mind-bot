@@ -40,7 +40,7 @@ export class PlatformSecrets {
         cipher.setAuthTag(data.subarray(12, 28));
         return JSON.parse(Buffer.concat([cipher.update(data.subarray(28)), cipher.final()]).toString('utf8'));
     }
-    derive(accountId: string, purpose: 'database' | 'api'): string {
+    derive(accountId: string, purpose: 'database' | 'api' | 'commerce'): string {
         return createHmac('sha256', this.key).update(`${purpose}:${accountId}`).digest('hex');
     }
 }

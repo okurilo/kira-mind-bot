@@ -35,7 +35,7 @@ export class LivePlaywrightAdapter implements LiveBrowserAdapter {
     private observe(page: Page) {
         if (this.observed.has(page)) return;
         this.observed.add(page);
-        page.on('framenavigated', () => { if (page === this.current) { this.navigationEpoch++; this.session.pageChanged(); } });
+        page.on('framenavigated', frame => { if (page === this.current) { this.navigationEpoch++; this.session.pageChanged(frame && frame !== page.mainFrame() ? 'subframe' : 'document'); } });
         page.on('close', () => {
             if (page !== this.current || this.closed) return;
             const next = this.context.pages().find(p => !p.isClosed());
@@ -88,7 +88,7 @@ export class LivePlaywrightAdapter implements LiveBrowserAdapter {
         }
         const metrics = await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight, deviceScaleFactor: window.devicePixelRatio }));
         const key = JSON.stringify(metrics);
-        if (this.viewportKey && this.viewportKey !== key) { this.viewportRevision++; this.session.pageChanged(); }
+        if (this.viewportKey && this.viewportKey !== key) { this.viewportRevision++; this.session.pageChanged('viewport'); }
         this.viewportKey = key;
         let origin = '';
         try { const url = new URL(page.url()); if (url.protocol === 'http:' || url.protocol === 'https:') origin = url.origin; } catch { /* blank */ }

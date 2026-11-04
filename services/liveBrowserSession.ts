@@ -27,10 +27,12 @@ export interface LiveBrowserAdapter {
 }
 export interface BrowserSnapshot {
     version: 1; sessionId: string; operationId: string; revision: number; eventSeq: number; state: LiveBrowserState;
+    commerce?: { provider: import('./commerce/catalog').CommerceProvider; manualCheckout: true; persistentLogin: boolean };
     control: { owner: 'agent' | 'user' | 'none'; observerId: string | null; leaseId: string | null };
     page: BrowserPageInfo | null; frame: BrowserFrame | null;
     pendingConfirmation: { confirmationId: string; summary: string; revision: number; kind?:'website_dialog'; dialogType?:string } | null;
-    assistanceRequest: { requestId: string; revision: number; kind: 'information' | 'login' | 'otp' | 'captcha' | 'clarification' | 'blocked'; prompt: string; responseActions: Array<'answer' | 'take_control' | 'pause' | 'stop'> } | null;
+    assistanceRequest: { requestId: string; revision: number; kind: 'information' | 'login' | 'otp' | 'captcha' | 'payment' | 'clarification' | 'blocked'; prompt: string; responseActions: Array<'answer' | 'take_control' | 'pause' | 'stop'> } | null;
+    result?: { id: string; text: string; status: 'ok' | 'failed' | 'unknown'; createdAt: string };
     inFlight: boolean; externalEffect: 'none' | 'possible' | 'confirmed' | 'unknown'; expiresAt: string;
     lastCommand: { commandId: string; type: string; accepted: boolean } | null; reason: string | null;
     metrics?: { captureIntervalMs: number; lastCaptureMs: number | null; lastScreenshotMs: number | null; lastInputToFrameMs: number | null;
@@ -40,6 +42,7 @@ export interface BrowserEvent { seq: number; event: 'snapshot' | 'state' | 'fram
     sessionId?: string; frame?: BrowserFrame; jpegBase64?: string; resync?: boolean; }
 export interface BrowserAck { commandId: string; accepted: boolean; session: BrowserSnapshot; interpretation?: string; reply?: string; }
 export const LIVE_BROWSER_CAPABILITY = { version: 1, available: true, transport: 'sse-jpeg',
+    presentation: { modes: ['background', 'visible'], observerField: 'presentation', backgroundFrames: false },
     activePath: '/api/v1/browser/sessions/active', maxObservers: 2, maxFrameRate: 5,
     inputs: ['tap', 'scroll', 'text', 'key', 'back', 'reload'], backgroundPolicy: 'pause', observerTimeoutMs: 15_000,
     accessibility: { structuredPageControls: false }, secureFocus: true,
@@ -82,7 +85,7 @@ export class LiveBrowserSession {
     private expires = this.now() + TTL;
     private graceUntil = this.now() + 15_000;
     private receipts = new Map<string, { hash: string; promise: Promise<BrowserAck> }>();
-    private observers = new Map<string, { heartbeat: number; sink?: (event: BrowserEvent) => boolean; close?: () => void; connection?: symbol }>();
+    private observers = new Map<string, { heartbeat: number; presentation?: 'background' | 'visible'; sink?: (event: BrowserEvent) => boolean; close?: () => void; connection?: symbol }>();
     private calls = new Set<Promise<unknown>>();
     private run?: Promise<unknown>;
     private agentAbort = new AbortController();
@@ -112,6 +115,12 @@ export class LiveBrowserSession {
     onState?: () => void;
     backgroundDelivery = false;
     task = '';
+    private result?: BrowserSnapshot['result'];
+    publishResult(text: string, status: 'ok' | 'failed' | 'unknown') {
+        this.result = { id: randomUUID(), text: text.slice(0,8000), status, createdAt: new Date(this.now()).toISOString() }; this.changed();
+    }
+    commerceProvider?: import('./commerce/catalog').CommerceProvider;
+    commercePersistentLogin = false;
     readonly telegramObserverId = randomUUID();
     readonly requiresObserver: boolean;
 
@@ -124,6 +133,8 @@ export class LiveBrowserSession {
     }
     snapshot(): BrowserSnapshot {
         return { version: 1, sessionId: this.id, operationId: this.operationId, revision: this.revision, eventSeq: this.sequence,
+            ...(this.result ? { result: { ...this.result } } : {}),
+            ...(this.commerceProvider ? { commerce: { provider: this.commerceProvider, manualCheckout: true as const, persistentLogin: this.commercePersistentLogin } } : {}),
             state: this.state, control: { owner: this.state === 'running' || this.state === 'starting' ? 'agent' : this.state === 'user_control' || this.confirmation?.kind === 'website_dialog' && Boolean(this.controller && this.lease) ? 'user' : 'none',
                 observerId: this.controller, leaseId: this.lease }, page: this.page ? structuredClone(this.page) : null,
             frame: this.frame && this.frame.revision === this.revision && this.now() - this.frameTime <= 2000 ? { ...this.frame } : null,
@@ -133,7 +144,7 @@ export class LiveBrowserSession {
             metrics: { captureIntervalMs: this.captureInterval(), ...this.metrics } };
     }
     private publish(event: BrowserEvent) {
-        for (const [id, observer] of this.observers) if (observer.sink && !observer.sink(event)) this.disconnect(id, observer.connection);
+        for (const [id, observer] of this.observers) if (observer.sink && !(event.event === 'frame' && observer.presentation === 'background') && !observer.sink(event)) this.disconnect(id, observer.connection);
     }
     private changed() { this.revision++; this.sequence++; this.publish({ event: 'state', seq: this.sequence, session: this.snapshot() }); this.onState?.(); void this.capture(true); }
     private invalidate() { this.generation++; this.agentAbort.abort(); this.agentAbort = new AbortController(); if (this.confirmation?.kind !== 'website_dialog') this.confirmation = null; this.confirmationBinding = undefined; this.permittedBinding = undefined; this.assistance = null; }
@@ -152,10 +163,19 @@ export class LiveBrowserSession {
         if (this.controller && this.controller !== id) fail('browser_control_busy', 'Браузером управляет другое устройство.');
         if (this.lease && lease !== this.lease) fail('browser_lease_conflict', 'Право управления изменилось.');
     }
-    registerObserver(id: unknown) {
+    private assertVisible(id: string) {
+        if (this.observers.get(id)?.presentation === 'background') fail('browser_view_required', 'Открой страницу перед ручным управлением.');
+    }
+    registerObserver(id: unknown, presentation?: unknown) {
         if (typeof id !== 'string' || !UUID.test(id)) fail('invalid_body', 'Нужен UUID наблюдателя.', 422);
+        if (presentation !== undefined && presentation !== 'background' && presentation !== 'visible') fail('invalid_body', 'Неизвестный режим просмотра.', 422);
         if (!this.observers.has(id) && this.observers.size >= 2) fail('browser_observer_limit', 'Подключено два устройства.', 429);
         if (!this.observers.has(id)) this.observers.set(id, { heartbeat: this.now() });
+        const observer = this.observers.get(id)!;
+        if (presentation === 'background' && this.controller === id && this.state === 'user_control')
+            fail('browser_control_required', 'Сначала поставь ручное управление на паузу.');
+        observer.presentation = presentation as 'background' | 'visible' | undefined ?? observer.presentation ?? 'visible';
+        if (observer.presentation === 'visible') void this.capture(true);
         return { observerId: id, session: this.snapshot() };
     }
     heartbeat(id: unknown) { const observer = this.observers.get(this.observer(id))!; observer.heartbeat = this.now(); return { session: this.snapshot() }; }
@@ -196,9 +216,13 @@ export class LiveBrowserSession {
         if (this.state === 'starting') this.state = 'running';
         this.changed(); void this.capture();
     }
-    pageChanged() {
+    pageChanged(kind: 'document' | 'subframe' | 'viewport' = 'document') {
         if (TERMINAL.has(this.state)) return;
         if (this.confirmation?.kind === 'website_dialog') { this.frame = null; this.frameBytes = undefined; this.changed(); return; }
+        if (kind !== 'document' && this.assistance && ['login', 'otp', 'captcha', 'payment'].includes(this.assistance.kind)) {
+            this.assistance = { ...this.assistance, revision: this.revision + 1 };
+            this.frame = null; this.frameBytes = undefined; this.changed(); return;
+        }
         if (this.assistance || this.confirmation) {
             this.invalidate(); this.state = 'paused'; this.reason = 'page_changed';
         }
@@ -216,7 +240,7 @@ export class LiveBrowserSession {
     async capture(request = false) {
         if (request) this.captureRequested = true;
         if (!this.requiresObserver || !this.adapter || TERMINAL.has(this.state) ||
-            ![...this.observers.values()].some(o => o.sink)) return;
+            ![...this.observers.values()].some(o => o.sink && o.presentation !== 'background')) return;
         if (this.capturing) return;
         const wait = this.captureInterval() - (this.now() - this.lastCapture);
         if (wait > 0) {
@@ -323,7 +347,7 @@ export class LiveBrowserSession {
         await this.suspend('needs_user', 'assistance_required');
         if (TERMINAL.has(this.state)) return;
         this.assistance = { requestId: randomUUID(), revision: this.revision + 1, kind, prompt: summary.slice(0, 700),
-            responseActions: ['answer','take_control','pause','stop'] };
+            responseActions: ['login','otp','captcha','payment'].includes(kind) ? ['take_control','pause','stop'] : ['answer','take_control','pause','stop'] };
         this.changed();
     }
     websiteDialog(id:string,type:string,summary:string) {
@@ -397,6 +421,7 @@ export class LiveBrowserSession {
                 this.reason=null;return this.ack(key,'confirm');
             }
             if (type === 'pause' || type === 'take_control') {
+                if (type === 'take_control') this.assertVisible(observerId);
                 const transitionGeneration = this.generation + 1;
                 await this.suspend(type === 'pause' ? 'paused' : 'user_control', String(type));
                 if (type === 'take_control' && !TERMINAL.has(this.state)) {
@@ -440,6 +465,7 @@ export class LiveBrowserSession {
     async humanInput(key: string, body: Record<string, unknown>): Promise<BrowserAck> {
         return this.receipt(key, body, async () => {
             const observerId = this.observer(body.observerId);
+            this.assertVisible(observerId);
             this.assertForeground(observerId); this.assertController(observerId, body.leaseId); this.checkRevision(body.expectedRevision);
             if (this.state !== 'user_control' || this.controller !== observerId || !this.lease || !this.adapter) fail('browser_control_required', 'Сначала возьми управление.');
             if (this.confirmation?.kind === 'website_dialog') fail('browser_dialog_pending','Сначала явно ответь на системное окно сайта.');
@@ -486,7 +512,7 @@ export class LiveBrowserSession {
     async answerAssistance(key: string, body: Record<string, unknown>, text: string): Promise<BrowserAck> {
         if (!this.assistance || body.assistanceRequestId !== this.assistance.requestId || this.state !== 'needs_user')
             fail('browser_assistance_expired', 'Ответ относится к прежнему вопросу.', 410);
-        if (['login','otp','captcha'].includes(this.assistance.kind))
+        if (['login','otp','captcha','payment'].includes(this.assistance.kind))
             fail('browser_manual_step_required', 'Выполни этот шаг непосредственно на сайте.');
         this.onOwnerText?.(text);
         this.corrections.push(`Ответ на вопрос «${this.assistance.prompt}»: ${text.slice(0, 2000)}`);

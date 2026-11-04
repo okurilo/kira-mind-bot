@@ -1,3 +1,4 @@
+import { commerceCatalog } from '../services/commerce/catalog';
 import { Bot, Context } from 'grammy';
 import { randomUUID } from 'node:crypto';
 import { readModelPreferences, saveModelPreferences } from '../services/modelPreferenceService';
@@ -85,7 +86,7 @@ export class BotApiBackend implements ApiBackend {
         const vision: VisionRoute = await this.photoRoute().catch((error: unknown) => ({ available: false,
             reason: error instanceof ApiError ? error.message : 'Не удалось определить модель для анализа фото.' }));
         return { input: ['text', 'actions', 'photo'], photo: { mime: ['image/jpeg'], maxBytes: MAX_PHOTO_BYTES, vision, notes: PHOTO_STORAGE_NOTE }, output: ['text', 'photo', 'document', 'voice'],
-            browserSession: this.browserSession.capability, workouts: this.workouts.capability, profile: { communication: COMMUNICATION_CAPABILITY }, settings: ['modelMode', 'modelPreferences'], scene: { version: 1 }, deferredDialogue: { preference: 'respond-async', results: '/api/v1/dialogue-jobs', cancellation: true }, capabilities: BOT_CAPABILITIES };
+            browserSession: this.browserSession.capability, commerce: { version: 1, services: commerceCatalog() }, workouts: this.workouts.capability, profile: { communication: COMMUNICATION_CAPABILITY }, settings: ['modelMode', 'modelPreferences'], scene: { version: 1 }, deferredDialogue: { preference: 'respond-async', results: '/api/v1/dialogue-jobs', cancellation: true }, capabilities: BOT_CAPABILITIES };
     }
 
     settings() { return readUserSettings(); }

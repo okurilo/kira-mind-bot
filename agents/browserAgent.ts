@@ -26,6 +26,9 @@ import { hasApprovedBrowserAction, runReviewedBrowserAction } from '../services/
 import { liveBrowserKeyboard, notifyLiveBrowserState } from '../services/liveBrowserTelegram';
 import { browserInternalDiagnostic, browserPublicFailure } from '../utils/browserFailureReply';
 import { launchChromium } from '../services/chromiumLaunch';
+import { commerceProvider, commerceTask, type CommerceProvider } from '../services/commerce/catalog';
+import { installCommercePolicy, startCommerceProxy } from '../services/commerce/browserPolicy';
+import { startCommerceDisplay, type CommerceDisplay } from '../services/commerce/display';
 import { BROWSER_TIME_ZONE, parseBrowserDate, resolveBrowserDateRange } from '../utils/browserCalendar';
 import { BrowserActionValidationError } from '../services/browserActionValidation';
 import { browserFieldDescriptor, browserSecretField, protectedBrowserField, fillBrowserTextField, browserAutocompleteSnapshot, browserOptionContext, verifyBrowserOptionSelection } from '../services/browserFormControl';
@@ -468,6 +471,7 @@ interface ArmedBrowserDialogResponse {
 }
 
 interface BrowserRunState {
+    commerceProvider?: CommerceProvider;
     pendingFieldSecret?: 'login'|'otp'|'payment';
     workspace?: BrowserWorkspace;
     shared?: LiveBrowserSession;
@@ -5675,6 +5679,7 @@ function pauseBrowserRun(
     activeBrowserSessions.delete(browserRunOwnerKey(state.userId, state.chatId, state.sessionScopeKey));
     ctx.session.activeBrowserTask = undefined;
     ctx.session.pendingBrowserTask = {
+        commerceProvider: state.commerceProvider,
         originalTask: state.originalTask,
         question,
         sessionId: state.id,
@@ -5753,7 +5758,7 @@ async function closeBrowserRunState(state: BrowserRunState, reason: 'done' | 'fa
 
     const domain = extractDomain(state.page.url());
     if (domain && domain !== 'about:blank') {
-        await BrowserSessionStore.save(state.browserCtx, state.userId, domain).catch(() => {});
+        if (!state.commerceProvider) await BrowserSessionStore.save(state.browserCtx, state.userId, domain).catch(() => {});
     }
 
     await state.browserCtx.close().catch(() => {});
@@ -9742,37 +9747,43 @@ async function closeBrowserStartupResources(resources: { browser?: Browser; brow
     try { await resources.browser?.close(); } catch {}
 }
 
-async function createBrowserLaunchResources(userId: number, chatId?: number): Promise<BrowserLaunchResources> {
+async function createBrowserLaunchResources(userId: number, chatId?: number, provider?: CommerceProvider): Promise<BrowserLaunchResources> {
     const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
-    const tenantProxy = process.env.KIRA_TENANT_ID ? process.env.KIRA_BROWSER_PROXY_URL : undefined;
+    if (provider && !liveBrowserInvocation()) throw new Error('Для магазина нужен общий браузер с ручным управлением.');
+    const shopProxy = provider ? await startCommerceProxy(provider) : undefined;
+    const tenantProxy = shopProxy?.url ?? (process.env.KIRA_TENANT_ID ? process.env.KIRA_BROWSER_PROXY_URL : undefined);
     if (process.env.KIRA_TENANT_ID && !tenantProxy) throw new Error('Не настроена изоляция сети браузера.');
     const launchOptions = {
-        headless: browserHeadlessMode(),
+        headless: provider && process.platform === 'linux' ? false : browserHeadlessMode(),
         executablePath: chromiumExecutablePath || undefined,
         ...(tenantProxy ? { proxy: { server: tenantProxy } } : {}),
         args: [
             '--no-sandbox',
             '--disable-dev-shm-usage',
             '--disable-blink-features=AutomationControlled',
-            '--disable-features=site-per-process',
+            ...(!provider ? ['--disable-features=site-per-process'] : []),
             '--window-size=1365,900',
+            ...(provider ? ['--disable-background-networking', '--disable-sync'] : []),
             ...(tenantProxy ? ['--proxy-bypass-list=<-loopback>', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] : []),
         ],
     };
     const contextOptions = {
         viewport: { width: 1365, height: 900 },
-        userAgent:
+        userAgent: provider ? undefined :
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
             '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         locale: 'ru-RU',
         timezoneId: BROWSER_TIME_ZONE,
         permissions: [],
-        acceptDownloads: true,
+        acceptDownloads: !provider,
+        ...(provider ? { serviceWorkers: 'block' as const } : {}),
     };
 
     const acquired: { browser?: Browser; browserCtx?: BrowserContext } = {};
+    let display: CommerceDisplay | undefined;
     try {
-        if (persistentBrowserProfileEnabled()) {
+        if (provider && process.platform === 'linux') display = await startCommerceDisplay();
+        if (!provider && persistentBrowserProfileEnabled()) {
             const profileDir = browserProfileDirForRun(userId, chatId);
             fs.mkdirSync(profileDir, { recursive: true });
             const browserCtx = await launchChromium(env => chromium.launchPersistentContext(profileDir, {
@@ -9792,16 +9803,32 @@ async function createBrowserLaunchResources(userId: number, chatId?: number): Pr
             return { browser, browserCtx, page, persistentProfile: true, profileDir };
         }
 
-        const browser = await launchChromium(env => chromium.launch({ ...launchOptions, env }));
+        const browser = await launchChromium(env => chromium.launch({ ...launchOptions, env: { ...env, ...display?.env } }));
         acquired.browser = browser;
+        if (shopProxy) {
+            const close = browser.close.bind(browser);
+            browser.close = async (...args) => { try { await close(...args); } finally { await display?.close(); await shopProxy.close(); } };
+        }
         const browserCtx = await browser.newContext(contextOptions);
         acquired.browserCtx = browserCtx;
+        if (provider) {
+            const session = liveBrowserInvocation()!.session;
+            await installCommercePolicy(browserCtx, provider, () => session.state === 'user_control', reason => {
+                const explanation = reason === 'access_denied' ? 'Магазин отказал в доступе к странице. Проверь вход или открой витрину вручную в общем браузере. Это не означает, что товаров нет.'
+                    : reason === 'rate_limited' ? 'Магазин ограничил частоту запросов. Остановила автоматические действия; повторять запрос сейчас не буду.'
+                    : 'Запрос сайта заблокирован ограничениями магазина. Продолжи вручную в разрешённой витрине; автоматически повторять действие не буду.';
+                if (['starting', 'running'].includes(session.state)) void session.needsUser(
+                    explanation, 'blocked').catch(() => {});
+            });
+        }
         await installBrowserContextDefaults(browserCtx);
         const page = await browserCtx.newPage();
         installBrowserPageDefaults(page);
         return { browser, browserCtx, page, persistentProfile: false };
     } catch (error) {
         await closeBrowserStartupResources(acquired);
+        await display?.close();
+        await shopProxy?.close();
         throw error;
     }
 }
@@ -9827,7 +9854,8 @@ export async function createBrowserRun(
     memoryContext?: string,
     recentUserContext?: string
 ): Promise<BrowserRunState> {
-    const resources = await createBrowserLaunchResources(userId, ctx.chat?.id);
+    const provider = commerceProvider(ctx.browserCommerceProvider);
+    const resources = await createBrowserLaunchResources(userId, ctx.chat?.id, provider);
     const {
         browser,
         browserCtx,
@@ -9838,8 +9866,8 @@ export async function createBrowserRun(
     let initializingState: BrowserRunState | undefined;
 
     try {
-        const explicitSavedCreds = BrowserCredentialService.parseAndSave(userId, originalTask);
-        const credentialCandidates = [
+        const explicitSavedCreds = provider ? null : BrowserCredentialService.parseAndSave(userId, originalTask);
+        const credentialCandidates = provider ? [] : [
             ...extractCredentialCandidatesFromText(originalTask, 'user'),
             ...extractCredentialCandidatesFromText(memoryContext, 'memory'),
         ];
@@ -9859,6 +9887,7 @@ export async function createBrowserRun(
                 ? { source: 'saved' as const, domain: explicitSavedCreds.domain, login: explicitSavedCreds.login, password: BrowserCredentialService.get(userId, explicitSavedCreds.domain)?.password }
                 : chooseCredentialCandidate(credentialCandidates) ?? null;
         const state: BrowserRunState = {
+            commerceProvider: provider,
             workspace: createBrowserWorkspace(userId, browserContextScopeKey(ctx), liveBrowserInvocation()?.session.operationId ?? randomUUID(), originalTask),
             id: liveBrowserInvocation()?.session.id ?? randomUUID(),
             userId,
@@ -9908,10 +9937,12 @@ export async function createBrowserRun(
             expiresAt: Date.now() + PENDING_BROWSER_TTL_MS,
         };
         if (state.workspace && ctx.browserOwnerText) state.workspace.ownerInputs = [ctx.browserOwnerText.slice(0,3000)];
+        if (state.workspace && provider) state.workspace.commerceProvider = provider;
         initializingState = state;
         if (!ctx.agentRuntimeStorageKey) ctx.session.browserWorkspace = state.workspace;
         const live = liveBrowserInvocation();
         if (live) {
+            live.session.commerceProvider = provider;
             state.shared = live.session;
             const adapter = new LivePlaywrightAdapter(live.session, browser, browserCtx, page);
             state.sharedAdapter = adapter;
@@ -12864,7 +12895,7 @@ async function runBrowserAgent(
             }
 
             const currentDomain = extractDomain(state.page.url());
-            const userCredentials = extractCredentialsFromUserText(answer, currentDomain);
+            const userCredentials = state.commerceProvider ? null : extractCredentialsFromUserText(answer, currentDomain);
             if (userCredentials) {
                 const material = {
                     ...userCredentials,
@@ -12885,7 +12916,7 @@ async function runBrowserAgent(
                 [state.memoryContext, injectedMemoryContext, recentUserContextBlock(recentUserContext)].filter(Boolean).join('\n\n') || undefined
             );
             state.memoryContext = memoryForLlm;
-            state.credentialCandidates.push(...extractCredentialCandidatesFromText(memoryForLlm, 'memory'));
+            if (!state.commerceProvider) state.credentialCandidates.push(...extractCredentialCandidatesFromText(memoryForLlm, 'memory'));
             await sendProgress(ctx, '🌐 Продолжаю браузерную задачу с того же места…');
         } else {
             const checkpoint = ctx.browserWorkspaceContinuation && availableBrowserWorkspace(ctx.session.browserWorkspace, userId, browserContextScopeKey(ctx));
@@ -12949,7 +12980,7 @@ async function runBrowserAgent(
                     }
                 }
                 const currentDomain = extractDomainsFromText(taskForLlm)[0];
-                const continuationCredentials = extractCredentialsFromUserText(continuation.answer, currentDomain);
+                const continuationCredentials = state.commerceProvider ? null : extractCredentialsFromUserText(continuation.answer, currentDomain);
                 if (continuationCredentials) {
                     state.credentialCandidates.unshift(continuationCredentials);
                     state.memoryCredentials = continuationCredentials;
@@ -12996,7 +13027,7 @@ async function runBrowserAgent(
                     await page.reload({ waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT_MS }).catch(() => {});
                 }
 
-                state.activeCredentials = resolveCredentialsForDomain(
+                state.activeCredentials = state.commerceProvider ? null : resolveCredentialsForDomain(
                     state.userId,
                     domain,
                     state.credentialCandidates,
@@ -13104,7 +13135,7 @@ async function runBrowserAgent(
                     pushEvidence(state, 'success', finalAutoSuccessSummary, state.page.url());
                     await sendScreenshot(ctx, page, browserDoneScreenshotCaption(finalAutoSuccessSummary));
                     if (domain) {
-                        await BrowserSessionStore.save(state.browserCtx, state.userId, domain).catch(() => {});
+                        if (!state.commerceProvider) await BrowserSessionStore.save(state.browserCtx, state.userId, domain).catch(() => {});
                         state.sessionSavedForDomain = domain;
                         rememberSuccessfulSitePattern(domain, state, observation, finalAutoSuccessSummary);
                     }
@@ -13859,7 +13890,7 @@ async function runBrowserAgent(
                 pushEvidence(state, 'success', finalDoneSummary, state.page.url());
                 await sendScreenshot(ctx, page, browserDoneScreenshotCaption(finalDoneSummary));
                 if (domain && domain !== state.sessionSavedForDomain) {
-                    await BrowserSessionStore.save(state.browserCtx, state.userId, domain);
+                    if (!state.commerceProvider) await BrowserSessionStore.save(state.browserCtx, state.userId, domain);
                     state.sessionSavedForDomain = domain;
                 }
                 if (domain) {
@@ -13930,10 +13961,12 @@ async function runBrowserAgent(
                     if (memoryBlock) {
                         memoryForLlm = mergeMemoryContext(memoryForLlm, memoryBlock, query);
                         state.memoryContext = memoryForLlm;
-                        const newCredentialCandidates = extractCredentialCandidatesFromText(memoryBlock, 'memory');
-                        state.credentialCandidates.push(...newCredentialCandidates);
-                        state.memoryCredentials = extractCredentialsFromMemory(memoryForLlm, domain) ?? state.memoryCredentials;
-                        if (!state.activeCredentials || state.activeCredentials.source === 'memory') {
+                        if (!state.commerceProvider) {
+                            const newCredentialCandidates = extractCredentialCandidatesFromText(memoryBlock, 'memory');
+                            state.credentialCandidates.push(...newCredentialCandidates);
+                            state.memoryCredentials = extractCredentialsFromMemory(memoryForLlm, domain) ?? state.memoryCredentials;
+                        }
+                        if (!state.commerceProvider && (!state.activeCredentials || state.activeCredentials.source === 'memory')) {
                             state.activeCredentials = resolveCredentialsForDomain(
                                 state.userId,
                                 domain,
@@ -14150,7 +14183,7 @@ async function runBrowserAgent(
                 if (note && shouldCompleteShoppingBrowseFromNote(taskForLlm, note)) {
                     await sendScreenshot(ctx, page, `✅ Готово: ${note.slice(0, 200)}`);
                     if (domain) {
-                        await BrowserSessionStore.save(state.browserCtx, state.userId, domain).catch(() => {});
+                        if (!state.commerceProvider) await BrowserSessionStore.save(state.browserCtx, state.userId, domain).catch(() => {});
                         state.sessionSavedForDomain = domain;
                         rememberSuccessfulSitePattern(domain, state, observation, note);
                     }
@@ -14455,7 +14488,7 @@ async function runBrowserAgent(
 
             const newDomain = extractDomain(state.page.url());
             if (newDomain && newDomain !== state.sessionSavedForDomain && newDomain !== 'about:blank') {
-                await BrowserSessionStore.save(state.browserCtx, state.userId, newDomain).catch(() => {});
+                if (!state.commerceProvider) await BrowserSessionStore.save(state.browserCtx, state.userId, newDomain).catch(() => {});
                 state.sessionSavedForDomain = newDomain;
             }
 
@@ -14567,6 +14600,17 @@ export async function browserAgent(
     injectedMemoryContext?: string
 ): Promise<ProcessingResult> {
     const scope = browserContextScopeKey(ctx);
+    const classifiedProvider = commerceProvider(classification?.details.commerceProvider);
+    if (!ctx.browserCommerceProvider && classifiedProvider) ctx = Object.assign(Object.create(ctx), { browserCommerceProvider: classifiedProvider });
+    // Restore the narrowing policy from server-owned continuation state, never from model prose.
+    const continuedProvider = commerceProvider(ctx.session.pendingBrowserTask?.commerceProvider) ??
+        (ctx.browserWorkspaceContinuation === ctx.session.browserWorkspace?.id ? commerceProvider(ctx.session.browserWorkspace?.commerceProvider) : undefined);
+    if (continuedProvider && ctx.browserCommerceProvider && ctx.browserCommerceProvider !== continuedProvider)
+        return { operationStatus: 'failed', responseText: 'Сначала заверши текущую задачу магазина перед переходом в другой.' };
+    if (continuedProvider) ctx = Object.assign(Object.create(ctx), { browserCommerceProvider: continuedProvider });
+    if (ctx.browserCommerceProvider && scope.startsWith('api:') && !ctx.liveBrowserRequest && !liveBrowserInvocation())
+        return { operationStatus: 'failed', responseText: 'Для магазина нужен клиент с общим браузером и ручным управлением. Включи поддержку браузера в приложении; пароль или код в чат отправлять не нужно.' };
+    if (ctx.browserCommerceProvider && !continuedProvider) message = commerceTask(ctx.browserCommerceProvider, message);
     if (!isForwarded && !ctx.browserOwnerTextBound && !ctx.browserOwnerText && !ctx.message?.forward_origin && ctx.message?.from?.id === ctx.from?.id && ctx.message && 'text' in ctx.message) ctx.browserOwnerText = ctx.message.text;
     if (!BROWSER_CONTINUATION_RE.test(message) && isBrowserCancellationText(message, classification)) {
         await cancelBrowserRunForContext(ctx);
@@ -14582,10 +14626,11 @@ export async function browserAgent(
         await existing.correct(message, ctx.browserOwnerText ?? null);
         return { responseText: 'Уточнение учтено. Та же страница остаётся открытой на паузе; продолжить можно в управлении браузером.', operationStatus: 'needs_input' };
     }
-    const sharedRequested = Boolean(ctx.liveBrowserRequest) || (!scope.startsWith('api:') && !ctx.agentRuntimeStorageKey &&
+    const sharedRequested = Boolean(ctx.liveBrowserRequest) || Boolean(ctx.browserCommerceProvider) || (!scope.startsWith('api:') && !ctx.agentRuntimeStorageKey &&
         ctx.from?.id === config.allowedUserId && ctx.chat?.type === 'private' && ctx.session.isAllowedUser);
     if (sharedRequested && !liveBrowserInvocation()) {
         const session = liveBrowserSessions.create(ctx.from!.id, scope, ctx.liveBrowserRequest?.operationId ?? `telegram-${ctx.message?.message_id ?? randomUUID()}`);
+        session.commerceProvider = ctx.browserCommerceProvider;
         session.task = message;
         ctx.releaseBrowserUpdate?.();
         if (!session.requiresObserver) notifyLiveBrowserState(ctx, session);

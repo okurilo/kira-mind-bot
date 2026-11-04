@@ -31,7 +31,7 @@ const owner = 94101;
 const botToken = '1234567890:abcdefghijklmnopqrstuvwxyzABCDE';
 const actualBrowserAgent = browser.browserAgent;
 
-for (const deferred of [false, true]) test(`accounts /messages keeps browser viewing constraints and operation discovery (async=${deferred})`, async t => {
+for (const provider of [undefined, 'yandex-lavka'] as const) for (const deferred of [false, true]) test(`accounts /messages keeps browser viewing constraints and operation discovery (async=${deferred}, provider=${provider ?? 'general'})`, async t => {
     const previousOwner = config.allowedUserId; config.allowedUserId = owner;
     const previousMode = process.env.KIRA_ORCHESTRATION_MODE; process.env.KIRA_ORCHESTRATION_MODE = 'skills';
     t.after(() => { config.allowedUserId = previousOwner;
@@ -62,17 +62,18 @@ for (const deferred of [false, true]) test(`accounts /messages keeps browser vie
         if (mode !== 'browser') return { intent:mode === 'greeting' ? 'РАЗГОВОР' : 'ВЕБ_ПОИСК', confidenceLevel:'ВЫСОКИЙ',
             details:{memoryNeed:'none',responseComplexity:'routine',...(mode === 'research' ? {knowledgeSource:'external_current'} : {})},
             fastReply:mode === 'greeting' ? {mode:'answer',answer:'Привет!'} : {mode:'route'} } as any;
-        return { intent: 'БРАУЗЕР_ЗАДАЧА', confidenceLevel: 'ВЫСОКИЙ', details: { memoryNeed: 'none', responseComplexity: 'routine', browserTaskControl: control } } as any;
+        return { intent: 'БРАУЗЕР_ЗАДАЧА', confidenceLevel: 'ВЫСОКИЙ', details: { memoryNeed: 'none', responseComplexity: 'routine', browserTaskControl: control, ...(provider ? { commerceProvider: provider } : {}) } } as any;
     });
     const answer = t.mock.method(conversation, 'conversationAgent', async () => ({ responseText: 'A conversation cannot open the requested page.' }));
     const search = t.mock.method(web, 'performWebSearch', async () => ({success:true,results:'Synthetic astronomy news from a public source.'}));
     const operationId = randomUUID();
-    const task = 'Открой https://fixture.example/. Ничего не бронируй и не отправляй. Оставь страницу открытой для ручного управления.' + (deferred ? ' Дальше жди моего ответа.' : '');
+    const task = (provider ? 'Открой витрину Яндекс Лавки.' : 'Открой https://fixture.example/.') + ' Ничего не бронируй и не отправляй. Оставь страницу открытой для ручного управления.' + (deferred ? ' Дальше жди моего ответа.' : '');
     let expectedText = task, expectedOperation = operationId;
     let session: ReturnType<typeof liveBrowserSessions.create>;
     const leaf = t.mock.method(browser, 'browserAgent', async (ctx: BotContext, text: string, ...args: any[]) => {
         assert.equal(text, expectedText); assert.equal(ctx.from?.id, owner); assert.equal(ctx.sessionStorageKey, `api:${owner}`);
         assert.equal(ctx.liveBrowserRequest?.operationId, expectedOperation);
+        if (!workspaceId) assert.equal(ctx.browserCommerceProvider, provider);
         if (workspaceId) {
             assert.equal(ctx.browserWorkspaceContinuation,workspaceId);
             assert.equal(ctx.session.browserWorkspace?.originalGoal,'Compare synthetic items; never buy');
@@ -81,7 +82,8 @@ for (const deferred of [false, true]) test(`accounts /messages keeps browser vie
         }
         if (control === 'cancel' || session) return actualBrowserAgent(ctx, text, ...args);
         if (!session) { session = liveBrowserSessions.create(owner, `api:${owner}`, operationId); t.after(() => session.dispose()); }
-        ctx.session.pendingBrowserTask = { sessionId: session.id, originalTask: task, question: 'Продолжить просмотр?', createdAt: Date.now(), expiresAt: Date.now() + 60_000 };
+        session.commerceProvider = provider;
+        ctx.session.pendingBrowserTask = { sessionId: session.id, originalTask: task, question: 'Продолжить просмотр?', commerceProvider: provider, createdAt: Date.now(), expiresAt: Date.now() + 60_000 };
         return { responseText: 'Синтетический браузер ожидает пользователя.', operationStatus: 'needs_input' as const };
     });
     const bot = new Bot<BotContext>(botToken, { botInfo: { id: 1234567890, is_bot: true, first_name: 'Test', username: 'synthetic_bot' } as any });
@@ -102,12 +104,19 @@ for (const deferred of [false, true]) test(`accounts /messages keeps browser vie
     await new Promise<void>(resolve => platform.listen(0, '127.0.0.1', resolve));
     t.after(async () => { for (const server of [platform, worker]) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
     const base = `http://127.0.0.1:${(platform.address() as AddressInfo).port}/api/v1`;
+    const capability = await fetch(base + '/capabilities', { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(capability.status, 200);
+    const stores = (await capability.json() as any).commerce.services;
+    assert.deepEqual(stores.map((item: any) => item.id), ['ozon', 'yandex-market', 'kuper', 'yandex-lavka', 'samokat']);
+    assert.ok(stores.every((item: any) => item.maturity === 'experimental' && item.requiresSharedBrowserClient));
     const response = await fetch(base + '/messages', { method: 'POST', headers: { Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json', 'Idempotency-Key': operationId, 'X-Kira-Browser-Session': 'v1', ...(deferred ? { Prefer: 'respond-async' } : {}) }, body: JSON.stringify({ text: task }) });
     assert.equal(response.status, 200, await response.text());
     const discovery = await fetch(base + `/browser/sessions/active?operationId=${operationId}`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(discovery.status, 200);
-    assert.ok((await discovery.json() as any).session, 'The message must start the requested browser, not merely answer in chat');
+    const discoveredSession = (await discovery.json() as any).session;
+    assert.ok(discoveredSession, 'The message must start the requested browser, not merely answer in chat');
+    assert.equal(discoveredSession.commerce?.provider, provider);
     assert.equal(leaf.mock.callCount(), 1); assert.equal(answer.mock.callCount(), 0); assert.equal(stage.mock.callCount(), 0);
     assert.equal(classify.mock.callCount(), 1);
     const originalSessionId = session!.id;
@@ -118,6 +127,7 @@ for (const deferred of [false, true]) test(`accounts /messages keeps browser vie
     assert.equal(leaf.mock.callCount(), 2, 'A scoped prohibition must reach the existing workflow');
     assert.equal(session!.id, originalSessionId); assert.notEqual(session!.state, 'cancelled');
     assert.equal(stored!.pendingBrowserTask?.sessionId, originalSessionId);
+    assert.equal(stored!.pendingBrowserTask?.commerceProvider, provider);
     control = 'cancel'; expectedText = 'Я передумал, останови всю браузерную задачу.' + (deferred ? ' Просмотр больше не нужен.' : ''); expectedOperation = randomUUID();
     const cancellation = await send(); assert.equal(cancellation.status, 200, await cancellation.text());
     assert.equal(session!.state, 'cancelled'); assert.equal(stored!.pendingBrowserTask, undefined);
@@ -130,6 +140,7 @@ for (const deferred of [false, true]) test(`accounts /messages keeps browser vie
     assert.equal(search.mock.callCount(),1); assert.equal(leaf.mock.callCount(),3);
     assert.equal(liveBrowserSessions.active(owner,`api:${owner}`,expectedOperation),null);
     const workspace=createBrowserWorkspace(owner,`api:${owner}`,'completed-operation','Compare synthetic items; never buy');
+    workspace.commerceProvider = provider;
     workspace.status='completed';workspace.currentUrl='https://catalog.example/list';
     workspace.records=[{id:'synthetic-record',title:'TEST Lamp',url:'https://catalog.example/item',sourceUrl:workspace.currentUrl,attributes:{price:'20 EUR'},excerpt:'Synthetic source',observedAt:new Date().toISOString()}];
     const storage=new TypeORMSessionStorage(true), previous=(await storage.read(`api:${owner}`))!;

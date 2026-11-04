@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Page } from 'playwright';
 import { BROWSER_TIME_ZONE } from '../utils/browserCalendar';
+import { isValidRuntimeOwnerId } from '../utils/runtimeIdentity';
 
 export interface BrowserSourceRecord {
     id: string; title: string; url?: string; sourceUrl: string; entityId?: string;
@@ -11,6 +12,7 @@ export interface BrowserWorkspace {
     version: 1; id: string; owner: number; scope: string; operationId: string;
     originalGoal: string; turns: string[]; status: 'active'|'paused'|'completed'|'cancelled';
     ownerInputs?: string[];
+    commerceProvider?: import('./commerce/catalog').CommerceProvider;
     timeZone: string; currentUrl?: string; title?: string; tabs: string;
     records: BrowserSourceRecord[];
     evidence: Array<{url:string;text:string;observedAt:string}>;
@@ -34,7 +36,7 @@ export function createBrowserWorkspace(owner:number,scope:string,operationId:str
         tabs:'',records:[],evidence:[],actions:[],questions:[],createdAt:now,expiresAt:now+TTL};
 }
 export function availableBrowserWorkspace(value:BrowserWorkspace|undefined,owner:number,scope:string,now=Date.now()):BrowserWorkspace|undefined {
-    return value?.version===1&&Number.isSafeInteger(owner)&&owner>0&&value.owner===owner&&value.scope===scope&&value.expiresAt>now&&value.status!=='cancelled'?value:undefined;
+    return value?.version===1&&isValidRuntimeOwnerId(owner)&&value.owner===owner&&value.scope===scope&&value.expiresAt>now&&value.status!=='cancelled'?value:undefined;
 }
 export function attachBrowserWorkspace(previous:BrowserWorkspace,operationId:string,turn:string,now=Date.now()):BrowserWorkspace {
     if(previous.status==='cancelled'||previous.expiresAt<=now)throw Error('Browser workspace is no longer available');
@@ -44,7 +46,7 @@ export function attachBrowserWorkspace(previous:BrowserWorkspace,operationId:str
 }
 export function browserWorkspaceContext(value:BrowserWorkspace):string {
     const context={workspaceId:value.id,status:value.status,originalGoal:value.originalGoal,ownerTurns:value.turns,ownerInputs:value.ownerInputs,
-        timeZone:value.timeZone,currentUrl:value.currentUrl,title:value.title,tabs:value.tabs,
+        timeZone:value.timeZone,commerceProvider:value.commerceProvider,currentUrl:value.currentUrl,title:value.title,tabs:value.tabs,
         evidence:value.evidence.slice(-8),actions:value.actions.slice(-8),unresolvedQuestions:value.questions,records:[] as BrowserSourceRecord[]};
     for(const record of value.records.slice(-24)) {
         context.records.push(record);
