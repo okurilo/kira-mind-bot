@@ -7,7 +7,7 @@ import { getBotPersona, getCommunicationStyle, getBotBiography } from "../person
 import { config } from "../config";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import { isAiContentSafetyError } from '../ai/contentSafety';
-import { accountPolicyError } from '../ai/accountPolicy';
+import { accountPolicyError, withBackgroundAiTask, currentAccountAiOperation } from '../ai/accountPolicy';
 import { selectConversationTask } from "../ai/taskRouting";
 import {
     getKiraSelfMemoryState,
@@ -391,14 +391,14 @@ ${historyContext}
         // Получаем текст ответа
         const responseText = response.choices[0]?.message?.content || "";
         if (!memoryAnswer && !relocationIntent && !classification?.details.behavioralFeedback && injectedMemoryContext?.allowSelfEvolution !== false) {
-            void maybeEvolveKiraSelfFromConversation({
+            void withBackgroundAiTask('conversation-evolution', currentAccountAiOperation()?.id ?? `${ctx.chat?.id}:${Date.now()}`, () => maybeEvolveKiraSelfFromConversation({
                 ownerMessage: message,
                 assistantResponse: responseText,
                 messageHistory,
                 domain,
                 emotionalTone: classification?.details.emotionalTone,
                 category: classification?.details.category,
-            }).catch((error) => devLog("[conversation] self-evolution failed:", error));
+            })).catch((error) => devLog("[conversation] self-evolution failed:", error));
         }
 
         // Возвращаем результат обработки разговора

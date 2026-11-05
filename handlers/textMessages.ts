@@ -4,6 +4,8 @@ import { Chat, User } from "grammy/types";
 import { Reminder, postponeReminderUntil } from "../reminder";
 import { BotContext, ConversationTurn } from "../types";
 import { processMessage } from "../orchestrator";
+import { withBackgroundAiTask, currentAccountAiOperation } from '../ai/accountPolicy';
+import { isBackgroundFeatureEnabled } from '../services/backgroundFeatureService';
 import { handleLiveBrowserText, runTelegramBrowserResponsive } from '../services/liveBrowserTelegram';
 import { getMessageDraft, saveMessageDraft } from "../agents/sendMessagesAgent";
 import {
@@ -585,13 +587,15 @@ export function registerTextMessageHandler(bot: Bot<BotContext>, options: { imme
                     // отдельным fire-and-forget сообщением после него.
                     let identityGapCandidate: Awaited<ReturnType<typeof detectMemoryGapCandidate>>;
                     let proactiveCandidate: ProactiveHintCandidate | undefined;
+                    const memoryTaskKey = currentAccountAiOperation()?.id ?? `${ctx.sessionStorageKey ?? ctx.chat.id}:${ctx.message.message_id}`;
                     // a spoken talk in the AR room stays a talk: no «кстати…» questions or offers tacked onto her answer
                     if (
-                        !result.skipOptionalFollowups && !ctx.arRoom && shouldRunProactiveHint(result, messageForProcessing) &&
+                        !result.skipOptionalFollowups && !ctx.arRoom && shouldRunProactiveHint(result, messageForProcessing) && await isBackgroundFeatureEnabled('memoryInsight') &&
                         !decideKnowledgeSource(message, turn.replyContext, turn.currentTopic).requiresWeb &&
                         !result.keyboard &&
                         !ctx.session.pendingContactMemory
                     ) {
+                        await withBackgroundAiTask('reply-followup', memoryTaskKey, async () => {
                         const identityCandidate = turn.replyContext?.contactId
                             ? undefined
                             : await detectMemoryGapCandidate(ctx, message).catch(() => undefined);
@@ -618,6 +622,7 @@ export function registerTextMessageHandler(bot: Bot<BotContext>, options: { imme
                                 }
                             }
                         }
+                        }).catch(() => {});
                     }
 
                     if (result.negotiationSummarySent) {
@@ -667,7 +672,9 @@ export function registerTextMessageHandler(bot: Bot<BotContext>, options: { imme
 
                     // Reconsolidation
                     if (!result.fastResponse && result.operationStatus !== 'failed' && result.operationStatus !== 'unknown') {
-                        reconsolidateAfterResponse(ctx, message, result.responseText, result.recalledMemories, turn).catch(() => {});
+                        // A correction of the evidence used in this answer belongs
+                        // to the original turn, even if its save finishes later.
+                        bindAccountAiOperation(() => reconsolidateAfterResponse(ctx, message, result.responseText, result.recalledMemories, turn))().catch(() => {});
                     }
                 }
                 } catch (timerError) {

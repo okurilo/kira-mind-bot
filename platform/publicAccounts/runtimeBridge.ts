@@ -18,6 +18,13 @@ export function attachAccountAuthority(child:ChildProcess,accountId:string,db:Da
                     if(data.reserveOnly!==undefined && typeof data.reserveOnly!=='boolean')v.invalid();
                     if(data.imageOperationId!==undefined)v.text(data.imageOperationId,1,512);
                     await policy.authorizeOutbound(accountId,data as unknown as OutboundAdmission);
+                }else if(message.operation==='task'){
+                    v.fields(data,['id','background'],['id','background']);
+                    if(typeof data.background!=='boolean')v.invalid();
+                    await policy.reserve(accountId,v.text(data.id,1,512),false,data.background as boolean);
+                }else if(message.operation==='quota'){
+                    v.fields(data,[]);
+                    result=await policy.quota(accountId);
                 }else if(message.operation==='release'){
                     v.fields(data,['operationId','imageOperationId'],['operationId']);
                     const image=data.imageOperationId===false?false:data.imageOperationId===undefined?undefined:v.text(data.imageOperationId,1,512);

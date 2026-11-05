@@ -9,6 +9,8 @@ import { type BudgetMode } from '../../../ai/budgetMode';
 import type { ActivityMode, ActivityModeDescriptor } from '../../../ai/activityModes';
 import { BACKGROUND_FEATURES, type BackgroundFeature, type BackgroundFeatureState } from '../../../ai/backgroundFeatures';
 import { fetchBackgroundFeatures, saveActivityMode, saveBackgroundFeature, saveBudgetMode } from '../api';
+import { AccountQuotaPanel } from './AccountQuotaPanel';
+import type { QuotaView } from '../../../platform/publicAccounts/contracts';
 
 interface Props {
   onToast: (message: string, severity: 'success' | 'error') => void;
@@ -21,6 +23,7 @@ function pauseLabel(feature: BackgroundFeatureState) {
 }
 
 export function BudgetSettingsSection({ onToast }: Props) {
+  const [quota, setQuota] = useState<QuotaView | null>(null);
   const [mode, setMode] = useState<BudgetMode | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,7 +83,8 @@ export function BudgetSettingsSection({ onToast }: Props) {
   }
 
   function featureRow(feature: BackgroundFeatureState, label = feature.title, details = false) {
-    const paused = pauseLabel(feature);
+    const paused = feature.effective && BACKGROUND_FEATURES[feature.key].budgetPaused && quota?.background.remaining === 0
+      ? 'Новые задачи на паузе: квота фона исчерпана' : pauseLabel(feature);
     return <Stack key={feature.key} direction="row" alignItems="center" spacing={2} sx={{ py: details ? 1.25 : 0.5, borderTop: '1px solid', borderColor: 'divider' }}>
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Typography component="label" htmlFor={`feature-${feature.key}`} variant="body2">{label}</Typography>
@@ -94,6 +98,7 @@ export function BudgetSettingsSection({ onToast }: Props) {
 
   return <Card id="budget-settings" sx={{ height: '100%' }}><CardContent>
     <Stack spacing={1.5}>
+      <AccountQuotaPanel onQuota={setQuota} />
       <Stack direction="row" justifyContent="space-between" alignItems="center">
         <Typography variant="subtitle1" component="h2" fontWeight={600} id="activity-heading">Активность Киры</Typography>
         <Tooltip title="Обновить состояния"><Box component="span"><IconButton size="small" aria-label="Обновить фоновые функции" onClick={() => void load()} disabled={loading || saving}>

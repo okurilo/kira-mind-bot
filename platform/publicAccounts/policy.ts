@@ -14,7 +14,13 @@ export interface OutboundAdmission {
     reserveOnly?: boolean;
     imageOperationId?: string;
 }
-type PolicyConfig = Pick<PublicAccountConfig, 'catalog' | 'routes' | 'aiLimit' | 'imageLimit'>;
+type PolicyConfig = Pick<PublicAccountConfig, 'catalog' | 'routes' | 'aiLimit' | 'imageLimit' | 'backgroundAiLimit' | 'maxAiCallsPerOperation'>;
+type BudgetPool = 'legacy' | 'dialogue' | 'background';
+const prefix = (pool: BudgetPool): string => {
+    if (pool === 'legacy') return 'ai';
+    if (pool === 'dialogue' || pool === 'background') return pool;
+    throw new ApiError(503, 'policy_unavailable', 'Неизвестная квота операции.');
+};
 const day = (now: Date) => now.toISOString().slice(0, 10);
 const catalogError = () => new ApiError(403, 'consent_required', 'Нужно согласие на текущий список получателей AI.');
 
@@ -52,10 +58,12 @@ export class PublicAccountPolicy {
     }
 
     /** Preflight reservation is optional. It never commits a unit before an outbound attempt. */
-    async reserve(accountId: string, operationId: string, image = false): Promise<void> {
+    async reserve(accountId: string, operationId: string, image = false, background = false): Promise<void> {
+        if (!operationId || operationId.length > 512 || typeof background !== 'boolean') throw new ApiError(403, 'policy_unavailable', 'Неизвестная задача.');
         await this.db.transaction(async tx => {
-            await this.account(tx, accountId, true);
-            await this.reservation(tx, accountId, operationId);
+            const account = await this.account(tx, accountId, true);
+            if (background && !account.autonomous_ai_enabled) throw new ApiError(403, 'autonomous_ai_disabled', 'Самостоятельные AI-задачи выключены.');
+            await this.reservation(tx, accountId, operationId, background, true);
             if(image)await this.imageReservation(tx,accountId,operationId,operationId);
         });
     }
@@ -79,13 +87,16 @@ export class PublicAccountPolicy {
             const [consent] = await tx.query('SELECT * FROM kira_public_consents WHERE account_id=$1', [accountId]);
             if (!consent?.accepted || consent.catalog_version !== config.catalog.version
                 || route.recipientIds.some(id => !consent.recipient_ids.includes(id))) throw catalogError();
-            const op = await this.reservation(tx, accountId, admission.operationId);
+            const op = await this.reservation(tx, accountId, admission.operationId, admission.background);
             const imageOp = admission.image ? await this.imageReservation(tx,accountId,admission.operationId,admission.imageOperationId || admission.operationId) : undefined;
             if(admission.reserveOnly)return;
+            if (Number(op.outbound_calls) >= (config.maxAiCallsPerOperation ?? 128)) throw new ApiError(429, 'operation_limit_exceeded', 'Достигнут предел AI-вызовов одной задачи.');
+            const counter = prefix(op.budget_pool);
             if (op.ai_state === 'reserved') {
-                await tx.query('UPDATE kira_public_quota SET ai_reserved=ai_reserved-1,ai_used=ai_used+1 WHERE account_id=$1 AND day=$2',[accountId,op.day]);
+                await tx.query(`UPDATE kira_public_quota SET ${counter}_reserved=${counter}_reserved-1,${counter}_used=${counter}_used+1 WHERE account_id=$1 AND day=$2`,[accountId,op.day]);
                 await tx.query("UPDATE kira_public_ai_operations SET ai_state='committed',lease_expires_at=NULL WHERE account_id=$1 AND operation_hash=$2",[accountId,digest(admission.operationId)]);
             }
+            await tx.query('UPDATE kira_public_ai_operations SET outbound_calls=outbound_calls+1 WHERE account_id=$1 AND operation_hash=$2',[accountId,digest(admission.operationId)]);
             if(imageOp?.state==='reserved'){
                 await tx.query('UPDATE kira_public_quota SET images_reserved=images_reserved-1,images_used=images_used+1 WHERE account_id=$1 AND day=$2',[accountId,imageOp.day]);
                 await tx.query("UPDATE kira_public_image_operations SET state='committed',lease_expires_at=NULL WHERE account_id=$1 AND image_hash=$2",[accountId,imageOp.image_hash]);
@@ -99,7 +110,8 @@ export class PublicAccountPolicy {
             const [op] = await tx.query('SELECT * FROM kira_public_ai_operations WHERE account_id=$1 AND operation_hash=$2 FOR UPDATE', [accountId, digest(operationId)]);
             if (!op) return;
             if(op.ai_state==='reserved'){
-                await tx.query('UPDATE kira_public_quota SET ai_reserved=ai_reserved-1 WHERE account_id=$1 AND day=$2',[accountId,op.day]);
+                const counter = prefix(op.budget_pool);
+                await tx.query(`UPDATE kira_public_quota SET ${counter}_reserved=${counter}_reserved-1 WHERE account_id=$1 AND day=$2`,[accountId,op.day]);
                 await tx.query("UPDATE kira_public_ai_operations SET ai_state='released',lease_expires_at=NULL WHERE account_id=$1 AND operation_hash=$2",[accountId,digest(operationId)]);
             }
             if(imageOperationId===false)return;
@@ -123,7 +135,10 @@ export class PublicAccountPolicy {
             const used = Number(row?.[`${prefix}_used`] || 0), reserved = Number(row?.[`${prefix}_reserved`] || 0);
             return { limit, used, reserved, remaining: Math.max(0, limit - used - reserved) };
         };
-        return { day: current, resetAt: new Date(Date.parse(current) + 24 * 3600_000).toISOString(), ai: budget('ai', cfg.aiLimit), images: budget('images', cfg.imageLimit) };
+        const dialogue = budget('dialogue', cfg.aiLimit);
+        return { day: current, resetAt: new Date(Date.parse(current) + 24 * 3600_000).toISOString(), ai: dialogue, dialogue,
+            background: budget('background', cfg.backgroundAiLimit ?? 60), images: budget('images', cfg.imageLimit),
+            legacyAi: { used: Number(row?.ai_used || 0), reserved: Number(row?.ai_reserved || 0) } };
     }
 
     async restrict(accountId: string): Promise<void> {
@@ -141,7 +156,15 @@ export class PublicAccountPolicy {
     }
 
     private async expireReservations(tx:EntityManager,accountId:string):Promise<void>{
-        for(const [table,state,counter] of [['kira_public_ai_operations','ai_state','ai_reserved'],['kira_public_image_operations','state','images_reserved']]){
+        for (const pool of ['legacy', 'dialogue', 'background'] as BudgetPool[]) {
+            const counter = prefix(pool);
+            await tx.query(`WITH expired AS (UPDATE kira_public_ai_operations SET ai_state='released',lease_expires_at=NULL
+                WHERE account_id=$1 AND budget_pool=$3 AND ai_state='reserved' AND lease_expires_at<=$2 RETURNING day),
+                totals AS(SELECT day,count(*)::int AS count FROM expired GROUP BY day)
+                UPDATE kira_public_quota q SET ${counter}_reserved=GREATEST(0,q.${counter}_reserved-t.count)
+                FROM totals t WHERE q.account_id=$1 AND q.day=t.day`,[accountId,this.now(),pool]);
+        }
+        for(const [table,state,counter] of [['kira_public_image_operations','state','images_reserved']]){
             await tx.query(`WITH expired AS (UPDATE ${table} SET ${state}='released',lease_expires_at=NULL
                 WHERE account_id=$1 AND ${state}='reserved' AND lease_expires_at<=$2 RETURNING day),
                 totals AS(SELECT day,count(*)::int AS count FROM expired GROUP BY day)
@@ -150,21 +173,28 @@ export class PublicAccountPolicy {
         }
     }
 
-    private async reservation(tx: EntityManager, accountId: string, operationId: string): Promise<any> {
+    private async reservation(tx: EntityManager, accountId: string, operationId: string, background: boolean, reopenUnused = false): Promise<any> {
         const hash = digest(operationId);
         const [existing] = await tx.query('SELECT * FROM kira_public_ai_operations WHERE account_id=$1 AND operation_hash=$2 FOR UPDATE', [accountId, hash]);
-        const op = existing || { day: day(this.now()), ai_state: 'none' };
+        const pool: BudgetPool = background ? 'background' : 'dialogue';
+        const renew = existing?.ai_state === 'released' && reopenUnused && existing.budget_pool === pool && Number(existing.outbound_calls) === 0;
+        const op = renew ? { ...existing, day: day(this.now()), ai_state: 'none' }
+            : existing || { day: day(this.now()), ai_state: 'none', budget_pool: pool, outbound_calls: 0 };
         if (op.ai_state === 'released') throw new ApiError(409, 'operation_closed', 'Операция уже закрыта.');
-        if(existing)return op;
+        if (existing && existing.budget_pool !== 'legacy' && existing.budget_pool !== pool) throw new ApiError(403, 'operation_scope_mismatch', 'Нельзя менять бюджет уже начатой задачи.');
+        if(existing && !renew)return op;
         const cfg = this.config();
         await tx.query('INSERT INTO kira_public_quota(account_id,day) VALUES($1,$2) ON CONFLICT DO NOTHING', [accountId, op.day]);
         const [quota] = await tx.query('SELECT * FROM kira_public_quota WHERE account_id=$1 AND day=$2 FOR UPDATE', [accountId, op.day]);
-        if (Number(quota.ai_used) + Number(quota.ai_reserved) >= cfg.aiLimit) {
-            throw new ApiError(429, 'quota_exhausted', 'Дневной лимит AI исчерпан.');
+        const counter = prefix(pool), limit = background ? cfg.backgroundAiLimit ?? 60 : cfg.aiLimit;
+        if (Number(quota[`${counter}_used`]) + Number(quota[`${counter}_reserved`]) >= limit) {
+            throw new ApiError(429, background ? 'background_quota_exhausted' : 'dialogue_quota_exhausted', background ? 'Лимит фонового AI исчерпан.' : 'Лимит общения с AI исчерпан.');
         }
-        await tx.query('UPDATE kira_public_quota SET ai_reserved=ai_reserved+1 WHERE account_id=$1 AND day=$2',[accountId,op.day]);
-        await tx.query(`INSERT INTO kira_public_ai_operations(account_id,operation_hash,day,ai_state,image_state,lease_expires_at) VALUES($1,$2,$3,'reserved','none',$4)`,
+        await tx.query(`UPDATE kira_public_quota SET ${counter}_reserved=${counter}_reserved+1 WHERE account_id=$1 AND day=$2`,[accountId,op.day]);
+        if (renew) await tx.query(`UPDATE kira_public_ai_operations SET day=$3,ai_state='reserved',lease_expires_at=$4 WHERE account_id=$1 AND operation_hash=$2`,
             [accountId,hash,op.day,new Date(this.now().getTime()+300_000)]);
+        else await tx.query(`INSERT INTO kira_public_ai_operations(account_id,operation_hash,day,ai_state,image_state,lease_expires_at,budget_pool) VALUES($1,$2,$3,'reserved','none',$4,$5)`,
+                [accountId,hash,op.day,new Date(this.now().getTime()+300_000),pool]);
         return {...op,ai_state:'reserved'};
     }
 

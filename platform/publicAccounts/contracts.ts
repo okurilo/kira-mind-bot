@@ -128,6 +128,10 @@ export interface QuotaView {
     day: string;
     resetAt: string;
     ai: { limit: number; used: number; reserved: number; remaining: number };
+    /** ai remains an alias of dialogue for existing native clients. */
+    dialogue: { limit: number; used: number; reserved: number; remaining: number };
+    background: { limit: number; used: number; reserved: number; remaining: number };
+    legacyAi: { used: number; reserved: number };
     images: { limit: number; used: number; reserved: number; remaining: number };
 }
 export interface ActivationInput { version: 1 }

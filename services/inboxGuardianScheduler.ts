@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import { Bot } from "grammy";
 import { config } from "../config";
 import { USER_TIMEZONE } from "../constants";
@@ -522,7 +523,7 @@ async function runGuardian(bot: Bot<BotContext>): Promise<void> {
         const threads = selectThreadCandidates(now);
         const daytimeSources = await daytimeSourceKeys();
         const eligibleThreads = filterDaytimeSourcesFromThreads(threads, daytimeSources);
-        const items = await analyzeThreads(eligibleThreads);
+        const items = await withBackgroundAiTask('inbox-guardian', dateKey, () => analyzeThreads(eligibleThreads));
 
         if (items.length > 0) {
             const chatId = await getProactiveChatId();

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { accountPolicyError } from './accountPolicy';
 import { createChatCompletionForTask } from './chatCompletion';
 import { resolveModelForTaskAsync } from './modelResolver';
 import { getAiProviderAdapter } from './providers/registry';
@@ -29,7 +30,8 @@ export async function needsPriorityReflection(senderName: string, text: string):
                     operation: 'decisions', traceId, success: true, inputTokens: result.usage?.input_tokens, outputTokens: result.usage?.output_tokens,
                     totalTokens: result.usage?.total_tokens, latencyMs: Date.now() - startedAt });
                 return answer.probability >= REFLECTION_TRIAGE_THRESHOLD;
-            } catch {
+            } catch (error) {
+                if (accountPolicyError(error)) throw error;
                 void logAiUsage({ taskKey: 'lightweightText', provider: route.modelRef.provider, model: route.modelRef.model, preset: route.presetName,
                     operation: 'decisions', traceId, success: false, errorMessage: 'Reflection predicate unavailable; using configured JSON route', latencyMs: Date.now() - startedAt });
             }

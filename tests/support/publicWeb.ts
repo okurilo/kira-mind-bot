@@ -16,6 +16,7 @@ import { publicTestConfig, publicTestSecrets } from './publicAccounts';
 const adminRequire = createRequire(path.resolve(process.cwd(), 'admin-panel/package.json'));
 const express = adminRequire('express');
 const { createOperatorAuth } = adminRequire('./operatorAuth.js');
+const { registerAccountQuotaRoutes } = adminRequire('./accountQuota.js');
 export const webSyntheticOrigin = 'https://synthetic.example.invalid';
 export const webSyntheticPassword = 'synthetic-existing-password-123';
 export const webOperatorPassword = 'synthetic-operator-password-123';
@@ -95,6 +96,7 @@ export async function publicWebHarness(db: any, store: any) {
     app.post('/api/logout',(req:any,res:any)=>req.session.destroy(()=>res.json({success:true})));
     app.get('/api/config',operator.requireAuth,(_req:any,res:any)=>res.json({globalOperatorOnly:true}));
     app.post('/api/config',operator.requireAuth,(_req:any,res:any)=>res.json({saved:true}));
+    registerAccountQuotaRoutes(app,{requireAuth:operator.requireAuth,operatorAuth:operator,readEnvFile:()=>({}),env:{}});
     const opServer=http.createServer(app),operatorBase=await listen(opServer);settings.operatorTarget=operatorBase;
     let clients=1,existing=0;
     const client=()=>new WebTestClient(base,`192.0.2.${clients++}`);

@@ -4304,6 +4304,70 @@
             ],
             "additionalProperties": false
           },
+          "dialogue": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "number"
+              },
+              "used": {
+                "type": "number"
+              },
+              "reserved": {
+                "type": "number"
+              },
+              "remaining": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "limit",
+              "used",
+              "reserved",
+              "remaining"
+            ],
+            "additionalProperties": false
+          },
+          "background": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "number"
+              },
+              "used": {
+                "type": "number"
+              },
+              "reserved": {
+                "type": "number"
+              },
+              "remaining": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "limit",
+              "used",
+              "reserved",
+              "remaining"
+            ],
+            "additionalProperties": false
+          },
+          "legacyAi": {
+            "type": "object",
+            "properties": {
+              "used": {
+                "type": "number"
+              },
+              "reserved": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "used",
+              "reserved"
+            ],
+            "additionalProperties": false
+          },
           "images": {
             "type": "object",
             "properties": {
@@ -4333,6 +4397,9 @@
           "day",
           "resetAt",
           "ai",
+          "dialogue",
+          "background",
+          "legacyAi",
           "images"
         ],
         "additionalProperties": false

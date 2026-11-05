@@ -95,13 +95,43 @@
       else { const box = node('section', undefined, 'card'); box.append(node('p', error.message), button('Повторить', () => render(page))); $('content').replaceChildren(box); }
     }
   }
+  function quotaPanel(quota) {
+    const box = node('section', undefined, 'quota-panel'); box.setAttribute('aria-label', 'Квоты AI на сегодня');
+    box.append(node('h3', 'Квоты AI на сегодня'));
+    if (!quota?.dialogue || !quota?.background || !quota?.images) {
+      box.append(node('p', quota?.ai ? `Прежняя общая AI-квота: осталось ${quota.ai.remaining}. Раздельный учёт пока недоступен.` : 'Сведения о квотах недоступны.', 'secondary')); return box;
+    }
+    const grid = node('div', undefined, 'quota-grid');
+    for (const [key, label] of [['dialogue', 'Общение и поручения'], ['background', 'Фоновая работа'], ['images', 'Изображения']]) {
+      const item = node('div', undefined, 'quota-item'), value = quota[key]; item.dataset.quota = key;
+      item.append(node('h4', label), node('p', `Осталось ${value.remaining} из ${value.limit}`, 'quota-value'));
+      item.append(node('p', `Использовано ${value.used}${value.reserved > 0 ? ` · В работе ${value.reserved}` : ''}`, 'secondary'));
+      if (value.remaining === 0) item.append(node('p', key === 'background' ? 'Новые фоновые задачи на паузе' : 'Лимит новых задач исчерпан', 'secondary'));
+      grid.append(item);
+    }
+    box.append(grid, node('p', 'Фон не расходует квоту общения. Одна задача может включать несколько AI-вызовов.', 'secondary'));
+    box.append(node('p', `Обновление: ${date(quota.resetAt)}`, 'secondary'));
+    if (quota.legacyAi?.used > 0 || quota.legacyAi?.reserved > 0) box.append(node('p', `До разделения учтено ${quota.legacyAi.used} операций; они сохранены отдельно и не уменьшают новые квоты.`, 'secondary'));
+    const expected = state.session.account.id, view = state.view, status = node('p', undefined, 'secondary'); status.setAttribute('aria-live', 'polite');
+    const refresh = button('Обновить квоты', async () => {
+      refresh.disabled = true; status.textContent = '';
+      try {
+        await session(expected); const result = await own('account/quota'); await session(expected);
+        if (view !== state.view || state.session?.account.id !== expected) return;
+        state.session.account.quota = result.quota; box.replaceWith(quotaPanel(result.quota));
+      } catch (error) { if (view === state.view) status.textContent = error.message; }
+      finally { refresh.disabled = false; }
+    }, 'secondary-button');
+    box.append(refresh, status);
+    return box;
+  }
   async function accountView(expected) {
     await session(expected);
     const box = node('section', undefined, 'card'); box.append(title('Твоя Кира', 'Все подключённые способы входа ведут в одно личное пространство.'));
     const status = state.session.account.consent.aiAllowed ? 'Согласие на AI подключено' : 'Согласие на AI пока не подключено';
     box.append(node('p', status));
     const quota = state.session.account.quota;
-    if (quota?.ai) box.append(node('p', `AI-запросов осталось сегодня: ${quota.ai.remaining}`, 'secondary'));
+    box.append(quotaPanel(quota));
     const consent = button('Настроить согласие на AI', () => consentView(box, expected), 'secondary-button'); box.append(consent);
     if (state.session.operatorLinkingAvailable) {
       const section = node('details'); section.append(node('summary', 'Доступ оператора'));
@@ -159,6 +189,7 @@
     const data = await own('settings'); await session(expected);
     const view = state.view;
     const box = node('section', undefined, 'card'), form = node('form', undefined, 'stack'); box.append(title('Настройки Киры'));
+    box.append(quotaPanel(state.session.account.quota));
     const catalog = data.activityModes || [], features = data.features || [], checks = new Map(), radios = new Map(), touched = new Set();
     let selected = data.activityMode || 'custom', presetChanged = false, replacing = false;
     box.append(node('p', 'Выберите, что Кира делает автоматически. Общение, ручные поручения, сохранённая память и обычные напоминания доступны в любом режиме.', 'secondary'));

@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import { Bot } from "grammy";
 import { BotContext } from "../types";
 import { config } from "../config";
@@ -67,7 +68,7 @@ export async function buildDigestGreeting(reminderCount: number): Promise<string
     if (!await isBackgroundFeatureEnabled('morningDigestAi')) return fallbackGreeting;
 
     try {
-        const response = await createChatCompletionForTask('lightweightText', {
+        const response = await withBackgroundAiTask('morning-digest', new Date().toISOString().slice(0, 10), () => createChatCompletionForTask('lightweightText', {
             max_completion_tokens: 160,
             messages: [
                 {
@@ -83,7 +84,7 @@ export async function buildDigestGreeting(reminderCount: number): Promise<string
                 },
             ],
             temperature: 0.85,
-        });
+        }));
         return response.choices[0]?.message?.content?.trim() || fallbackGreeting;
     } catch {
         return fallbackGreeting;

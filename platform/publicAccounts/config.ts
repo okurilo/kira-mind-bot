@@ -15,6 +15,7 @@ export interface PublicAccountConfig {
     privacyUrl: string | null; supportUrl: string | null;
     catalog: ConsentCatalog; routes: ConsentRoute[];
     aiLimit: number; imageLimit: number;
+    backgroundAiLimit?: number; maxAiCallsPerOperation?: number;
     readyCapabilities?: AuthConfig['capabilities'];
 }
 const https = (value: string) => {
@@ -83,7 +84,9 @@ export function loadPublicAccountConfig(env: NodeJS.ProcessEnv = process.env): P
         gateway: { peers: get('GATEWAY_PEERS').split(',').map(x => x.trim()).filter(Boolean), secret: get('GATEWAY_SECRET') },
         privacyUrl: get('PRIVACY_URL') ? https(get('PRIVACY_URL')) : null,
         supportUrl: get('SUPPORT_URL') ? https(get('SUPPORT_URL')) : null,
-        ...catalog, aiLimit: count(env.KIRA_PUBLIC_AI_DAILY_LIMIT, 20), imageLimit: count(env.KIRA_PUBLIC_IMAGE_DAILY_LIMIT, 1),
+        ...catalog, aiLimit: count(env.KIRA_PUBLIC_DIALOGUE_DAILY_LIMIT ?? env.KIRA_PUBLIC_AI_DAILY_LIMIT, 20),
+        backgroundAiLimit: count(env.KIRA_PUBLIC_BACKGROUND_DAILY_LIMIT, 60),
+        maxAiCallsPerOperation: count(env.KIRA_PUBLIC_AI_TASK_MAX_CALLS, 128), imageLimit: count(env.KIRA_PUBLIC_IMAGE_DAILY_LIMIT, 1),
     };
 }
 

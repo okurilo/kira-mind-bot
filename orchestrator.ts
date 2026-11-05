@@ -28,7 +28,7 @@ import { executePlan } from "./orchestration/executor";
 import { Plan } from "./orchestration/types";
 import { runKiraRuntime, orchestrationMode, hasCompoundActionRequest, continueConfirmedRuntime, mergeRuntimeResults, continueQuestionRuntime, cancelRuntimeContinuation, pendingTelegramProfileQuestion, continueClassifiedProfileQuestion } from './orchestration/runtime/kernel';
 import { classifyWithDecisions, decisionsEnabled } from './ai/decisionRouting';
-import { contactMemoryConfirmationKey, browserConfirmationKey, findPendingRuntimeConfirmation, CONTACT_MEMORY_PARENT_TOOLS } from './orchestration/runtime/confirmation';
+import { contactMemoryConfirmationKey, browserConfirmationKey, findPendingRuntimeConfirmation, withRuntimeConfirmationAiOperation, CONTACT_MEMORY_PARENT_TOOLS } from './orchestration/runtime/confirmation';
 import { isBrowserContinuationAnswer } from './utils/continuationInput';
 import { ChatGroupRepository } from "./services/ChatGroupRepository";
 import { handlePendingContactMemoryText } from "./utils/contactMemory";
@@ -748,7 +748,7 @@ async function processMessageInternal(
         if (!workspace && !explicitRemember && !isBrowserTaskLike && !knowledgeDecision.requiresWeb) {
             const contactMemoryKey = contactMemoryConfirmationKey(ctx);
             let contactMemorySaved: string | undefined;
-            const contactMemoryResolution = await handlePendingContactMemoryText(ctx, message, summary => { contactMemorySaved = summary; });
+            const contactMemoryResolution = await withRuntimeConfirmationAiOperation(ctx, contactMemoryKey, () => handlePendingContactMemoryText(ctx, message, summary => { contactMemorySaved = summary; }));
             if (contactMemoryResolution) {
                 const remaining = contactMemorySaved && contactMemoryKey ? await continueConfirmedRuntime(ctx, CONTACT_MEMORY_PARENT_TOOLS, contactMemorySaved, {}, contactMemoryKey) : undefined;
                 return remaining ? mergeRuntimeResults([{ responseText: contactMemoryResolution }, remaining]) : { responseText: contactMemoryResolution };

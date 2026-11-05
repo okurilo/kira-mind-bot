@@ -90,6 +90,13 @@ export async function initializePublicAccounts(db: DataSource): Promise<void> {
             day date NOT NULL, ai_state text NOT NULL, image_state text NOT NULL,
             created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(account_id,operation_hash)
         )`);
+        // Keep pre-split counters and operations as legacy history. Their category
+        // was never recorded; guessing it would silently charge the wrong pool.
+        for (const pool of ['dialogue', 'background']) for (const state of ['used', 'reserved']) {
+            await tx.query(`ALTER TABLE kira_public_quota ADD COLUMN IF NOT EXISTS ${pool}_${state} int NOT NULL DEFAULT 0 CHECK(${pool}_${state} >= 0)`);
+        }
+        await tx.query(`ALTER TABLE kira_public_ai_operations ADD COLUMN IF NOT EXISTS budget_pool text NOT NULL DEFAULT 'legacy' CHECK(budget_pool IN ('legacy','dialogue','background'))`);
+        await tx.query('ALTER TABLE kira_public_ai_operations ADD COLUMN IF NOT EXISTS outbound_calls int NOT NULL DEFAULT 0 CHECK(outbound_calls >= 0)');
         await tx.query('ALTER TABLE kira_public_ai_operations ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz');
         await tx.query(`UPDATE kira_public_ai_operations SET lease_expires_at=now()+interval '5 minutes' WHERE ai_state='reserved' AND lease_expires_at IS NULL`);
         await tx.query(`CREATE TABLE IF NOT EXISTS kira_public_image_operations (

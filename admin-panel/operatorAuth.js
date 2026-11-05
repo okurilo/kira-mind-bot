@@ -159,7 +159,13 @@ function createOperatorAuth({ username, password, sessionSecret, cookieName, env
       }));
     }
   };
-  return { prepare, csrfGuard, requireAuth: safe(requireAuth), rateLimit, login: safe(login), register, csrf,
+  const accountQuota = async req => {
+    if (req.operatorAuthentication !== 'account') return undefined;
+    const accessToken = cookie(req, ACCESS_COOKIE), browserCookie = cookie(req, BROWSER_COOKIE);
+    if (!accessToken || !browserCookie) return { ok: false, status: 401, body: {} };
+    return internal('/internal/operator/quota', { accessToken, browserCookie });
+  };
+  return { prepare, csrfGuard, requireAuth: safe(requireAuth), rateLimit, login: safe(login), register, csrf, accountQuota,
     session: (req, res, next) => trusted(req) ? publicSession(req, res, next) : privateSession(req, res, next) };
 }
 module.exports = { createOperatorAuth, OPERATOR_CSP };

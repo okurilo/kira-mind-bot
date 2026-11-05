@@ -28,7 +28,7 @@ export function bindAccountAiOperation<T extends (...args:any[])=>Promise<any>>(
 }
 
 /** No registry credential in a tenant process. Account authority is the process's parent binding. */
-export async function accountAuthority(operation:'outbound'|'admission'|'inbox'|'release',data:Record<string,unknown>):Promise<any>{
+export async function accountAuthority(operation:'outbound'|'admission'|'inbox'|'release'|'task'|'quota',data:Record<string,unknown>):Promise<any>{
     if(!process.env.KIRA_TENANT_ID)return undefined;
     if(!process.send || !process.connected)throw new ApiError(503,'policy_unavailable','Политика аккаунта временно недоступна.');
     if(!listening){
@@ -51,6 +51,25 @@ export async function accountAuthority(operation:'outbound'|'admission'|'inbox'|
             if(!error)return;const p=pending.get(id);if(p){pending.delete(id);clearTimeout(timer);reject(new ApiError(503,'policy_unavailable','Политика аккаунта недоступна.'));}
         });
     });
+}
+/** A logical job owns one durable quota receipt across all its AI stages. */
+export async function withAccountAiTask<T>(operation: AccountAiOperation, work: () => Promise<T>): Promise<T> {
+    return withAccountAiOperation(operation, async () => {
+        // Foreground operations stay lazy: buttons and other non-AI actions must
+        // work even when the dialogue quota is empty.
+        if (operation.background) await accountAuthority('task', operation as unknown as Record<string, unknown>);
+        try { return await work(); }
+        finally { await accountAuthority('release', { operationId: operation.id, imageOperationId: false }).catch(() => {}); }
+    });
+}
+export function backgroundAiTaskId(kind: string, key: string): string {
+    return `background:${kind}:${createHash('sha256').update(key).digest('hex')}`;
+}
+export function withBackgroundAiTask<T>(kind: string, key: string, work: () => Promise<T>): Promise<T> {
+    return withAccountAiTask({ id: backgroundAiTaskId(kind, key), background: true }, work);
+}
+export function backgroundQuotaError(error: unknown): boolean {
+    return accountPolicyError(error)?.code === 'background_quota_exhausted';
 }
 export async function authorizeAccountOutbound(provider:string,endpoint:string,image=false,reserveOnly=false):Promise<void>{
     if(!process.env.KIRA_TENANT_ID)return;
@@ -104,7 +123,7 @@ export function accountHttpOperation(handler:(req:IncomingMessage,res:ServerResp
         void withAccountAiOperation({id:`api:${id}`,background:false},()=>handler(req,res)).catch(()=>res.destroy());
     };
 }
-const policyCodes=new Set(['consent_required','account_restricted','account_deleting','autonomous_ai_disabled','quota_exhausted','activation_required','policy_unavailable','operation_closed','moderation_unavailable','content_policy_violation']);
+const policyCodes=new Set(['consent_required','account_restricted','account_deleting','autonomous_ai_disabled','quota_exhausted','dialogue_quota_exhausted','background_quota_exhausted','operation_scope_mismatch','operation_limit_exceeded','activation_required','policy_unavailable','operation_closed','moderation_unavailable','content_policy_violation']);
 export function accountPolicyError(error:unknown):ApiError|undefined{
     let current=error;
     for(let n=0;n<5 && current && typeof current==='object';n++){
@@ -120,6 +139,10 @@ export function accountPolicyReply(error: unknown): string | undefined {
     if (!policy) return undefined;
     switch (policy.code) {
         case 'quota_exhausted': return 'Дневной лимит AI для этой операции исчерпан. Проверь лимиты в аккаунте или повтори запрос после их обновления.';
+        case 'dialogue_quota_exhausted': return 'Дневной лимит общения и поручений исчерпан. Проверь квоты в аккаунте или повтори запрос после их обновления.';
+        case 'background_quota_exhausted': return 'Дневной лимит фоновой работы исчерпан. Фон приостановлен до обновления квоты; он не расходует лимит общения.';
+        case 'operation_limit_exceeded': return 'Задача достигла предела AI-вызовов и остановлена. Проверь уже выполненные действия перед продолжением.';
+        case 'operation_scope_mismatch': return 'Не удалось подтвердить бюджет продолжения задачи. Отправь новый запрос.';
         case 'consent_required': return 'Для этого запроса нужно согласие на обработку данных выбранными AI-сервисами. Проверь согласие в настройках аккаунта.';
         case 'activation_required': return 'Для AI-запросов сначала нужно активировать аккаунт.';
         case 'account_restricted': return 'AI-запросы для этого аккаунта ограничены. Проверь состояние аккаунта.';

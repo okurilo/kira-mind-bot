@@ -190,6 +190,13 @@ export async function fetchBudgetMode(): Promise<{ mode: BudgetMode }> {
   return body;
 }
 
+export async function fetchAccountQuota(): Promise<{ available: boolean; quota?: import('../../platform/publicAccounts/contracts').QuotaView }> {
+  const response = await apiFetch('/api/account-quota');
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось загрузить квоты');
+  return body;
+}
+
 export async function fetchBackgroundFeatures(): Promise<{ mode: BudgetMode; features: BackgroundFeatureState[]; activityMode: ActivityMode; activityModes: ActivityModeDescriptor[] }> {
   const response = await apiFetch('/api/background-features');
   const body = await response.json();

@@ -3,6 +3,7 @@ import { extractAndSaveFactsFromConversation } from './enhancedFactExtraction';
 import { persistSessionNow } from '../services/SessionStorage';
 import { isBackgroundFeatureEnabled } from '../services/backgroundFeatureService';
 import { summarizeDialogue } from '../services/dialogueSummarizer';
+import { withBackgroundAiTask, backgroundQuotaError } from '../ai/accountPolicy';
 
 interface PendingAnalysis {
     /** Контекст нужен для доступа к ctx.session при отложенном анализе (session обновляется по ссылке при MemorySessionStorage) */
@@ -81,8 +82,10 @@ class FactAnalysisManager {
             clearTimeout(analysis.maxWaitTimerId);
         }
 
+        let deferred = false;
         try {
             if (!await isBackgroundFeatureEnabled('deferredFacts')) return;
+            await withBackgroundAiTask('dialogue-facts', `${userId}:${analysis.firstMessageAt}`, async () => {
             console.log(`🧠 Запуск анализа фактов для ${userId}. Причина: ${reason}. Сообщений накоплено: ${analysis.messageCount}`);
             await extractAndSaveFactsFromConversation(
                 analysis.ctx,
@@ -95,10 +98,18 @@ class FactAnalysisManager {
                 if (summary) analysis.ctx.session.dialogueSummary = summary;
             }
             await persistSessionNow(analysis.ctx);
+            });
         } catch (error) {
+            if (backgroundQuotaError(error)) {
+                deferred = true;
+                const now = new Date(), next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+                analysis.debounceTimerId = setTimeout(() => void this.executeAnalysis(userId, 'debounce'), next - now.getTime() + 1000);
+                analysis.debounceTimerId.unref?.();
+                return;
+            }
             console.error('Error in delayed fact analysis:', error);
         } finally {
-            this.pendingAnalyses.delete(userId);
+            if (!deferred) this.pendingAnalyses.delete(userId);
         }
     }
 

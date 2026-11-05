@@ -1,4 +1,4 @@
-import { withAccountAiOperation } from '../ai/accountPolicy';
+import { withAccountAiTask, backgroundAiTaskId, backgroundQuotaError } from '../ai/accountPolicy';
 import { randomUUID } from 'node:crypto';
 import type { Bot } from 'grammy';
 import type { BotContext, SessionData } from '../types';
@@ -157,7 +157,9 @@ export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob,
             await repository.update(job, { status: 'completed' });
             return;
         }
-        await withAccountAiOperation({id:job.input.accountAiOperation?.id || `dialogue:${job.id}`,background:!job.input.required || (job.input.accountAiOperation?.background ?? true)},()=>runWithChannelPreset(job.input.preset, () => runWithModelPolicy(job.input.modelPolicy ?? null, async () => {
+        const operation = job.input.required && job.input.accountAiOperation ? job.input.accountAiOperation
+            : { id: job.input.required ? `dialogue:${job.id}` : backgroundAiTaskId('dialogue-review', job.id), background: !job.input.required };
+        await withAccountAiTask(operation,()=>runWithChannelPreset(job.input.preset, () => runWithModelPolicy(job.input.modelPolicy ?? null, async () => {
             if (job.phase === 'review') {
                 const decision = await (deps.review ?? review)(job);
                 if (!await valid()) return;
@@ -182,7 +184,11 @@ export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob,
             if (!result.material || !result.answer.trim()) { await repository.update(job, { status: 'completed', resultText: null }); return; }
             await repository.update(job, { status: 'ready', phase: 'deep', resultText: result.answer });
         })));
-    } catch {
+    } catch (error) {
+        if (backgroundQuotaError(error) && !job.input.required) {
+            await repository.update(job, { status: 'cancelled', error: 'background_quota_exhausted', lockedAt: null as any });
+            return;
+        }
         // Do not log prompts, memory or provider errors. A delivery with no acknowledgement remains unknown.
         const status = job.status === 'delivering' ? 'unknown' : job.input.required ? 'ready' : 'failed';
         if (job.input.required) await recordDeferredOutcome(job.input.analyticsTaskId, job.userId, status === 'unknown' ? 'unknown' : 'failed');

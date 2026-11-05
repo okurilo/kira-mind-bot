@@ -423,6 +423,7 @@ test('a room turn that needs memory or depth gets the full answer at once: the r
 test('real API text handler: a spoken room talk gets no «кстати…» question tacked on; the chat keeps it', async t => {
     const value = classification(); value.fastReply = { mode: 'route' };
     foreground(t, value);
+    t.mock.method(features, 'isBackgroundFeatureEnabled', async () => true);
     t.mock.method(factAnalysisManager, 'scheduleAnalysis', () => {});
     t.mock.method(DialogueJobRepository, 'beginTurn', async () => {});
     t.mock.method(session.TypeORMSessionStorage.prototype, 'read', async () => undefined);
@@ -437,4 +438,45 @@ test('real API text handler: a spoken room talk gets no «кстати…» ques
     assert.equal(asked.mock.callCount(), 0);
     const inChat = await backend.message('Мы с Ирой вчера гуляли');
     assert.ok(inChat.messages.some(item => /кто такая Ира/u.test(item.text || '')));
+});
+
+test('required deferred work retains its user task while optional review stops on its own empty budget', async t => {
+    const policy = await import('../ai/accountPolicy');
+    const { ApiError } = await import('../api/contracts');
+    const original = policy.withAccountAiTask;
+    t.mock.method(policy, 'withAccountAiTask', async function<T>(operation: import('../ai/accountPolicy').AccountAiOperation, work: () => Promise<T>): Promise<T> {
+        if (operation.background) throw new ApiError(429, 'background_quota_exhausted', 'Synthetic');
+        assert.deepEqual(operation, { id: 'synthetic-original-user-task', background: false });
+        return original(operation, work);
+    });
+    const required = job(true); required.input.accountAiOperation = { id: 'synthetic-original-user-task', background: false };
+    const deps = worker(t, required);
+    await executeDialogueJob({} as any, required, { ...deps, deepen: async () => {
+        assert.equal(policy.currentAccountAiOperation()?.id, 'synthetic-original-user-task'); return 'Ответ на исходное поручение.';
+    } });
+    assert.equal(deps.stored().status, 'ready'); assert.equal(deps.stored().resultText, 'Ответ на исходное поручение.');
+    const optional = job(false); deps.replace(optional); let reviewed = false;
+    await executeDialogueJob({} as any, optional, { ...deps, review: async () => { reviewed = true; return { needed: false, memoryNeed: 'none', web: false }; } });
+    assert.equal(reviewed, false); assert.equal(deps.stored().status, 'cancelled'); assert.equal(deps.stored().error, 'background_quota_exhausted');
+});
+
+test('delayed memory analysis preserves its pending source while background is exhausted, then resumes', async t => {
+    environment(t);
+    const policy = await import('../ai/accountPolicy'); const { ApiError } = await import('../api/contracts');
+    t.mock.method(features, 'isBackgroundFeatureEnabled', async () => true);
+    const extracted = t.mock.method(extraction, 'extractAndSaveFactsFromConversation', async () => {});
+    t.mock.method(session, 'persistSessionNow', async () => {});
+    let denied = true; const keys: string[] = [];
+    const original = policy.withBackgroundAiTask;
+    t.mock.method(policy, 'withBackgroundAiTask', async function<T>(kind: string, key: string, work: () => Promise<T>): Promise<T> {
+        keys.push(key); if (denied) throw new ApiError(429, 'background_quota_exhausted', 'Synthetic'); return original(kind, key, work);
+    });
+    const value = ctx(); value.sessionStorageKey = 'synthetic-quota-memory';
+    t.after(() => factAnalysisManager.cancelAnalysis(value.sessionStorageKey!));
+    factAnalysisManager.scheduleAnalysis(value);
+    await (factAnalysisManager as any).executeAnalysis(value.sessionStorageKey, 'debounce');
+    assert.ok(factAnalysisManager.getPendingAnalysis(value.sessionStorageKey)); assert.equal(extracted.mock.callCount(), 0);
+    denied = false; await (factAnalysisManager as any).executeAnalysis(value.sessionStorageKey, 'debounce');
+    assert.equal(factAnalysisManager.getPendingAnalysis(value.sessionStorageKey), undefined); assert.equal(extracted.mock.callCount(), 1);
+    assert.equal(new Set(keys).size, 1);
 });

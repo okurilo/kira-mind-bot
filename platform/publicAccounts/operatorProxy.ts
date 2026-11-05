@@ -8,7 +8,7 @@ import type { PublicLimits } from './limits';
 
 const GET = new Set(['auth/context','config','ai-preset','chats','recurring-tasks','memory','memory/graph','health/logs','health/export',
     'status','monitoring/health','ai-usage/summary','ai-usage/traces','personality','local-models','mcp/servers','image-recognition',
-    'image-generation','image-generation/connection','image-generation/reference','budget-mode','background-features','product-analytics','model-preferences']);
+    'image-generation','image-generation/connection','image-generation/reference','budget-mode','background-features','account-quota','product-analytics','model-preferences']);
 const POST = new Set(['login','logout','config','ai-preset','personality','local-models','image-recognition','image-generation',
     'image-generation/reference','budget-mode','background-features','product-analytics/review','memory','operator/link-account','operator/unlink-account','operator/login-account']);
 const PUT = new Set(['model-preferences','product-analytics/targets']);

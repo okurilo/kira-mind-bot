@@ -84,7 +84,7 @@ test('quota is atomic across accounts, processes and concurrent image/AI admissi
         await policy.authorizeOutbound(a.id, admission);
         await policy.release(a.id, admission.operationId);
         assert.deepEqual((await policy.quota(a.id)).ai, { limit: 2, used: 2, reserved: 0, remaining: 0 });
-        await assert.rejects(() => make().authorizeOutbound(a.id, { ...admission, operationId: 'exhausted' }), (e: any) => e.code === 'quota_exhausted');
+        await assert.rejects(() => make().authorizeOutbound(a.id, { ...admission, operationId: 'exhausted' }), (e: any) => e.code === 'dialogue_quota_exhausted');
         await policy.authorizeOutbound(b.id, { ...admission, image: true });
         assert.equal((await policy.quota(b.id)).ai.remaining, 1);
     });

@@ -6,6 +6,7 @@ import { ReminderRepository } from './ReminderRepository';
 import { ReminderRegistry } from '../stores/ReminderRegistry';
 import { createOrRefreshReminderMemory } from './ReminderMemorySync';
 import { buildDefaultTargetReminderMessage } from '../utils/reminderTargetNotification';
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 
 export interface ReminderServiceDependencies {
     save(reminder: Reminder): Promise<void>;
@@ -64,7 +65,7 @@ export class ReminderService {
         this.dependencies.register(reminder);
         this.dependencies.schedule(reminder);
 
-        await this.dependencies.syncMemory(ctx, reminder).catch((error) => {
+        await withBackgroundAiTask('reminder-memory', `${reminder.id}:create`, () => this.dependencies.syncMemory(ctx, reminder)).catch((error) => {
             console.error('[reminder] memory sync failed on create:', error);
         });
 

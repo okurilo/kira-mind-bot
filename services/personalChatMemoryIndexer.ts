@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Api } from 'telegram';
@@ -730,7 +731,7 @@ export async function getPersonalChatMemoryIndexStatus(): Promise<string> {
 
 async function runScheduledCycle(): Promise<void> {
     if (!await isBackgroundFeatureEnabled('personalChatMemory')) return;
-    const result = await runPersonalChatMemoryIndexingCycle();
+    const result = await withBackgroundAiTask('personal-chat-indexing', String(Date.now()), () => runPersonalChatMemoryIndexingCycle());
     console.log('[personal-chat-memory] cycle completed:', result);
 }
 

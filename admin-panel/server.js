@@ -3,6 +3,7 @@
 const express = require('express');
 const compression = require('compression');
 const { createOperatorAuth } = require('./operatorAuth');
+const { registerAccountQuotaRoutes } = require('./accountQuota');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -368,6 +369,7 @@ registerModelPreferenceRoutes(app, { requireAuth, createDbPool, ensureBotSetting
 
 registerBudgetModeRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable });
 registerBackgroundFeatureRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
+registerAccountQuotaRoutes(app, { requireAuth, operatorAuth, readEnvFile });
 registerLocalModelRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
 registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
 registerImageRecognitionRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });

@@ -73,3 +73,42 @@ test('actual worker SDK/image/embedding transports make zero calls before consen
         }finally{await stop();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(directory,{recursive:true,force:true});}
     });
 });
+
+test('real IPC task scopes keep multi-stage background separate, preserve a direct answer and allow non-AI consent at both limits', {skip:!publicTestPort},async()=>{
+    await withPublicRegistry(async(db,store)=>{
+        const account=await store.create('synthetic_logical_tasks','disabled');let sends=0;
+        const server=http.createServer(async(req,res)=>{for await(const _ of req){};res.setHeader('content-type','application/json');
+            if(req.url==='/v1/moderations')return res.end(JSON.stringify({results:[{flagged:false,categories:{}}]}));
+            sends++;res.end(JSON.stringify({id:'synthetic',object:'chat.completion',created:1,model:'synthetic-model',choices:[{index:0,finish_reason:'stop',message:{role:'assistant',content:'Synthetic safe answer'}}]}));});
+        await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+        const base=`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,cfg={...publicTestConfig(),aiLimit:1,backgroundAiLimit:1};
+        cfg.routes=[{provider:'openai',baseUrl:base,recipientIds:['synthetic-ai']}];
+        const p=new PublicAccountPolicy(db,()=>cfg),inbox=new PublicInbox(db,publicTestSecrets);
+        await p.setConsent(account.id,{version:1,consentVersion:cfg.catalog.version,accepted:true,recipientIds:['synthetic-ai']});
+        await db.query('UPDATE kira_accounts SET autonomous_ai_enabled=true WHERE id=$1',[account.id]);
+        const directory=await fs.mkdtemp(path.join(os.tmpdir(),'kira-task-quota-'));
+        const child=fork(path.resolve(__dirname,'fixtures/publicAccountPolicyWorker.ts'),[],{cwd:directory,execArgv:['--require',require.resolve('ts-node/register')],
+            env:{NODE_ENV:'test',PATH:process.env.PATH,KIRA_TENANT_ID:account.id,KIRA_RUNTIME_MODE:'api_only',KIRA_RUNTIME_PRINCIPAL:'-1',
+                KIRA_RUNTIME_DATA_DIR:path.join(directory,'data'),OPENAI_API_KEY:'synthetic',OPENAI_BASE_URL:base,TS_NODE_PROJECT:path.resolve(__dirname,'../tsconfig.server.json'),
+                KIRA_PUBLIC_MODERATION_API_KEY:'synthetic',KIRA_PUBLIC_MODERATION_BASE_URL:base},stdio:['ignore','ignore','ignore','ipc']});
+        attachAccountAuthority(child,account.id,db,p,inbox);
+        try{
+            await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Fixture startup timeout')),15000);child.on('message',(m:any)=>{if(m?.type==='fixture-ready'){clearTimeout(timer);resolve();}});});
+            const call=(action:string,operationId:string,background=false)=>new Promise<any>((resolve,reject)=>{
+                const id=randomUUID(),timer=setTimeout(()=>reject(Error('Fixture timeout')),15000);
+                const receive=(m:any)=>{if(m?.type==='fixture-result'&&m.id===id){clearTimeout(timer);child.off('message',receive);resolve(m);}};
+                child.on('message',receive);child.send({type:'fixture-call',id,action,operationId,background});
+            });
+            assert.equal((await call('background-batch','batch-a',true)).ok,true);assert.equal(sends,3);
+            assert.equal((await p.quota(account.id)).background.used,1);assert.equal((await p.quota(account.id)).dialogue.used,0);
+            assert.equal((await call('background-batch','batch-b',true)).code,'background_quota_exhausted');assert.equal(sends,3);
+            const answer=await call('foreground-optional','request-a');assert.equal(answer.ok,true);assert.equal(answer.optionalCode,'background_quota_exhausted');assert.equal(sends,4);
+            assert.equal((await p.quota(account.id)).dialogue.used,1);
+            const result=await call('reminder','confirmed-non-ai-action');assert.equal(result.ok,true);assert.equal(result.saved,1);assert.equal(result.timers,1);assert.equal(result.memory,0);
+            assert.equal(sends,4);assert.equal((await p.quota(account.id)).dialogue.used,1);
+        }finally{
+            await new Promise<void>(resolve=>{child.once('exit',()=>resolve());child.kill();});server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));
+            await fs.rm(directory,{recursive:true,force:true});
+        }
+    });
+});

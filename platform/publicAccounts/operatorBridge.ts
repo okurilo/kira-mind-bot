@@ -8,10 +8,11 @@ import { consumeReauthentication } from './identities';
 import type { PublicWebConfig } from './webConfig';
 import { equalSecret } from './webCookies';
 import * as v from './validation';
+import type { PublicAccountPolicy } from './policy';
 
 /** The bridge authenticates the operator SERVER, never an end-user role header. */
 export class PublicOperatorBridge {
-    constructor(private db: DataSource, private sessions: PublicSessions, private settings: PublicWebConfig) {}
+    constructor(private db: DataSource, private sessions: PublicSessions, private settings: PublicWebConfig, private policy?: Pick<PublicAccountPolicy, 'quota'>) {}
 
     async authorized(accountId: string): Promise<boolean> {
         if (!this.settings.operatorEnabled) return false;
@@ -55,7 +56,7 @@ export class PublicOperatorBridge {
     }
 
     async route(req: IncomingMessage, path: string, json: (status: number, body: unknown) => void): Promise<boolean> {
-        if (!['/internal/operator/session','/internal/operator/grants'].includes(path)) return false;
+        if (!['/internal/operator/session','/internal/operator/grants','/internal/operator/quota'].includes(path)) return false;
         if (!this.settings.operatorEnabled) throw new ApiError(404, 'not_found', 'Ресурс не найден.');
         const supplied = req.headers['x-kira-operator-bridge'];
         if (typeof supplied !== 'string' || !this.settings.operatorBridgeSecret || !equalSecret(supplied, this.settings.operatorBridgeSecret)) {
@@ -63,7 +64,13 @@ export class PublicOperatorBridge {
         }
         if (req.method !== 'POST') throw new ApiError(405, 'method_not_allowed', 'Недопустимый метод.');
         const body = await readBody(req);
-        if (path === '/internal/operator/session') {
+        if (path === '/internal/operator/quota') {
+            v.fields(body, ['version','accessToken','browserCookie'], ['version','accessToken','browserCookie']); v.version(body);
+            const current = await this.introspect(v.text(body.accessToken, 32, 128), v.text(body.browserCookie, 32, 128));
+            if (!current.authorized || !current.accountId) throw new ApiError(403, 'forbidden', 'Нет доступа к квотам аккаунта.');
+            if (!this.policy) throw new ApiError(503, 'policy_unavailable', 'Квоты временно недоступны.');
+            json(200, { version: 1, quota: await this.policy.quota(current.accountId) });
+        } else if (path === '/internal/operator/session') {
             v.fields(body, ['version','accessToken','browserCookie'], ['version','accessToken','browserCookie']); v.version(body);
             json(200, await this.introspect(v.text(body.accessToken, 32, 128), v.text(body.browserCookie, 32, 128)));
         } else {

@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import { Bot } from 'grammy';
 import { BotContext } from '../types';
 import { ChatGroupRepository } from './ChatGroupRepository';
@@ -62,8 +63,6 @@ async function pollOnce(): Promise<void> {
 
                 if (!newMessages.length) continue;
 
-                lastSeenId.set(key, latestId);
-
                 const recentContext: TrackedMessage[] = sorted
                     .filter((m: any) => m.id <= prevId && m.message?.trim())
                     .slice(-10)
@@ -79,7 +78,8 @@ async function pollOnce(): Promise<void> {
                     date: new Date(m.date * 1000),
                 }));
 
-                const result = await analyzeTrackedMessages(chatName, group.name, incoming, recentContext);
+                const result = await withBackgroundAiTask('tracked-chat', `${key}:${prevId}:${latestId}`, () => analyzeTrackedMessages(chatName, group.name, incoming, recentContext));
+                lastSeenId.set(key, latestId);
                 if (!result?.isImportant) continue;
 
                 const blocks: RichBlock[] = [

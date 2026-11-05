@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import type { BotContext } from '../../types';
+import { withAccountAiOperation } from '../../ai/accountPolicy';
 
 /** Server-derived identity of the operation confirmed by the existing channel callback. */
 export function memoryConfirmationKey(id: string, domain: string): string {
@@ -25,4 +26,10 @@ export function hasPendingRuntimeConfirmation(ctx: BotContext, key: string): boo
 
 export function findPendingRuntimeConfirmation(ctx: BotContext, key: string) {
     return [ctx.session.agentRuntime, ...(ctx.session.agentRuntimePending ?? [])].find(run => run?.status === 'waiting' && run.observations?.some(item => item.status === 'needs_input' && item.confirmationKey === key));
+}
+
+/** Include the confirmed domain step itself, before the kernel resumes its remaining goal. */
+export function withRuntimeConfirmationAiOperation<T>(ctx: BotContext, key: string | undefined, work: () => Promise<T>): Promise<T> {
+    const operation = key ? findPendingRuntimeConfirmation(ctx, key)?.accountAiOperation : undefined;
+    return operation ? withAccountAiOperation(operation, work) : work();
 }

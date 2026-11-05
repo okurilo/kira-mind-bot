@@ -143,6 +143,8 @@ test('account denials retain safe actionable reasons through SDK causes', async 
     const f = fixture(t);
     const cases = [
         ['quota_exhausted', /дневной лимит.*исчерпан/iu], ['consent_required', /согласие/iu],
+        ['dialogue_quota_exhausted', /лимит общения.*исчерпан/iu], ['background_quota_exhausted', /лимит фоновой работы.*исчерпан/iu],
+        ['operation_limit_exceeded', /предела AI-вызовов/iu], ['operation_scope_mismatch', /бюджет продолжения/iu],
         ['activation_required', /активировать/iu], ['account_restricted', /ограничены/iu],
         ['account_deleting', /удаляется/iu], ['autonomous_ai_disabled', /самостоятельные.*выключены/iu],
         ['policy_unavailable', /проверить доступность/iu], ['operation_closed', /уже завершена/iu],

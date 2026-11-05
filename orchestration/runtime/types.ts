@@ -118,6 +118,7 @@ export interface RuntimeReceipt {
 }
 
 export interface RuntimeSessionState {
+    accountAiOperation?: import('../../ai/accountPolicy').AccountAiOperation;
     analyticsTaskId?: string;
     version: 1;
     runId: string;

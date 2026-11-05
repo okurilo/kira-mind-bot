@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 /**
  * Memory Insight Scheduler
  *
@@ -249,9 +250,10 @@ async function runCycle(bot: Bot<BotContext>): Promise<void> {
 
         // Достаём userId из конфига (allowedUserId — единственный пользователь)
         const userId = String(config.allowedUserId);
-        const memories = await gatherRelevantMemories(userId);
-
-        const decision = await decideInsight(memories, dayCtx);
+        const { memories, decision } = await withBackgroundAiTask('memory-insight', String(Date.now()), async () => {
+            const memories = await gatherRelevantMemories(userId);
+            return { memories, decision: await decideInsight(memories, dayCtx) };
+        });
         if (!decision.shouldSend) {
             console.log('[memory-insight] No relevant insight to send at this time.');
             return;

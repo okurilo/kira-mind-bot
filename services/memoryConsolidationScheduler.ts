@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import { runMemoryConsolidationForUser } from './MemoryConsolidationService';
 import { runMemorySchemaConsolidationForUser } from './MemorySchemaConsolidationService';
 import { runMemorySleepCycleForUser } from './MemorySleepCycleService';
@@ -16,6 +17,7 @@ async function runCycle(): Promise<void> {
     try {
         if (!await isBackgroundFeatureEnabled('memoryConsolidation')) return;
         const userId = String(config.allowedUserId);
+        await withBackgroundAiTask('memory-maintenance', String(Date.now()), async () => {
         const result = await runMemoryConsolidationForUser(userId, {
             minFacts: config.memoryConsolidationMinFacts,
             limit: 600,
@@ -36,6 +38,7 @@ async function runCycle(): Promise<void> {
             skipped: result.skipped,
             sleep,
             schemas,
+        });
         });
     } catch (error) {
         console.error('[memory-consolidation] cycle failed:', error);

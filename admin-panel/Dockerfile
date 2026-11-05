@@ -5,6 +5,7 @@ COPY admin-panel/package.json admin-panel/package-lock.json* ./
 RUN npm install
 COPY admin-panel ./
 COPY ai ../ai
+COPY platform/publicAccounts/contracts.ts ../platform/publicAccounts/contracts.ts
 RUN npm run build
 
 # Stage 2: Production server

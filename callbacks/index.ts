@@ -55,7 +55,7 @@ import { getBotGenderedText } from "../persona";
 import { saveRemindersFromResult as saveSharedRemindersFromResult } from '../handlers/shared';
 import { sendResultToUser } from '../handlers/shared';
 import { continueConfirmedRuntime, cancelRuntimeContinuation, replaceRuntimeConfirmation, mergeRuntimeResults } from '../orchestration/runtime/kernel';
-import { contactMemoryConfirmationKey, browserConfirmationKey, telegramPeriodConfirmationKey, hasPendingRuntimeConfirmation, findPendingRuntimeConfirmation, CONTACT_MEMORY_PARENT_TOOLS } from '../orchestration/runtime/confirmation';
+import { contactMemoryConfirmationKey, browserConfirmationKey, telegramPeriodConfirmationKey, hasPendingRuntimeConfirmation, findPendingRuntimeConfirmation, withRuntimeConfirmationAiOperation, CONTACT_MEMORY_PARENT_TOOLS } from '../orchestration/runtime/confirmation';
 import {
     buildReminderAssistanceRequest,
     getReminderAssistanceKnowledgeSourceText,
@@ -250,7 +250,7 @@ export function registerCallback(bot: Bot<BotContext>): void {
             const contactMemoryKey = contactMemoryConfirmationKey(ctx);
             let contactMemorySaved: string | undefined;
             let contactMemoryCancelled = false;
-            if (await handleContactMemoryCallback(ctx, callbackData, summary => { contactMemorySaved = summary; }, () => { contactMemoryCancelled = true; })) {
+            if (await withRuntimeConfirmationAiOperation(ctx, contactMemoryKey, () => handleContactMemoryCallback(ctx, callbackData, summary => { contactMemorySaved = summary; }, () => { contactMemoryCancelled = true; }))) {
                 if (contactMemorySaved && contactMemoryKey) {
                     const remaining = await continueConfirmedRuntime(ctx, CONTACT_MEMORY_PARENT_TOOLS, contactMemorySaved, {}, contactMemoryKey);
                     if (remaining) await sendResultToUser(ctx, remaining);
@@ -856,7 +856,7 @@ export function registerCallback(bot: Bot<BotContext>): void {
 
                 const confirmationKey = telegramPeriodConfirmationKey('chat-analysis', requestId);
                 if (hasPendingRuntimeConfirmation(ctx, confirmationKey)) ctx.suppressAgentProgress = true;
-                const result = await handleChatAnalysisPeriodCallback(ctx, period, requestId);
+                const result = await withRuntimeConfirmationAiOperation(ctx, confirmationKey, () => handleChatAnalysisPeriodCallback(ctx, period, requestId));
                 if (result.operationStatus === 'ok') {
                     const remaining = await continueConfirmedRuntime(ctx, ['telegram.readMessages'], result.responseText, {}, confirmationKey);
                     if (remaining) { await sendResultToUser(ctx, mergeRuntimeResults([result, remaining])); return; }
@@ -942,7 +942,7 @@ export function registerCallback(bot: Bot<BotContext>): void {
 
                 const confirmationKey = requestId ? telegramPeriodConfirmationKey('study-chat', requestId) : undefined;
                 if (confirmationKey && hasPendingRuntimeConfirmation(ctx, confirmationKey)) ctx.suppressAgentProgress = true;
-                const studyResult = await handleStudyChatPeriodCallback(ctx, period, requestId);
+                const studyResult = await withRuntimeConfirmationAiOperation(ctx, confirmationKey, () => handleStudyChatPeriodCallback(ctx, period, requestId));
                 const { responseText } = studyResult;
                 if (studyResult.operationStatus === 'ok') {
                     const remaining = confirmationKey ? await continueConfirmedRuntime(ctx, ['telegram.readMessages'], responseText, {}, confirmationKey) : undefined;

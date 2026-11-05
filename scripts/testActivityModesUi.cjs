@@ -41,13 +41,17 @@ async function run(harness) {
         telegram:{personalSessionConfigured:false},features:buildFeatureStates(preferences,budget,false)});
       const context=await browser.newContext({viewport:{width:1100,height:950}});
       const origin='https://synthetic.example.invalid';
+      const counter=(limit,used)=>({limit,used,reserved:0,remaining:limit-used});
+      let quota={day:'2037-01-01',resetAt:'2037-01-02T00:00:00Z',dialogue:counter(20,3),background:counter(60,60),images:counter(1,0),legacyAi:{used:7,reserved:0}};
+      let quotaFailure=false;
       await context.route('**/*', async route=>{
         const request=route.request(),url=new URL(request.url()),endpoint=url.pathname;
         const json=(body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
         if(url.origin!==origin)return route.abort();
         if(endpoint==='/api/auth/context')return json({csrfEnabled:true,csrfToken:'synthetic-csrf'});
         if(endpoint==='/api/v1/web/config')return json({csrfToken:'synthetic-csrf',hasBrowserSession:true,providers:[]});
-        if(endpoint==='/api/v1/web/session'){if(holdSession){holdSession=false;await new Promise(resolve=>{releaseSession=resolve;});}return json({account:{id:'11111111-1111-4111-8111-111111111111',username:'synthetic_account',runtimeState:'ready',autonomousAiEnabled:true,consent:{aiAllowed:true}}});}
+        if(endpoint==='/api/v1/web/session'){if(holdSession){holdSession=false;await new Promise(resolve=>{releaseSession=resolve;});}return json({account:{id:'11111111-1111-4111-8111-111111111111',username:'synthetic_account',runtimeState:'ready',autonomousAiEnabled:true,consent:{aiAllowed:true},quota}});}
+        if(['/api/account-quota','/api/v1/web/api/account/quota'].includes(endpoint))return quotaFailure?json({error:kind==='portal'?{message:'Синтетическая ошибка квот'}:'Синтетическая ошибка квот'},503):json({available:true,version:1,quota});
         if(endpoint==='/api/v1/web/auth/pending')return json({pending:null});
         if(['/api/background-features','/api/v1/web/api/settings'].includes(endpoint)) {
           if(request.method()==='GET')return failRead?json({error:kind==='portal'?{message:'Синтетическая ошибка чтения'}:'Синтетическая ошибка чтения'},503):json(snapshot());
@@ -72,7 +76,16 @@ async function run(harness) {
       const current=title=>page.getByText('Сейчас: '+title,{exact:true}).waitFor();
       try {
         await open();assert.equal(writes.length,0);await current('По моей инициативе');if(kind==='admin')assert.equal(await page.getByRole('button',{name:'Применить режим',exact:true}).isDisabled(),true);
+        await page.locator('[data-quota="dialogue"]').getByText('Осталось 17 из 20',{exact:true}).waitFor();
+        await page.locator('[data-quota="background"]').getByText('Новые фоновые задачи на паузе',{exact:true}).waitFor();
         await page.getByRole('radio',{name:'Помнит важное',exact:true}).check();assert.equal(writes.length,0,'a draft never saves itself');
+        quota={...quota,dialogue:counter(20,20),background:counter(60,10)};
+        await page.getByRole('button',{name:'Обновить квоты',exact:true}).click();
+        await page.locator('[data-quota="background"]').getByText('Осталось 50 из 60',{exact:true}).waitFor();
+        assert.equal(await page.getByRole('radio',{name:'Помнит важное',exact:true}).isChecked(),true,'refreshing quotas preserves the unsaved activity draft');
+        quotaFailure=true;await page.getByRole('button',{name:'Обновить квоты',exact:true}).click();await page.getByText('Синтетическая ошибка квот',{exact:true}).waitFor();
+        assert.equal(await page.getByRole('radio',{name:'Помнит важное',exact:true}).isChecked(),true);
+        quotaFailure=false;await page.getByRole('button',{name:'Обновить квоты',exact:true}).click();await page.locator('[data-quota="background"]').getByText('Осталось 50 из 60',{exact:true}).waitFor();
         if(kind==='portal')holdSession=true;
         await save();
         if(kind==='portal'){

@@ -164,6 +164,13 @@ test('operator requires explicit exact-account proof and password, rechecks cano
             assert.equal((await c.call('/operator/api/config')).status,401,'transport/role alone does not establish local operator intent');
             assert.equal((await c.call('/operator/api/operator/login-account',{})).status,200);
             assert.equal((await c.call('/operator/api/config')).data.globalOperatorOnly,true);
+            const today=new Date().toISOString().slice(0,10);
+            await db.query(`INSERT INTO kira_public_quota(account_id,day,dialogue_used,background_used) VALUES($1,$3,2,60),($2,$3,7,4)`,[a.id,b.id,today]);
+            const quota=await c.call('/operator/api/account-quota');assert.equal(quota.status,200);
+            assert.equal(quota.data.quota.dialogue.used,2);assert.equal(quota.data.quota.background.remaining,0);
+            assert.equal((await c.web('api/account/quota')).data.quota.dialogue.used,2);
+            assert.equal((await other.call('/operator/api/account-quota')).status,401);
+            assert.equal((await c.call('/operator/api/account-quota?accountId='+b.id)).status,400,'query identity cannot select another account');
             const access=c.value(h.cookieNames.access), [session]=await db.query('SELECT * FROM kira_public_sessions WHERE access_hash=$1',[digest(access)]);
             await db.query("UPDATE kira_public_sessions SET access_expires_at=now()-interval '1 second' WHERE id=$1",[session.id]);c.cookies.delete(h.cookieNames.access);
             assert.equal((await c.call('/operator/api/config')).status,401);
@@ -173,6 +180,7 @@ test('operator requires explicit exact-account proof and password, rechecks cano
             await c.call('/operator/api/logout',{});assert.equal((await c.web('session')).data.account.id,a.id);
             await c.call('/operator/api/auth/context');await c.call('/operator/api/operator/login-account',{});
             await h.accounts.sessions.logout(a.id,session.id);assert.equal((await c.call('/operator/api/config')).status,401);
+            assert.equal((await c.call('/operator/api/account-quota')).status,401);
             assert.equal((await other.web('session')).data.account.id,b.id);
             // The old private operator password remains independent of central availability.
             const privateClient = new WebTestClient(h.operatorBase,'192.0.2.99');const privateContext=await privateClient.call('/api/auth/context');

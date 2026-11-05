@@ -1,3 +1,4 @@
+import { withBackgroundAiTask, backgroundQuotaError } from '../ai/accountPolicy';
 import { generatedImageInput, generatedImageHistoryText } from "../utils/generatedImage";
 import fs from "fs";
 import path from "path";
@@ -262,6 +263,7 @@ export async function executeRecurringTask(
     }, LOCK_HEARTBEAT_MS);
     heartbeat.unref?.();
     try {
+        await withBackgroundAiTask('recurring-task', `${task.id}:${scheduledFor.toISOString()}`, async () => {
         const ctx = await buildBackgroundContext(bot, task);
         const executionPrompt = normalizeRecurringExecutionPrompt(task.prompt);
         const result = await processMessage(
@@ -312,7 +314,14 @@ export async function executeRecurringTask(
             runCount: task.runCount + 1,
         });
         console.info(`[recurring-task] event=completed id=${task.id} next=${nextRunAt.toISOString()}`);
+        });
     } catch (cause) {
+        if (backgroundQuotaError(cause)) {
+            const now = new Date();
+            await RecurringTaskRepository.update(task.id, { lockedAt: null as any,
+                nextRunAt: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)) }, task.chatId);
+            return;
+        }
         const runtimeFailure = cause instanceof RuntimeExecutionFailure ? cause.result : undefined;
         const error = runtimeFailure ? runtimeFailure.responseText : cause instanceof Error ? cause.message : String(cause);
         const consecutiveFailures = task.consecutiveFailures + 1;

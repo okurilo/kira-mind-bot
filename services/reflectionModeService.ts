@@ -51,6 +51,7 @@ import { sendDaytimeReflection } from './inboxGuardianScheduler';
 import { USER_TIMEZONE } from '../constants';
 import { reflectionPrescreenMessages, normalizeReminderReview, type TelegramReminderReview } from '../ai/telegramReminderReview';
 import { telegramReminderProposals } from './telegramReminderProposals';
+import { backgroundAiTaskId, withAccountAiTask, withBackgroundAiTask, accountPolicyError } from '../ai/accountPolicy';
 
 // ── Настройки ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ function formatBufferedMessage(message: BufferedMessage): string {
 }
 
 interface ChatBuffer {
+    accountAiTaskId?: string;
     chatTitle: string;
     messages: BufferedMessage[];
     /** Когда в последний раз запускался processBuffers для этого чата */
@@ -257,6 +259,7 @@ export async function queueMessage(
     }
 
     const buf = chatBuffers.get(chatId)!;
+    if (!buf.messages.length) buf.accountAiTaskId = backgroundAiTaskId('reflection', `${chatId}:${messageId ?? date.getTime()}`);
     // Имя чата берём от собеседника, не от себя
     if (!isOwn) buf.chatTitle = senderName;
     buf.lastMessageAt = date;
@@ -299,12 +302,13 @@ async function triageForHighPriority(chatId: string, senderName: string, text: s
     if (!await isBackgroundFeatureEnabled('reflection')) return;
     const buf = chatBuffers.get(chatId);
     if (!buf || buf.highPriority) return;
+    const taskId = buf.accountAiTaskId!;
 
     try {
-        if (await needsPriorityReflection(senderName, text)) {
+        if (await withAccountAiTask({ id: taskId, background: true }, () => needsPriorityReflection(senderName, text))) {
             // Перепроверяем — буфер мог быть уже обработан пока шёл запрос
             const currentBuf = chatBuffers.get(chatId);
-            if (currentBuf === buf && await isBackgroundFeatureEnabled('reflection')) {
+            if (currentBuf === buf && currentBuf.accountAiTaskId === taskId && await isBackgroundFeatureEnabled('reflection')) {
                 currentBuf.highPriority = true;
                 devLog('[reflection] AI triage: high-priority buffer');
             }
@@ -384,14 +388,19 @@ export async function processBuffers(bot: Bot<BotContext>): Promise<void> {
             continue;
         }
 
-        const batch = [...buf.messages];
-        const criticalSignal = buf.highPriority;
-        buf.messages = [];
-        buf.lastAnalyzedAt = new Date();
-        buf.enqueuedAt = new Date();
-        buf.highPriority = false;
-
-        await analyzeBatch(bot, chatId, buf, batch, criticalSignal);
+        try {
+            await withAccountAiTask({ id: buf.accountAiTaskId!, background: true }, async () => {
+                // Reserve before draining: an exhausted background pool leaves
+                // the source batch and its receipt intact for the next poll.
+                const batch = [...buf.messages], criticalSignal = buf.highPriority;
+                buf.messages = []; buf.accountAiTaskId = undefined;
+                buf.lastAnalyzedAt = new Date(); buf.enqueuedAt = new Date(); buf.highPriority = false;
+                await analyzeBatch(bot, chatId, buf, batch, criticalSignal);
+            });
+        } catch (error) {
+            if (accountPolicyError(error)) break;
+            throw error;
+        }
     }
 }
 
@@ -981,14 +990,14 @@ async function analyzeBatch(
         devLog(`[reflection] Saved ${savedCount} facts from "${buf.chatTitle}"`);
 
         if (savedCount > 0 && await isBackgroundFeatureEnabled('memoryConsolidation')) {
-            Promise.allSettled([
+            withBackgroundAiTask('reflection-maintenance', `${chatId}:${endDate.toISOString()}`, () => Promise.allSettled([
                 runMemorySchemaConsolidationForUser(String(config.allowedUserId), {
                     minSources: Math.max(config.memoryConsolidationMinFacts, 12),
                     limit: 800,
                     periodDays: 240,
                 }),
                 runMemorySleepCycleForUser(String(config.allowedUserId)),
-            ]).catch(() => { /* best-effort */ });
+            ])).catch(() => { /* best-effort */ });
         }
 
         // Reflection наполняет память молча. Пользовательская интерпретация

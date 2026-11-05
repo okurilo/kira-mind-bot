@@ -36,7 +36,7 @@ export class PublicWebHttp {
     constructor(private owner: PublicAccountsHttp, db: DataSource, store: AccountStore, secrets: PlatformSecrets,
         readonly settings: PublicWebConfig, dependencies: WebAuthDependencies = {}) {
         this.auth = new PublicWebAuth(db, store, secrets, owner.sessions, owner.config, owner.limits, settings, account => owner.view(account), dependencies);
-        this.operator = new PublicOperatorBridge(db, owner.sessions, settings);
+        this.operator = new PublicOperatorBridge(db, owner.sessions, settings, owner.policy);
     }
 
     private security(res: ServerResponse): void {

@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import { Bot } from "grammy";
 import { BotContext } from "../types";
 import { config } from "../config";
@@ -430,7 +431,7 @@ async function runInnerDevelopmentCycle(): Promise<void> {
       return;
     }
 
-    await maybeGenerateLifeEvent("inner");
+    await withBackgroundAiTask('kira-inner', String(Date.now()), () => maybeGenerateLifeEvent("inner"));
     lastInnerDevelopmentAt = Date.now();
     await saveLastInnerDevelopmentAt(lastInnerDevelopmentAt);
   } catch (error) {
@@ -464,8 +465,8 @@ async function runProactiveCycle(bot: Bot<BotContext>): Promise<void> {
       return;
     }
 
-    const generatedEvent = await maybeGenerateLifeEvent("proactive");
-    const proactive = await buildProactiveMessage(generatedEvent);
+    const proactive = await withBackgroundAiTask('kira-life', String(Date.now()), async () =>
+      buildProactiveMessage(await maybeGenerateLifeEvent("proactive")));
 
     const chatId = await getProactiveChatId();
     const sent = await (await import('./productAnalytics')).sendProactiveWithAnalytics(bot, chatId, proactive.message, 'conversation');

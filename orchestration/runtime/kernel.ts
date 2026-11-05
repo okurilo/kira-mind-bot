@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import { AI_CONTENT_SAFETY_REPLY, isAiContentSafetyError } from '../../ai/contentSafety';
-import { accountPolicyReply } from '../../ai/accountPolicy';
+import { accountPolicyReply, currentAccountAiOperation, withAccountAiOperation } from '../../ai/accountPolicy';
 import { looksLikeIndependentRequest } from '../../utils/continuationInput';
 import { continueTelegramProfileLookup, telegramProfileCandidates } from '../../services/telegramProfileService';
 import { createJsonChatCompletionForTask } from '../../ai/chatCompletion';
@@ -230,6 +230,11 @@ function fastCalls(input: KiraRuntimeInput): RuntimeToolCall[] | undefined {
 }
 
 export async function runKiraRuntime(input: KiraRuntimeInput, dependencies: RuntimeDependencies = {}): Promise<ProcessingResult> {
+    const original = dependencies.continuation?.accountAiOperation;
+    return original ? withAccountAiOperation(original, () => runKiraRuntimeInternal(input, dependencies)) : runKiraRuntimeInternal(input, dependencies);
+}
+
+async function runKiraRuntimeInternal(input: KiraRuntimeInput, dependencies: RuntimeDependencies): Promise<ProcessingResult> {
     await continueAnalyticsTask(input.ctx, dependencies.continuation?.analyticsTaskId);
     await observeClassification(input.ctx, input.classification);
     const respond = dependencies.respond ?? (async (value, memoryContext, toolSynthesis) => conversationAgent(value.ctx, value.message, value.isForwarded, value.forwardFrom, value.messageHistory, value.classification, { domain: 'personal', context: memoryContext, recall: value.memoryRecall, allowSideEffects: false, allowSelfEvolution: !toolSynthesis && !value.readOnly }));
@@ -262,7 +267,7 @@ export async function runKiraRuntime(input: KiraRuntimeInput, dependencies: Runt
         return { responseText: uncertain ? 'Этот запрос уже начал выполняться, но результат части действий неизвестен. Я не повторяла их автоматически.'
             : previous.receipts.map(receipt => receipt.summary).filter(Boolean).join('\n\n') || 'Этот запрос уже обработан; действия не повторялись.', operationStatus: uncertain ? 'unknown' : previous.status === 'waiting' ? 'needs_input' : previous.status === 'failed' ? 'failed' : 'ok', skipOptionalFollowups: true };
     }
-    const state: RuntimeSessionState = { version: 1, analyticsTaskId: continuation?.analyticsTaskId ?? input.ctx.productAnalytics?.id, runId: continuation?.runId ?? randomUUID(), requestKey, startedAt: continuation?.startedAt ?? Date.now(), updatedAt: Date.now(), status: 'running',
+    const state: RuntimeSessionState = { version: 1, accountAiOperation: continuation?.accountAiOperation ?? currentAccountAiOperation(), analyticsTaskId: continuation?.analyticsTaskId ?? input.ctx.productAnalytics?.id, runId: continuation?.runId ?? randomUUID(), requestKey, startedAt: continuation?.startedAt ?? Date.now(), updatedAt: Date.now(), status: 'running',
         receipts: continuation?.receipts.map(receipt => ({ ...receipt })) ?? [], agents: (previous?.agents ?? []).slice(-12), skills: [], toolNames: [], goal: input.message.slice(0, 8000), classification,
         backgroundRun: input.recurringTaskRun, ledgerKey: continuation?.ledgerKey ?? input.ctx.agentRuntimeStorageKey };
     const observations: ToolObservation[] = continuation?.observations?.filter(observation => !input.continuationAnswer || observation.id !== continuation.parameterCall?.id).map(observation => ({ ...observation })) ?? [];

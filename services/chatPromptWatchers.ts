@@ -1,3 +1,4 @@
+import { withBackgroundAiTask } from '../ai/accountPolicy';
 import type { Api } from "grammy";
 import { randomUUID } from "crypto";
 import { createJsonChatCompletionForTask } from "../ai/chatCompletion";
@@ -813,6 +814,7 @@ async function pollChatPromptWatchersOnceImpl(api: Api): Promise<void> {
     const client = await initTelegramClient({ preloadContacts: false });
     if (!client) return;
 
+    await withBackgroundAiTask('chat-watchers', String(Date.now()), async () => {
     const messagesBySource = new Map<string, WatchedChatMessage[]>();
     const rawMessagesBySource = new Map<string, Map<number, any>>();
     const sourceSinceMessageId = new Map<string, number | undefined>();
@@ -896,6 +898,7 @@ async function pollChatPromptWatchersOnceImpl(api: Api): Promise<void> {
         pollWatermarks.set(watcher.id, latestId);
         await updateWatcherReadWatermark(watcher.id, latestId);
     }
+    });
 }
 
 /**

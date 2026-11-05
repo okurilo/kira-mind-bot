@@ -28,6 +28,7 @@ import { config } from '../config';
 import * as orchestrator from '../orchestrator';
 import * as history from '../utils/history';
 import * as reconsolidation from '../services/MemoryReconsolidationService';
+import { currentAccountAiOperation, withAccountAiOperation } from '../ai/accountPolicy';
 
 const originalMode = process.env.KIRA_ORCHESTRATION_MODE;
 process.env.KIRA_ORCHESTRATION_MODE = 'skills';
@@ -74,14 +75,16 @@ test('group analysis connection failure is failed and never resumes the remainin
 
 test('successful actual group callback resumes only its keyed parent and returns both results', async t => {
     const value = ctx(); request(value);
+    value.session.agentRuntime = state('chat-analysis:synthetic-request');
+    value.session.agentRuntime.accountAiOperation = { id: 'synthetic-initial-chat-goal', background: false };
     t.mock.method(persistence, 'persistSessionNow', async () => {});
     t.mock.method(telegram, 'initTelegramClient', async () => ({}) as any);
     t.mock.method(telegram, 'searchGroupByTitle', async () => ({ id: 303, title: 'Группа Сигма' }) as any);
     t.mock.method(studyFlow, 'getMessagesInDateRange', async () => [{ id: 1, message: 'Синтетическое событие', date: 1 }] as any);
-    t.mock.method(completion, 'createChatCompletionForTask', async () => ({ choices: [{ message: { content: 'Сводка Сигма' } }] }) as any);
+    t.mock.method(completion, 'createChatCompletionForTask', async () => { assert.deepEqual(currentAccountAiOperation(), { id: 'synthetic-initial-chat-goal', background: false }); return { choices: [{ message: { content: 'Сводка Сигма' } }] } as any; });
     const resumed = t.mock.method(kernel, 'continueConfirmedRuntime', async (...[_ctx, names, _summary, _deps, key]: Parameters<typeof kernel.continueConfirmedRuntime>) => { assert.deepEqual(names, ['telegram.readMessages']); assert.equal(key, 'chat-analysis:synthetic-request'); return { responseText: 'Напоминание сохранено', operationStatus: 'ok' }; });
     const sent = t.mock.method(shared, 'sendResultToUser', async (...[_ctx, result]: Parameters<typeof shared.sendResultToUser>) => { assert.match(result.responseText, /Сводка Сигма/); assert.match(result.responseText, /Напоминание сохранено/); });
-    await callbackBot(value)('chat_analysis:synthetic-request:week');
+    await withAccountAiOperation({ id: 'synthetic-new-callback', background: false }, () => callbackBot(value)('chat_analysis:synthetic-request:week'));
     assert.equal(resumed.mock.callCount(), 1); assert.equal(sent.mock.callCount(), 1);
 });
 
