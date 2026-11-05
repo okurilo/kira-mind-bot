@@ -330,6 +330,8 @@ test('browser proxy rejects internal and transition networks, even with public-l
 });
 
 test('manager restores paired accounts, waits for readiness, restarts workers and stops them when its database lease is lost', async t => {
+    let now = Date.now();
+    t.mock.method(Date, 'now', () => now);
     const provisions: string[] = [];
     const workoutProvisions: string[] = [];
     t.mock.method(require('../platform/analytics'), 'provisionTenantAnalytics', async (_db: unknown, id: string) => { provisions.push(id); });
@@ -369,10 +371,22 @@ test('manager restores paired accounts, waits for readiness, restarts workers an
         children[0].emit('message', { type: 'kira-ready', port: 12345 });
         assert.equal(manager.endpoint(account).port, 12345);
         await manager.tick(); assert.equal(children.length, 1, 'no second poller for a live runtime');
-        await manager.restart(account.id);
-        await manager.tick(); assert.equal(children.length, 2);
+        now += 40_000; children[0].emit('message', { type: 'kira-heartbeat' });
+        now += 40_000; await manager.tick();
+        assert.equal(children.length, 1, 'healthy async work is not restarted while the event loop sends heartbeats');
+        now += 5001;
+        assert.equal(manager.status(account.id), 'restarting', 'a frozen process cannot claim readiness');
+        assert.throws(() => manager.endpoint(account), /ещё запускается/);
+        await manager.tick(); assert.equal(children.length, 2, 'the frozen worker is replaced without restarting the manager');
+        children[0].emit('message', { type: 'kira-ready', port: 12345 });
+        children[0].emit('message', { type: 'kira-heartbeat' });
+        assert.equal(manager.status(account.id), 'starting', 'late events from the former worker cannot restore ready');
         children[1].emit('message', { type: 'kira-ready', port: 12346 });
         assert.equal(manager.endpoint(account).port, 12346);
+        await manager.restart(account.id);
+        await manager.tick(); assert.equal(children.length, 3);
+        children[2].emit('message', { type: 'kira-ready', port: 12347 });
+        assert.equal(manager.endpoint(account).port, 12347);
         t.mock.method(store, 'configured', async () => { throw new Error('synthetic database lease lost'); });
         await manager.tick();
         assert.equal(fatal, true);

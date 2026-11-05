@@ -34,6 +34,7 @@ import { registerDialogueLifecycle, startDialogueJobScheduler } from './services
 import { initReflectionMode } from "./services/reflectionModeService";
 import { REACTIONS_ENABLED, ALLOWED_REACTIONS } from "./handlers/shared";
 import { isApiOnlyRuntime } from './utils/runtimeIdentity';
+import { startRuntimeHeartbeat } from './services/runtimeHeartbeat';
 
 
 // Загрузка переменных окружения
@@ -41,6 +42,7 @@ console.log('🚀 Запуск Kira Mind Bot...');
 console.log('📁 Рабочая директория:', __dirname);
 
 const bot = createBot();
+startRuntimeHeartbeat();
 setBotRef(bot);
 setBotApi(bot.api);
 console.log('🤖 Бот создан успешно');

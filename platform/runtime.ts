@@ -68,7 +68,8 @@ export function tenantEnvironment(env: NodeJS.ProcessEnv, account: Account, cred
     return child;
 }
 
-type Worker = { child: ChildProcess; port?: number; token: string; state: string; startedAt: number };
+const HEARTBEAT_TIMEOUT_MS = 45_000;
+type Worker = { child: ChildProcess; port?: number; token: string; state: string; startedAt: number; lastHeartbeatAt: number };
 
 export class TenantRuntimeManager implements AccountRuntimes {
     private authority?: {policy:PublicAccountPolicy;inbox:PublicInbox};
@@ -84,10 +85,16 @@ export class TenantRuntimeManager implements AccountRuntimes {
         private telegram: TelegramGateway, private root: string, private env = process.env,
         private fatal?: () => void) {}
 
-    status(id: string): string { return this.workers.get(id)?.state || this.pairingErrors.get(id) || 'waiting'; }
+    status(id: string): string {
+        const worker = this.workers.get(id);
+        return worker && this.unresponsive(worker) ? 'restarting' : worker?.state || this.pairingErrors.get(id) || 'waiting';
+    }
+    private unresponsive(worker: Worker): boolean {
+        return worker.state === 'ready' && Date.now() - worker.lastHeartbeatAt > HEARTBEAT_TIMEOUT_MS;
+    }
     endpoint(account: Account): RuntimeEndpoint {
         const worker = this.workers.get(account.id);
-        if (worker?.state !== 'ready' || !worker.port) throw new ApiError(503, 'kira_starting', 'Кира ещё запускается. Повтори запрос позже.');
+        if (worker?.state !== 'ready' || !worker.port || this.unresponsive(worker)) throw new ApiError(503, 'kira_starting', 'Кира ещё запускается. Повтори запрос позже.');
         return { port: worker.port, token: worker.token };
     }
     start() {
@@ -111,6 +118,12 @@ export class TenantRuntimeManager implements AccountRuntimes {
         finally { this.ticking = false; }
     }
     private async reconcile(account: Account) {
+        const current = this.workers.get(account.id);
+        if (current && this.unresponsive(current)) {
+            current.state = 'restarting';
+            console.error('[accounts] worker heartbeat timed out; restarting runtime');
+            await this.restart(account.id);
+        }
         if (this.workers.has(account.id) || (this.retryAt.get(account.id) || 0) > Date.now()) return;
         const revision = this.revisions.get(account.id);
         try {
@@ -152,14 +165,16 @@ export class TenantRuntimeManager implements AccountRuntimes {
                 cwd: directory, env: workerEnv,
                 execArgv: [], stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
             });
-            const worker: Worker = { child, token: workerEnv.KIRA_API_TOKEN!, state: 'starting', startedAt: Date.now() };
+            const worker: Worker = { child, token: workerEnv.KIRA_API_TOKEN!, state: 'starting', startedAt: Date.now(), lastHeartbeatAt: Date.now() };
             if(this.authority)attachAccountAuthority(child,account.id,this.admin,this.authority.policy,this.authority.inbox);
             this.workers.set(account.id, worker);
             const timeout = setTimeout(() => { child.kill('SIGKILL'); }, 120_000);
             child.on('message', (message: unknown) => {
+                if (this.workers.get(account.id) !== worker) return;
                 const data = message as { type?: string; port?: number };
+                if (data?.type === 'kira-heartbeat') worker.lastHeartbeatAt = Date.now();
                 if (data?.type === 'kira-ready' && Number.isInteger(data.port) && data.port! > 0 && data.port! <= 65535) {
-                    worker.port = data.port; worker.state = 'ready'; clearTimeout(timeout);
+                    worker.port = data.port; worker.state = 'ready'; worker.lastHeartbeatAt = Date.now(); clearTimeout(timeout);
                 }
             });
             const exited = () => {
