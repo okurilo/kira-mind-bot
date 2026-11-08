@@ -21,6 +21,8 @@ test('MCP config validates transports, URLs and operator policy without revealin
     assert.throws(() => parseMcpConfig({ servers: { demo: { ...config().demo, tools: { lookup: 'readOnlyHint' } } } }));
     assert.throws(() => parseMcpConfig(JSON.parse('{"servers":{"__proto__":{}}}')));
     assert.deepEqual(readMcpConfig('/tmp/kira-mcp-nonexistent-synthetic.json'), {});
+    assert.deepEqual(parseMcpConfig({ servers: { demo: { ...config().demo, refreshTools: ['lookup'] } } }).demo.refreshTools, ['lookup']);
+    for (const refreshTools of [['change'], ['missing'], ['lookup', 'lookup'], 'lookup']) assert.throws(() => parseMcpConfig({ servers: { demo: { ...config().demo, refreshTools } } }));
 });
 
 test('local routing catalog exposes only permitted capabilities without connecting to providers', () => {

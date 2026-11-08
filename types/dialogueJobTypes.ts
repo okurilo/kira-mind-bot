@@ -8,7 +8,7 @@ export interface FastReplyDecision {
 }
 export interface DialogueJobInput {
     ui?: { request: import('../generative-ui/contracts').UiRequest; version: string };
-    uiResult?: { ui: import('../generative-ui/contracts').UiPayload | import('../generative-ui/contracts').UiChange; messageId: number };
+    uiResult?: { ui: import('../generative-ui/contracts').UiPayload | import('../generative-ui/contracts').UiChange; messageId: number; uiRefresh?: import('../generative-ui/contracts').UiRefreshMeta };
     accountAiOperation?: import('../ai/accountPolicy').AccountAiOperation;
     analyticsTaskId?: string;
     message: string;

@@ -122,6 +122,18 @@ export function uiExampleFiles(): Record<string, unknown> {
     files['capabilities.json'] = UI_CAPABILITY;
     files['history.json'] = { messages: [{ role: 'assistant', text: 'Учебный план', createdAt: '2041-04-12T19:00:00Z', id: -1001, ui: fixtureSnapshot() },
         { role: 'assistant', text: 'Привет!', createdAt: '2041-04-12T18:59:00Z' }] };
+    const refreshUi = fixtureSnapshot([{ id: 'root', component: 'Metric', label: 'Учебная температура', value: '18 °C' }]);
+    const refreshMeta = { token: 'rf_' + 'a'.repeat(43) + '.0', kind: 'data', asOf: '2041-04-12T19:00:00Z', minIntervalSeconds: 600 };
+    files['refresh/capabilities.json'] = UI_CAPABILITY;
+    files['refresh/turn-with-refresh.json'] = { messages: [{ id: -1001, type: 'text', format: 'plain', text: 'Учебная температура 18 °C.', ui: refreshUi, uiRefresh: refreshMeta }] };
+    const refreshed = structuredClone(refreshUi); (refreshed.messages[0].createSurface.components[0] as any).value = '19 °C';
+    files['refresh/refresh-reply.json'] = { results: [
+        { surfaceId: sid, status: 'updated', ui: refreshed, uiRefresh: { ...refreshMeta, token: 'rf_' + 'a'.repeat(43) + '.1', asOf: '2041-04-12T20:00:00Z' } },
+        { surfaceId: 'kira_22222222222242228222222222222222', status: 'unchanged', uiRefresh: { ...refreshMeta, kind: 'search', minIntervalSeconds: 3600 } },
+        { surfaceId: 'kira_33333333333343338333333333333333', status: 'tooEarly', retryAfterSeconds: 120 },
+        { surfaceId: 'kira_44444444444444448444444444444444', status: 'gone' },
+        { surfaceId: 'kira_55555555555545558555555555555555', status: 'failed' },
+    ] };
     return files;
 }
 if (require.main === module) {

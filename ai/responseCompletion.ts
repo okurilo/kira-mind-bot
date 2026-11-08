@@ -18,6 +18,14 @@ import { assertAiExecutionActive } from './executionScope';
 
 const MAX_PRESET_REFRESHES_PER_REQUEST = 3;
 
+/** One bounded logical provider call, with the usual policy/usage accounting and no fallback/repair loop. */
+export async function createSingleResponseForTask(taskKey: AiTaskKey, params: ResponseCreateParams): Promise<ResponseResult> {
+    const route = await resolveModelForTaskAsync(taskKey);
+    const model = route.candidates ? route.candidates.find(ref => supportsAutomaticResponse(ref, params)) : route.modelRef;
+    if (!model) throw new Error('single_response_route_unavailable');
+    return createResponseWithModel(taskKey, params, route.presetName, model, createAiExecutionTrace().traceId, 1, 'primary');
+}
+
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }

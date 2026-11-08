@@ -277,7 +277,7 @@ export function createExternalApiServer(
             try {
                 // Actions also deduplicate across different client keys: one button may execute only once.
                 // Keep legacy fingerprints for callers without UI. Negotiated UI participates in the receipt.
-                const extensions = ui && (ui.metadata || ui.target || ui.device) ? `ext:${uiRequestFingerprint(ui)}:` : '';
+                const extensions = ui && (ui.metadata || ui.refresh || ui.target || ui.device) ? `ext:${uiRequestFingerprint(ui)}:` : '';
                 const fingerprint = `${deferredDialogue ? 'async:' : ''}${ui ? `ui:${ui.catalogId}:` : ''}${extensions}${values === undefined ? '' : `values:${uiRequestFingerprint(values)}:`}${hash(`${path}:${value}`)}`;
                 const result = await operations.run(`${options.ownerId}:request:${hash(idempotencyKey)}`, fingerprint,
                     () => isAction
@@ -291,9 +291,13 @@ export function createExternalApiServer(
         } catch (error) {
             const safe = error instanceof ApiError ? error
                 : new ApiError(500, 'internal_error', 'Не удалось выполнить запрос.');
+            if (safe.status === 429 && req.url?.split('?')[0] === `${PREFIX}/ui/refresh` && !safe.retryAfterSeconds) {
+                safe.retryAfterSeconds = Number(res.getHeader('Retry-After')) || 60;
+            }
+            if (safe.retryAfterSeconds) res.setHeader('Retry-After', String(safe.retryAfterSeconds));
             if (!(error instanceof ApiError)) console.error(`[external-api] request=${requestId} failed`);
             if (!res.headersSent && !res.destroyed) {
-                json(safe.status, { error: { code: safe.code, message: safe.message }, requestId,
+                json(safe.status, { error: { code: safe.code, message: safe.message, ...(safe.retryAfterSeconds ? { retryAfterSeconds: safe.retryAfterSeconds } : {}) }, requestId,
                     ...(error instanceof CommunicationProfileConflict ? { profile: error.profile } : {}) });
             }
         }

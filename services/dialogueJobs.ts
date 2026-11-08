@@ -16,6 +16,7 @@ import { runKiraRuntime } from '../orchestration/runtime/kernel';
 import { appendPersistedHistory } from './SessionStorage';
 import { recordDeferredOutcome } from './productAnalytics';
 import { composeDialogueUi } from '../generative-ui/dialogue';
+import { withUiRefreshCapture } from '../generative-ui/refreshEvidence';
 
 const active = new Map<string, AbortController>();
 const MAX_CONCURRENT = 2;
@@ -30,7 +31,8 @@ export function publicDialogueJob(job: DialogueJob) {
     return { id: job.id, turnId: job.turnId, messageId: job.messageId, status: job.status, phase: job.phase,
         required: job.input.required, notice: job.notice ?? undefined, result: job.resultText ?? undefined,
         error: job.error ?? undefined, createdAt: job.createdAt, updatedAt: job.updatedAt,
-        ...(job.input.uiResult ? { ui: job.input.uiResult.ui, uiMessageId: job.input.uiResult.messageId } : {}) };
+        ...(job.input.uiResult ? { ui: job.input.uiResult.ui, uiMessageId: job.input.uiResult.messageId,
+            ...(job.input.uiResult.uiRefresh ? { uiRefresh: job.input.uiResult.uiRefresh } : {}) } : {}) };
 }
 
 /** Register before commands as well as text: any new user turn supersedes older analysis in this channel. */
@@ -156,13 +158,14 @@ export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob,
             await send(job, job.resultText || 'Не удалось завершить разбор. Повтори вопрос, если он ещё актуален.', false);
             if (!job.channel.startsWith('api:')) await recordDeferredOutcome(job.input.analyticsTaskId, job.userId, job.error ? 'failed' : 'delivered', true);
             if (job.channel.startsWith('api:') && job.resultText) await appendPersistedHistory(job.channel, 'bot', job.resultText,
-                job.input.uiResult && 'createSurface' in job.input.uiResult.ui.messages[0] ? { ui: job.input.uiResult.ui as import('../generative-ui/contracts').UiPayload, apiMessageId: job.input.uiResult.messageId } : {});
+                job.input.uiResult && 'createSurface' in job.input.uiResult.ui.messages[0] ? { ui: job.input.uiResult.ui as import('../generative-ui/contracts').UiPayload, apiMessageId: job.input.uiResult.messageId,
+                    ...(job.input.uiResult.uiRefresh ? { uiRefresh: job.input.uiResult.uiRefresh } : {}) } : {});
             await repository.update(job, { status: 'completed' });
             return;
         }
         const operation = job.input.required && job.input.accountAiOperation ? job.input.accountAiOperation
             : { id: job.input.required ? `dialogue:${job.id}` : backgroundAiTaskId('dialogue-review', job.id), background: !job.input.required };
-        await withAccountAiTask(operation,()=>runWithChannelPreset(job.input.preset, () => runWithModelPolicy(job.input.modelPolicy ?? null, async () => {
+        await withUiRefreshCapture(job.input.ui?.request.refresh === true, () => withAccountAiTask(operation,()=>runWithChannelPreset(job.input.preset, () => runWithModelPolicy(job.input.modelPolicy ?? null, async () => {
             if (job.phase === 'review') {
                 const decision = await (deps.review ?? review)(job);
                 if (!await valid()) return;
@@ -189,7 +192,7 @@ export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob,
             if (!await valid()) return;
             await repository.update(job, { status: 'ready', phase: 'deep', resultText: result.answer,
                 ...(uiResult ? { input: { ...job.input, uiResult } } : {}) });
-        })));
+        }))));
     } catch (error) {
         if (backgroundQuotaError(error) && !job.input.required) {
             await repository.update(job, { status: 'cancelled', error: 'background_quota_exhausted', lockedAt: null as any });

@@ -41,6 +41,9 @@ import { isApiOnlyRuntime } from '../utils/runtimeIdentity';
 import { UI_CAPABILITY, UI_CATALOG_V2, type UiRequest, type UiValues, type UiPlacement } from '../generative-ui/contracts';
 import { composeUi } from '../generative-ui/compose';
 import { UiService } from '../generative-ui/service';
+import { uiCapability } from '../generative-ui/contracts';
+import { withUiRefreshCapture, uiRefreshEvidence } from '../generative-ui/refreshEvidence';
+import type { RefreshRecipe } from '../generative-ui/refreshTemplate';
 import { UiHttpApi } from './ui';
 import { submissionText, validateSubmission } from '../generative-ui/forms';
 
@@ -94,7 +97,7 @@ export class BotApiBackend implements ApiBackend {
         const vision: VisionRoute = await this.photoRoute().catch((error: unknown) => ({ available: false,
             reason: error instanceof ApiError ? error.message : 'Не удалось определить модель для анализа фото.' }));
         return { input: ['text', 'actions', 'photo'], photo: { mime: ['image/jpeg'], maxBytes: MAX_PHOTO_BYTES, vision, notes: PHOTO_STORAGE_NOTE }, output: ['text', 'photo', 'document', 'voice'],
-            generativeUi: UI_CAPABILITY, browserSession: this.browserSession.capability, commerce: { version: 1, services: commerceCatalog() }, workouts: this.workouts.capability, profile: { communication: COMMUNICATION_CAPABILITY }, settings: ['modelMode', 'modelPreferences'], scene: { version: 1 }, deferredDialogue: { preference: 'respond-async', results: '/api/v1/dialogue-jobs', cancellation: true }, capabilities: BOT_CAPABILITIES };
+            generativeUi: uiCapability(), browserSession: this.browserSession.capability, commerce: { version: 1, services: commerceCatalog() }, workouts: this.workouts.capability, profile: { communication: COMMUNICATION_CAPABILITY }, settings: ['modelMode', 'modelPreferences'], scene: { version: 1 }, deferredDialogue: { preference: 'respond-async', results: '/api/v1/dialogue-jobs', cancellation: true }, capabilities: BOT_CAPABILITIES };
     }
 
     settings() { return readUserSettings(); }
@@ -134,12 +137,12 @@ export class BotApiBackend implements ApiBackend {
         const session = await this.storage.read(this.sessionKey);
         return { messages: await Promise.all((session?.messageHistory ?? []).slice(0, limit).reverse().map(async item => {
             let ui = item.ui;
-            if (ui?.catalogId === UI_CATALOG_V2) {
+            if (ui?.catalogId === UI_CATALOG_V2 && !item.uiRefresh) {
                 const surface = await this.widgets.surface(ui.messages[0].createSurface.surfaceId).catch(() => undefined);
                 ui = surface && !surface.deleted ? surface.ui : undefined;
             }
             return { role: item.role === 'bot' ? 'assistant' : item.role, text: item.content, createdAt: item.timestamp.toISOString(),
-                ...(ui ? { ui } : {}), ...(item.apiMessageId ? { id: item.apiMessageId } : {}) };
+                ...(ui ? { ui, ...(item.uiRefresh ? { uiRefresh: item.uiRefresh } : {}) } : {}), ...(item.apiMessageId ? { id: item.apiMessageId } : {}) };
         })) };
     }
 
@@ -270,16 +273,18 @@ export class BotApiBackend implements ApiBackend {
         let widgetPlacement: UiPlacement | undefined;
         // The app's own text mode, read once per turn; null follows the server's global preset.
         const preset = selectedPreset === undefined ? await apiTurnPreset(this.models) : selectedPreset;
-        await runWithChannelPreset(preset, async () => {
+        await withUiRefreshCapture(ui?.refresh === true, () => runWithChannelPreset(preset, async () => {
             await this.dispatcher.middleware()(ctx, async () => {});
             if (ui && !ctx.dialogueJobId) {
                 const message = transport.result().messages.filter(item => item.type === 'text' && item.text && item.replacesMessageId === undefined).at(-1);
                 if (message) {
                     const fileIds = new Set(transport.result().messages.filter(m => m.type === 'photo' || /\.(png|jpe?g|gif|webp)$/i.test(m.filename ?? ''))
                         .flatMap(m => m.fileUrl?.match(/^\/api\/v1\/files\/([a-f0-9-]{36})$/)?.[1] ?? []));
+                    let refreshRecipe: RefreshRecipe | undefined;
                     const payload = await composeUi(update.message?.text ?? update.message?.caption ?? '', message,
                         text => this.actions.sign(message.id, `ui.reply:${text}`, message.text ?? '', version), undefined, {
                             request: ui, files: fileIds, sceneObjects: arRoom?.uiObjects,
+                            refreshSources: uiRefreshEvidence(), onRefreshRecipe: value => { refreshRecipe = value; },
                             onPlacement: value => { widgetPlacement = value; },
                             submitToken: (text, fields) => this.actions.sign(message.id, 'ui.submit:' + JSON.stringify({ text, fields }), message.text ?? '', version),
                         });
@@ -288,9 +293,10 @@ export class BotApiBackend implements ApiBackend {
                             if (ui.target) { await this.widgets.update(ui.target.surfaceId, ui.target.revision, payload); widgetPlacement = undefined; }
                             else {
                                 await this.widgets.record(payload, message.id, ui); message.ui = payload;
+                                message.uiRefresh = await this.widgets.refresh.register(payload, refreshRecipe, ui).catch(() => undefined);
                                 const historyEntry = ctx.session.messageHistory.find(item => !priorHistory.has(item) && item.role === 'bot' && item.content === message.text);
-                                if (historyEntry) { historyEntry.ui = payload; historyEntry.apiMessageId = message.id; }
-                                else ctx.session.messageHistory.unshift({ role: 'bot', content: message.text!, timestamp: new Date(), ui: payload, apiMessageId: message.id });
+                                if (historyEntry) { historyEntry.ui = payload; historyEntry.apiMessageId = message.id; historyEntry.uiRefresh = message.uiRefresh; }
+                                else ctx.session.messageHistory.unshift({ role: 'bot', content: message.text!, timestamp: new Date(), ui: payload, apiMessageId: message.id, uiRefresh: message.uiRefresh });
                             }
                         } catch { widgetPlacement = undefined; /* Optional visual persistence cannot discard a completed answer. */ }
                     }
@@ -298,10 +304,10 @@ export class BotApiBackend implements ApiBackend {
                 // Bound presentation storage independently of text history. Existing session merge/JSON handles it.
                 let retained = 0;
                 for (const item of ctx.session.messageHistory) if (item.ui && ++retained > 20) {
-                    delete item.ui; delete item.apiMessageId;
+                    delete item.ui; delete item.apiMessageId; delete item.uiRefresh;
                 }
             }
-        });
+        }));
         await this.storage.write(this.sessionKey, ctx.session);
         if (ctx.dialogueJobId) await activateDialogueJob(ctx, ctx.dialogueJobId);
         const result = transport.result();

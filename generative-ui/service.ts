@@ -4,6 +4,7 @@ import { UI_CATALOG_ID, UI_CATALOG_V2, type UiPayload, type UiChange, type UiReq
 import { plainObject, onlyKeys, uiString } from './forms';
 import { validateUiPayload } from './validate';
 import { PgUiStore, type UiStore, type UiTransaction } from './store';
+import { UiRefreshService, type RefreshDependencies } from './refresh';
 
 const SURFACE = /^kira_[a-f0-9]{32}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -13,6 +14,7 @@ export interface UiDevice {
 export interface UiSurface {
     surfaceId: string; messageId: number; ui: UiPayload; request: UiRequest; revision: number;
     updatedAt: number; createdAt: number; deleted: boolean;
+    dataAsOf?: string;
 }
 export interface UiEvent {
     seq: number; kind: 'widget-note' | 'ui-update'; createdAt: string; deviceId?: string; bindingId?: string;
@@ -34,7 +36,9 @@ export function parseFeedback(value: unknown): UiFeedback {
 }
 const hash = (v: string) => createHash('sha256').update(v).digest('hex');
 export class UiService {
-    constructor(readonly owner: number, private store: UiStore = new PgUiStore(), private now = () => Date.now()) {}
+    private refresher?: UiRefreshService;
+    get refresh() { return this.refresher ??= new UiRefreshService(this.owner, this.store, this.now, this.refreshDeps); }
+    constructor(readonly owner: number, private store: UiStore = new PgUiStore(), private now = () => Date.now(), private refreshDeps: Partial<RefreshDependencies> = {}) {}
     async record(ui: UiPayload, messageId: number, request: UiRequest, active?: () => Promise<boolean>): Promise<void> {
         if (!validateUiPayload(ui, request.metadata === true) || !Number.isSafeInteger(messageId) || messageId >= 0 || ui.catalogId !== request.catalogId) throw invalid();
         await this.store.transact(this.owner, async tx => {
@@ -121,12 +125,15 @@ export class UiService {
             if (surface.revision !== revision) throw conflict();
             if (this.now() - surface.updatedAt < 60_000) throw new ApiError(429, 'ui_update_rate_limited', 'Карточку можно обновлять не чаще раза в минуту.');
             if (surface.request.device) await this.requireDevice(tx, surface.request.device);
-            if (surface.ui.meta?.asOf && Date.parse(asOf) < Date.parse(surface.ui.meta.asOf)) throw new ApiError(409, 'ui_data_stale', 'Новые данные старше текущей карточки.');
+            const priorAsOf = surface.dataAsOf ?? surface.ui.meta?.asOf;
+            if (priorAsOf && Date.parse(asOf) < Date.parse(priorAsOf)) throw new ApiError(409, 'ui_data_stale', 'Новые данные старше текущей карточки.');
             const next = revision + 1, components = ui.messages[0].createSurface.components;
             const change: UiChange = { protocol: 'a2ui', version: '1.0', catalogId: UI_CATALOG_V2, revision: next, meta: ui.meta,
                 messages: [{ version: '1.0', updateComponents: { surfaceId: id, components } }] };
             const snapshot: UiPayload = { ...ui, revision: next, messages: [{ version: '1.0', createSurface: { surfaceId: id, catalogId: UI_CATALOG_V2, components } }] };
-            await tx.put('surface', id, { ...surface, ui: snapshot, revision: next, updatedAt: this.now() });
+            await tx.put('surface', id, { ...surface, ui: snapshot, revision: next, updatedAt: this.now(), dataAsOf: asOf });
+            await tx.put('refreshrevoked', id, { at: this.now() });
+            await tx.trim('refreshrevoked', 1000);
             await this.event(tx, surface, change); return change;
         });
     }
@@ -138,6 +145,8 @@ export class UiService {
             const change: UiChange = { protocol: 'a2ui', version: '1.0', catalogId: UI_CATALOG_V2, revision: revision + 1,
                 messages: [{ version: '1.0', deleteSurface: { surfaceId: id } }] };
             await tx.put('surface', id, { ...surface, deleted: true, revision: revision + 1, updatedAt: this.now() });
+            await tx.put('refreshrevoked', id, { at: this.now() });
+            await tx.trim('refreshrevoked', 1000);
             await this.event(tx, surface, change); return { ok: true };
         });
     }

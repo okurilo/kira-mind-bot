@@ -18,6 +18,8 @@ import { getActiveAiPresetName } from '../services/aiRuntimeConfigService';
 import { parsePhotoTurn } from '../api/photos';
 import { UiService } from '../generative-ui/service';
 import { MemoryUiStore } from './helpers/generativeUi';
+import { McpService, mcpService } from '../services/mcp/client';
+import * as mcpConfig from '../services/mcp/config';
 
 const ui = { enabled: true as const, catalogId: UI_CATALOG_ID };
 const owner = 730001, token = 'synthetic-ui-token-with-at-least-32-characters';
@@ -28,12 +30,13 @@ function draft(action: unknown = { type: 'reply', text: 'Замени чтени
         { id: 'plan', component: 'Table', columns: ['Занятие', 'Минуты'], rows: [['Чтение', '20'], ['Прогулка', '30']] },
         { id: 'button', component: 'Button', child: 'label', action }, { id: 'label', component: 'Text', text: 'Изменить план' }] };
 }
-function fixture(t: TestContext) {
+function fixture(t: TestContext, refreshDependencies: Partial<import('../generative-ui/refresh').RefreshDependencies> = {}) {
     let saved: SessionData | undefined;
+    let writes = 0;
     const oldOwner = config.allowedUserId; config.allowedUserId = owner;
     t.after(() => { config.allowedUserId = oldOwner; });
     t.mock.method(TypeORMSessionStorage.prototype, 'read', async () => saved ? structuredClone(saved) : undefined);
-    t.mock.method(TypeORMSessionStorage.prototype, 'write', async (_key: string, value: SessionData) => { saved = structuredClone(value); });
+    t.mock.method(TypeORMSessionStorage.prototype, 'write', async (_key: string, value: SessionData) => { writes++; saved = structuredClone(value); });
     t.mock.method(history, 'addToHistory', async (ctx: BotContext, role: string, content: string) => {
         ctx.session.messageHistory.unshift({ role, content, timestamp: new Date() });
     });
@@ -44,9 +47,9 @@ function fixture(t: TestContext) {
     } as any });
     bot.api.config.use(async () => { assert.fail('UI cannot send Telegram traffic'); });
     let time = Date.now();
-    const widgets = new UiService(owner, new MemoryUiStore(), () => time);
+    const widgets = new UiService(owner, new MemoryUiStore(), () => time, refreshDependencies);
     const backend = new BotApiBackend(bot, options, { read: async () => ({ preset: 'gpt-lean', revision: 'synthetic' }) } as any, undefined, widgets);
-    return { backend, widgets, advance: () => { time += 60_000; }, saved: () => saved! };
+    return { backend, widgets, advance: () => { time += 60_000; }, saved: () => saved!, writes: () => writes };
 }
 class Receipts implements ApiOperationStore {
     rows = new Map<string, { fingerprint: string; result: ApiReply }>();
@@ -253,4 +256,59 @@ test('v2 HTTP devices, feedback, revision polling and history share owner state 
     assert.equal((await call('/ui/devices/' + deviceId, 'DELETE')).status, 200);
     assert.equal((await call(pollPath)).status, 409);
     assert.equal((await call('/ui/devices/' + deviceId + '/extra', 'PUT', prefs)).status, 404);
+});
+
+test('HTTP API source → opt-in widget → refresh changes no dialogue/history/memory and replays receipts without source calls', async t => {
+    const f = fixture(t, { allowed: async () => true }), sourceUrl = 'https://example.org/station';
+    const configuration = mcpConfig.parseMcpConfig({ servers: { synthetic: { description: 'Учебный API без модели', transport: 'jsonrpc', url: 'https://example.org/mcp',
+        tools: { observation: 'read' }, refreshTools: ['observation'], fixedArguments: { account: 'synthetic-account' } } } });
+    let price = 18, sourceCalls = 0, turns = 0, uiCalls = 0;
+    const source = new McpService(() => configuration, async () => ({ client: {
+        listTools: async () => ({ tools: [{ name: 'observation', inputSchema: { type: 'object', properties: { station: { type: 'string' }, account: { const: 'synthetic-account' } }, required: ['station', 'account'] } }] }),
+        callTool: async (body: any) => { sourceCalls++; assert.deepEqual(body.arguments, { station: 'training', account: 'synthetic-account' });
+            return { content: [], structuredContent: { uiRefresh: { identity: 'station:training:celsius', asOf: price === 18 ? '2041-04-12T19:00:00Z' : '2041-04-12T20:00:00Z',
+                sources: [{ label: 'Учебный источник', url: sourceUrl }], values: { temperature: price } } } }; },
+    } as any, close: async () => {} }));
+    t.mock.method(mcpConfig, 'readMcpConfig', () => configuration);
+    t.mock.method(mcpService, 'callTool', (id: string, name: string, args: Record<string, unknown>, effect: any, signal?: AbortSignal) => source.callTool(id, name, args, effect, signal));
+    t.mock.method(orchestrator, 'processMessage', async () => { turns++; await source.callTool('synthetic', 'observation', { station: 'training' }, 'read');
+        return { responseText: `Учебная температура 18 °C. ${sourceUrl}`, skipOptionalFollowups: true }; });
+    t.mock.method(completion, 'createChatCompletionForTask', async (_task: string, args: any) => {
+        uiCalls++; const input = JSON.parse(args.messages[1].content);
+        return { choices: [{ message: { content: JSON.stringify({ components: [{ id: 'root', component: 'Metric', label: 'Учебная температура', value: '18 °C' }],
+            ...(input.refreshSources?.length ? { refresh: { source: 0, subject: 'Температура учебной станции training, °C', sourceUrl,
+                slots: [{ id: 'temperature', componentId: 'root', path: ['value'], sourceField: 'temperature', suffix: ' °C', description: 'Температура, строка в °C' }] } } : {}) }) } }] } as any;
+    });
+    const post = await http(t, f.backend), refreshUi = { ...ui, refresh: true };
+    const turn = await (await post('/messages', { text: 'Покажи температуру', ui: refreshUi }, 'refresh-initial-001')).json() as any;
+    const message = turn.messages[0]; assert.ok(message.uiRefresh); assert.equal(message.uiRefresh.kind, 'data');
+    const original = structuredClone(message.ui), historyBefore = JSON.stringify(f.saved()), writesBefore = f.writes();
+    assert.deepEqual((await f.backend.history(20)).messages.find(m => m.ui)!.uiRefresh, message.uiRefresh);
+    for (let i = 0; i < 10; i++) f.advance(); price = 19;
+    const body = { items: [{ token: message.uiRefresh.token, surfaceId: original.messages[0].createSurface.surfaceId }], ui: refreshUi };
+    const refreshed = await post('/ui/refresh', body, 'refresh-fetch-001'); assert.equal(refreshed.status, 200);
+    const result = await refreshed.json() as any; assert.equal(result.results[0].status, 'updated');
+    assert.equal(result.results[0].ui.messages[0].createSurface.components[0].value, '19 °C');
+    assert.deepEqual(await (await post('/ui/refresh', body, 'refresh-fetch-001')).json(), result);
+    assert.equal(sourceCalls, 2); assert.equal(uiCalls, 1); assert.equal(turns, 1); assert.equal(f.writes(), writesBefore);
+    assert.equal(JSON.stringify(f.saved()), historyBefore); assert.deepEqual((await f.backend.history(20)).messages.find(m => m.ui)!.ui, original);
+    assert.equal((await f.widgets.events()).uiEvents.length, 0);
+    assert.equal((await post('/ui/refresh', { ...body, items: [{ ...body.items[0], token: 'unknown' }] }, 'refresh-fetch-001')).status, 409);
+    const cached = await (await post('/ui/refresh', body, 'refresh-recover-001')).json() as any; assert.equal(cached.results[0].status, 'updated'); assert.equal(sourceCalls, 2);
+    assert.equal((await post('/messages', { text: 'Покажи температуру', ui }, 'refresh-initial-001')).status, 409);
+    const plain = await f.backend.message('Покажи температуру', { ui }); assert.equal(plain.messages[0].uiRefresh, undefined);
+});
+
+test('HTTP refresh requires account auth, gates disabled capability, bounds batches and returns a retry interval on rate limits', async t => {
+    const f = fixture(t), post = await http(t, f.backend), sid = 'kira_11111111111141118111111111111111';
+    const body = { items: [{ token: 'unknown', surfaceId: sid }], ui: { ...ui, refresh: true } };
+    assert.equal((await post('/ui/refresh', body, 'auth-refresh-001', { authorization: 'Bearer invalid' })).status, 401);
+    assert.equal((await post('/ui/refresh', { ...body, items: Array.from({ length: 11 }, () => body.items[0]) }, 'large-refresh-001')).status, 413);
+    for (let i = 0; i < 30; i++) assert.equal((await post('/ui/refresh', body, 'rate-refresh-' + i)).status, 200);
+    const limited = await post('/ui/refresh', body, 'rate-refresh-excess'); assert.equal(limited.status, 429);
+    assert.ok(Number(limited.headers.get('retry-after')) > 0); assert.ok((await limited.json() as any).error.retryAfterSeconds > 0);
+    f.advance(); assert.equal((await post('/ui/refresh', body, 'rate-refresh-excess')).status, 200);
+    const old = process.env.KIRA_UI_REFRESH_ENABLED; process.env.KIRA_UI_REFRESH_ENABLED = 'false';
+    t.after(() => { if (old === undefined) delete process.env.KIRA_UI_REFRESH_ENABLED; else process.env.KIRA_UI_REFRESH_ENABLED = old; });
+    assert.equal((await post('/ui/refresh', body, 'disabled-refresh-001')).status, 404);
 });

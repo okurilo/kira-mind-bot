@@ -17,6 +17,8 @@ export interface McpServerConfig {
     args?: string[];
     env?: Record<string, string>;
     tools: Record<string, McpEffect>;
+    /** Explicit operator declaration: these read tools perform repeatable API reads without a model. */
+    refreshTools?: string[];
     /** Operator-bound arguments, e.g. service role. The model cannot override them. */
     fixedArguments?: Record<string, unknown>;
     timeoutMs: number;

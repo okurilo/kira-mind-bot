@@ -20,7 +20,7 @@ function parseMcpConfig(value) {
     const servers = {};
     for (const [id, raw] of Object.entries(value.servers)) {
         if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || !object(raw)) throw new Error('MCP: некорректный сервер');
-        const keys = ['description', 'transport', 'url', 'headers', 'oauth', 'command', 'args', 'env', 'tools', 'fixedArguments', 'timeoutMs'];
+        const keys = ['description', 'transport', 'url', 'headers', 'oauth', 'command', 'args', 'env', 'tools', 'fixedArguments', 'refreshTools', 'timeoutMs'];
         if (Object.keys(raw).some(key => !keys.includes(key)) || !['http', 'jsonrpc', 'stdio'].includes(String(raw.transport)) ||
             typeof raw.description !== 'string' || raw.description.length > 1500 || !object(raw.tools) || Object.keys(raw.tools).length > 200 ||
             Object.entries(raw.tools).some(([name, effect]) => !/^[A-Za-z0-9_.:-]{1,128}$/.test(name) || !['read', 'external'].includes(String(effect)))) throw new Error('MCP: некорректная конфигурация сервера');
@@ -32,6 +32,8 @@ function parseMcpConfig(value) {
         const timeoutMs = raw.timeoutMs ?? 30_000;
         if (typeof timeoutMs !== 'number' || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) throw new Error('MCP: timeoutMs должен быть от 100 до 60000');
         if (raw.fixedArguments !== undefined && !object(raw.fixedArguments)) throw new Error('MCP: некорректные fixedArguments');
+        if (raw.refreshTools !== undefined && (!Array.isArray(raw.refreshTools) || raw.refreshTools.length > 64 || new Set(raw.refreshTools).size !== raw.refreshTools.length
+            || raw.refreshTools.some(name => typeof name !== 'string' || raw.tools[name] !== 'read'))) throw new Error('MCP: refreshTools допускает только разрешённые инструменты чтения без LLM');
         if (raw.transport === 'http' || raw.transport === 'jsonrpc') {
             let url;
             try { url = new URL(String(raw.url)); } catch { throw new Error('MCP: некорректный URL'); }

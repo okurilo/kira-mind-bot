@@ -8,6 +8,7 @@ import { buildSafeAiErrorLog } from "../ai/errorDiagnostics";
 import { accountPolicyError } from '../ai/accountPolicy';
 import { isAiContentSafetyError } from '../ai/contentSafety';
 import { USER_TIMEZONE } from "../constants";
+import { rememberRefreshEvidence, citationSources } from '../generative-ui/refreshEvidence';
 import { AVAILABILITY_SEARCH_RULES, AVAILABILITY_REVIEW_RULES, AVAILABILITY_UNVERIFIED, evaluateAvailabilityReview } from '../utils/availabilityVerification';
 
 export interface WebSearchOptions { verifyAvailability?: boolean; context?: string }
@@ -127,7 +128,8 @@ export async function webSearchAgent(
         }
 
         const memoryBlock = memoryContext ? `\nКонтекст из долговременной памяти (используй для уточнения поискового запроса):\n${memoryContext}\n` : '';
-        const searchResponse = await performWebSearch(`${historyContext}${memoryBlock}\n\nЗапрос пользователя: ${message}`, options);
+        const searchResponse = await performWebSearch(`Запрос пользователя: ${message}`, { ...options,
+            context: [options.context, `${historyContext}${memoryBlock}`].filter(Boolean).join('\n\n') });
 
         if (searchResponse.success && searchResponse.results) {
             devLog("Web search successful. Returning results.");
@@ -197,6 +199,7 @@ export async function performWebSearch(query: string, options: WebSearchOptions 
                 },
             ],
             tool_choice: 'required',
+            include: ['web_search_call.action.sources'] as any,
             temperature: 1,
             max_output_tokens: review ? 4000 : 2048,
             top_p: 1,
@@ -245,6 +248,10 @@ export async function performWebSearch(query: string, options: WebSearchOptions 
         devLog(response);
 
         if (response && response.output_text) {
+            if (!options.verifyAvailability && query.length <= 4000) {
+                const sources = citationSources(response).slice(0, 8);
+                if (sources.length) rememberRefreshEvidence({ kind: 'search', query, text: processMarkdownLinks(response.output_text).slice(0, 6000), sources });
+            }
             return {
                 success: true,
                 results: processMarkdownLinks(response.output_text),

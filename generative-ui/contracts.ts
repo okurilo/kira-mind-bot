@@ -3,7 +3,7 @@ export const UI_CATALOG_ID = 'urn:kira:ui:catalog:1' as const;
 export const UI_CATALOG_V2 = 'urn:kira:ui:catalog:2' as const;
 export type UiCatalogId = typeof UI_CATALOG_ID | typeof UI_CATALOG_V2;
 export interface UiRequest {
-    enabled: true; catalogId: UiCatalogId; metadata?: true;
+    enabled: true; catalogId: UiCatalogId; metadata?: true; refresh?: true;
     target?: { surfaceId: string; revision: number };
     device?: { id: string; bindingId: string };
 }
@@ -50,6 +50,7 @@ export interface UiChange {
 }
 export interface UiPlacement { surfaceId: string; objectId: string; side: 'front' | 'top' | 'wall' }
 export type UiValues = Record<string, string | number | boolean>;
+export interface UiRefreshMeta { token: string; kind: 'data' | 'search'; asOf?: string; minIntervalSeconds: number }
 export const UI_LIMITS = { bytes: 32_768, components: 64, depth: 8, buttons: 6 } as const;
 export const UI_V2_COMPONENTS = ['Progress', 'Steps', 'Map', 'Image', 'Countdown', 'Checklist', 'Choice', 'Slider', 'Toggle', 'DateTime'] as const;
 const V1_COMPONENTS = ['Column', 'Row', 'Card', 'Text', 'Divider', 'Metric', 'Table', 'Chart', 'Button'];
@@ -70,4 +71,9 @@ export const UI_CAPABILITY = {
     forms: { catalogId: UI_CATALOG_V2, maxFields: 8, valuesIn: '/api/v1/actions' },
     updates: { catalogId: UI_CATALOG_V2, minIntervalMs: 60_000, pollPath: '/api/v1/dialogue-jobs' },
     proactive: { catalogId: UI_CATALOG_V2, preferencesPath: '/api/v1/ui/devices', delivery: 'widget-note', actions: false },
+    refresh: { enabled: true, maxItems: 10 },
 } as const;
+export function uiCapability() {
+    const { refresh, ...legacy } = UI_CAPABILITY;
+    return process.env.KIRA_UI_REFRESH_ENABLED === 'false' ? legacy : UI_CAPABILITY;
+}

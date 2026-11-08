@@ -4,6 +4,7 @@ import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { assertSafeMcpValue, McpConfig, McpEffect, McpServerConfig, readMcpConfig, mcpServerCatalog } from './config';
 import { connectMcp, secretHeaderValues } from '../../utils/mcpConnection';
 import { nativeCommerceProvider } from '../commerce/config';
+import { rememberRefreshEvidence, parseRefreshData, mcpRefreshAuthority } from '../../generative-ui/refreshEvidence';
 export { mcpResultEvidence } from './evidence';
 
 export class McpInputError extends Error {}
@@ -79,7 +80,7 @@ export class McpService {
         assertSafeMcpValue(args);
         if (JSON.stringify(args).length > 20_000) throw new McpInputError('MCP: аргументы слишком велики.');
         const boundArgs = { ...args, ...config.fixedArguments };
-        return this.withServer(id, signal, async ({ client }, current, bounded) => {
+        const result = await this.withServer(id, signal, async ({ client }, current, bounded) => {
             let tool: Tool | undefined;
             let cursor: string | undefined;
             const cursors = new Set<string>();
@@ -98,6 +99,11 @@ export class McpService {
             // Deliberately no retry, transport fallback, session replay or reconnection here.
             return await client.callTool({ name, arguments: boundArgs }, undefined, { signal: bounded, timeout: current.timeoutMs }) as CallToolResult;
         }, config);
+        if (effect === 'read' && config.refreshTools?.includes(name) && !result.isError) {
+            const data = parseRefreshData((result.structuredContent as any)?.uiRefresh);
+            if (data) rememberRefreshEvidence({ kind: 'data', adapter: 'mcp', server: id, tool: name, args: structuredClone(args), authority: mcpRefreshAuthority(config, name), data });
+        }
+        return result;
     }
 
     async listResources(id: string, cursor?: string, signal?: AbortSignal) {

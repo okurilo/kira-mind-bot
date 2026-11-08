@@ -19,6 +19,7 @@ map "$request_method:$uri" $kira_api_route_allowed {
     "~^GET:/api/v1/files/[0-9a-f-]{36}$" 1;
     "~^POST:/api/v1/(messages|actions|photos)$" 1;
     "POST:/api/v1/ui-feedback" 1;
+    "POST:/api/v1/ui/refresh" 1;
     "~^GET:/api/v1/ui/(devices|feedback-metrics|surfaces)$" 1;
     "~^PUT:/api/v1/ui/devices/[0-9a-f-]{36}$" 1;
     "~^DELETE:/api/v1/ui/devices/[0-9a-f-]{36}$" 1;

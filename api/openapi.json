@@ -209,6 +209,9 @@
                             "type": "integer",
                             "format": "int64",
                             "description": "Original API message ID for persisted UI; present with ui."
+                          },
+                          "uiRefresh": {
+                            "$ref": "#/components/schemas/UiRefreshMeta"
                           }
                         }
                       }
@@ -2095,7 +2098,7 @@
     },
     "/ui-feedback": {
       "post": {
-        "operationId": "postUi1",
+        "operationId": "postUi2",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -2139,7 +2142,7 @@
     },
     "/ui/devices": {
       "get": {
-        "operationId": "getUi2",
+        "operationId": "getUi3",
         "parameters": [],
         "responses": {
           "200": {
@@ -2174,7 +2177,7 @@
     },
     "/ui/devices/{deviceId}": {
       "put": {
-        "operationId": "putUi3",
+        "operationId": "putUi4",
         "parameters": [
           {
             "name": "deviceId",
@@ -2247,7 +2250,7 @@
         }
       },
       "delete": {
-        "operationId": "deleteUi4",
+        "operationId": "deleteUi5",
         "parameters": [
           {
             "name": "deviceId",
@@ -2291,7 +2294,7 @@
     },
     "/ui/feedback-metrics": {
       "get": {
-        "operationId": "getUi5",
+        "operationId": "getUi6",
         "parameters": [],
         "responses": {
           "200": {
@@ -2312,7 +2315,7 @@
     },
     "/ui/surfaces": {
       "get": {
-        "operationId": "getUi6",
+        "operationId": "getUi7",
         "parameters": [],
         "responses": {
           "200": {
@@ -2374,7 +2377,7 @@
     },
     "/ui/surfaces/{surfaceId}": {
       "delete": {
-        "operationId": "deleteUi7",
+        "operationId": "deleteUi8",
         "parameters": [
           {
             "name": "surfaceId",
@@ -2412,6 +2415,90 @@
                   },
                   "required": [
                     "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ui/refresh": {
+      "post": {
+        "operationId": "postUi1",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "token": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512,
+                          "pattern": "^[\\x21-\\x7e]+$"
+                        },
+                        "surfaceId": {
+                          "type": "string",
+                          "pattern": "^kira_[a-f0-9]{32}$"
+                        }
+                      },
+                      "required": [
+                        "token",
+                        "surfaceId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  },
+                  "ui": {
+                    "$ref": "#/components/schemas/UiRequest"
+                  }
+                },
+                "required": [
+                  "items",
+                  "ui"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UiRefreshResult"
+                      },
+                      "minItems": 1,
+                      "maxItems": 10
+                    }
+                  },
+                  "required": [
+                    "results"
                   ],
                   "additionalProperties": false
                 }
@@ -2492,6 +2579,10 @@
                     },
                     "message": {
                       "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 1
                     }
                   }
                 },
@@ -2625,6 +2716,9 @@
           },
           "ui": {
             "$ref": "#/components/schemas/UiPayload"
+          },
+          "uiRefresh": {
+            "$ref": "#/components/schemas/UiRefreshMeta"
           }
         }
       },
@@ -3218,6 +3312,9 @@
           "uiMessageId": {
             "type": "integer",
             "maximum": -1
+          },
+          "uiRefresh": {
+            "$ref": "#/components/schemas/UiRefreshMeta"
           }
         }
       },
@@ -3614,6 +3711,9 @@
             ]
           },
           "metadata": {
+            "type": "boolean"
+          },
+          "refresh": {
             "type": "boolean"
           },
           "target": {
@@ -4308,6 +4408,134 @@
           "unknownUnreported"
         ],
         "additionalProperties": false
+      },
+      "UiRefreshMeta": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[\\x21-\\x7e]+$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "data",
+              "search"
+            ]
+          },
+          "asOf": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 24,
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$"
+          },
+          "minIntervalSeconds": {
+            "type": "integer",
+            "minimum": 60
+          }
+        },
+        "required": [
+          "token",
+          "kind",
+          "minIntervalSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "UiRefreshResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "pattern": "^kira_[a-f0-9]{32}$"
+              },
+              "status": {
+                "const": "updated"
+              },
+              "ui": {
+                "$ref": "#/components/schemas/UiPayload"
+              },
+              "uiRefresh": {
+                "$ref": "#/components/schemas/UiRefreshMeta"
+              }
+            },
+            "required": [
+              "surfaceId",
+              "status",
+              "ui",
+              "uiRefresh"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "pattern": "^kira_[a-f0-9]{32}$"
+              },
+              "status": {
+                "const": "unchanged"
+              },
+              "uiRefresh": {
+                "$ref": "#/components/schemas/UiRefreshMeta"
+              }
+            },
+            "required": [
+              "surfaceId",
+              "status",
+              "uiRefresh"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "pattern": "^kira_[a-f0-9]{32}$"
+              },
+              "status": {
+                "const": "tooEarly"
+              },
+              "retryAfterSeconds": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "surfaceId",
+              "status",
+              "retryAfterSeconds"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "pattern": "^kira_[a-f0-9]{32}$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "gone",
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "surfaceId",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        ]
       }
     }
   }

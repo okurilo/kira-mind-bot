@@ -10,6 +10,7 @@ export class MemoryUiStore implements UiStore {
             const tx: UiTransaction = {
                 get: async <V>(kind: string, id: string) => structuredClone(rows.get(kind + ':' + id)) as V | undefined,
                 put: async (kind, id, value) => { rows.delete(kind + ':' + id); rows.set(kind + ':' + id, structuredClone(value)); },
+                delete: async (kind, id) => { rows.delete(kind + ':' + id); },
                 list: async <V>(kind: string, limit: number) => [...rows.entries()].filter(([k]) => k.startsWith(kind + ':')).reverse().slice(0, limit)
                     .map(([id, value]) => ({ id: id.slice(kind.length + 1), value: structuredClone(value) as V })),
                 trim: async (kind, retain) => {

@@ -1,6 +1,7 @@
 import type { ApiSettings, ApiSettingsPatch } from './settings';
 
 export class ApiError extends Error {
+    retryAfterSeconds?: number;
     /** `released`: refused before anything ran, so a durable receipt for the request is dropped, not kept as failed,
      *  and a corrected retry may run. */
     constructor(public readonly status: number, public readonly code: string, message: string, public readonly released = false) {
@@ -20,6 +21,7 @@ export interface ApiButton {
 }
 
 export interface ApiMessage {
+    uiRefresh?: import('../generative-ui/contracts').UiRefreshMeta;
     /** Optional native UI; text stays the canonical readable/spoken answer. */
     ui?: import('../generative-ui/contracts').UiPayload;
     id: number;
@@ -80,5 +82,5 @@ export interface ApiBackend {
 export interface ApiOperationStore {
     run(key: string, fingerprint: string, work: () => Promise<ApiReply>, options?: { releaseRefusals?: boolean }): Promise<ApiReply>;
     /** Same durable ledger, for non-dialogue JSON contracts. Older clients retain run(ApiReply). */
-    runJson?<T extends object>(key: string, fingerprint: string, work: () => Promise<T>): Promise<T>;
+    runJson?<T extends object>(key: string, fingerprint: string, work: () => Promise<T>, options?: { releaseRefusals?: boolean }): Promise<T>;
 }

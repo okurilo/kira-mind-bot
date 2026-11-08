@@ -5,10 +5,12 @@ import { ApiActionTokens } from '../api/actionTokens';
 import { readExternalApiOptions } from '../api/options';
 import { nextApiMessageId } from '../api/transport';
 import type { UiChange, UiPayload } from './contracts';
+import { uiRefreshEvidence } from './refreshEvidence';
+import type { RefreshRecipe } from './refreshTemplate';
 
 /** Called under the original task/preset, with an atomic current-turn guard in the presentation store. */
 export async function composeDialogueUi(job: DialogueJob, answer: string, active: () => Promise<boolean>,
-    dependencies: { service?: UiService; actions?: ApiActionTokens; complete?: UiCompletion } = {}): Promise<{ ui: UiPayload | UiChange; messageId: number } | undefined> {
+    dependencies: { service?: UiService; actions?: ApiActionTokens; complete?: UiCompletion } = {}): Promise<{ ui: UiPayload | UiChange; messageId: number; uiRefresh?: import('./contracts').UiRefreshMeta } | undefined> {
     if (!job.input.ui || job.input.ui.request.catalogId !== 'urn:kira:ui:catalog:2' || !job.channel.startsWith('api:')) return;
     try {
         const options = dependencies.actions ? undefined : readExternalApiOptions(process.env, job.userId);
@@ -16,9 +18,11 @@ export async function composeDialogueUi(job: DialogueJob, answer: string, active
         if (!actions || !await active()) return;
         const service = dependencies.service ?? new UiService(job.userId), messageId = nextApiMessageId();
         const { request, version } = job.input.ui;
+        let recipe: RefreshRecipe | undefined;
         const ui = await composeUi(job.input.message, { id: messageId, type: 'text', text: answer, format: 'plain' },
             text => actions.sign(messageId, 'ui.reply:' + text, answer, version), dependencies.complete, {
                 request, submitToken: (text, fields) => actions.sign(messageId, 'ui.submit:' + JSON.stringify({ text, fields }), answer, version),
+                refreshSources: uiRefreshEvidence(), onRefreshRecipe: value => { recipe = value; },
             });
         if (!ui || !await active()) return;
         if (request.target) {
@@ -27,6 +31,7 @@ export async function composeDialogueUi(job: DialogueJob, answer: string, active
             return { ui: change, messageId: surface!.messageId };
         }
         await service.record(ui, messageId, request, active);
-        return { ui, messageId };
+        const uiRefresh = await service.refresh.register(ui, recipe, request).catch(() => undefined);
+        return { ui, messageId, ...(uiRefresh ? { uiRefresh } : {}) };
     } catch { return; /* An optional visual cannot replace a completed textual answer. */ }
 }

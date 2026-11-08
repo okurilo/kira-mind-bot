@@ -9,8 +9,8 @@ export class PersistentApiOperations implements ApiOperationStore {
     async run(key: string, fingerprint: string, work: () => Promise<ApiReply>, options: { releaseRefusals?: boolean } = {}): Promise<ApiReply> {
         return this.execute(key, fingerprint, work, options);
     }
-    async runJson<T extends object>(key: string, fingerprint: string, work: () => Promise<T>): Promise<T> {
-        return this.execute(key, fingerprint, work);
+    async runJson<T extends object>(key: string, fingerprint: string, work: () => Promise<T>, options: { releaseRefusals?: boolean } = {}): Promise<T> {
+        return this.execute(key, fingerprint, work, options);
     }
     private async execute<T extends object>(key: string, fingerprint: string, work: () => Promise<T>, options: { releaseRefusals?: boolean } = {}): Promise<T> {
         key = scopedBotKey(key);

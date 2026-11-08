@@ -379,6 +379,9 @@
     },
     "/ui/surfaces/{surfaceId}": {
       "$ref": "./openapi.json#/paths/~1ui~1surfaces~1{surfaceId}"
+    },
+    "/ui/refresh": {
+      "$ref": "./openapi.json#/paths/~1ui~1refresh"
     }
   },
   "components": {

@@ -6,6 +6,7 @@ import type { DataSource, EntityManager } from 'typeorm';
 export interface UiTransaction {
     get<T>(kind: string, id: string): Promise<T | undefined>;
     put(kind: string, id: string, value: unknown): Promise<void>;
+    delete(kind: string, id: string): Promise<void>;
     list<T>(kind: string, limit: number): Promise<Array<{ id: string; value: T }>>;
     trim(kind: string, retain: number): Promise<void>;
 }
@@ -38,6 +39,9 @@ class PgUiTransaction implements UiTransaction {
     }
     async put(kind: string, id: string, value: unknown) {
         await this.manager.query('/* ui-private */ INSERT INTO bot_settings(key,value,"updatedAt") VALUES($1,$2,now()) ON CONFLICT(key) DO UPDATE SET value=excluded.value,"updatedAt"=now()', [this.key(kind, id), JSON.stringify(value)]);
+    }
+    async delete(kind: string, id: string) {
+        await this.manager.query('/* ui-private */ DELETE FROM bot_settings WHERE key=$1', [this.key(kind, id)]);
     }
     async list<T>(kind: string, limit: number) {
         if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw Error('invalid_ui_storage_limit');

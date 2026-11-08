@@ -49,8 +49,9 @@ export function uiSchemas() {
 export function updateUiOpenApi(spec: any) {
     const defs = spec.components.schemas, ref = (name: string) => ({ $ref: '#/components/schemas/' + name });
     spec.openapi = '3.1.0';
+    spec.components.responses.Error.content['application/json'].schema.properties.error.properties.retryAfterSeconds = { type: 'integer', minimum: 1 };
     defs.UiPayload = { oneOf: [{ $ref: '../docs/generative-ui.schema.json' }, { $ref: '../docs/generative-ui.metadata.schema.json' }, { $ref: '../docs/generative-ui.v2.schema.json' }] };
-    defs.UiRequest = { ...obj({ enabled: { type: 'boolean' }, catalogId: en(UI_CATALOG_ID, UI_CATALOG_V2), metadata: { type: 'boolean' },
+    defs.UiRequest = { ...obj({ enabled: { type: 'boolean' }, catalogId: en(UI_CATALOG_ID, UI_CATALOG_V2), metadata: { type: 'boolean' }, refresh: { type: 'boolean' },
         target: obj({ surfaceId, revision: { type: 'integer', minimum: 1 } }), device: obj({ id: uuid, bindingId: uuid }) }, ['enabled']),
         allOf: [{ if: { properties: { enabled: { const: true } } }, then: { required: ['catalogId'] } },
             { if: { required: ['target'] }, then: { properties: { catalogId: { const: UI_CATALOG_V2 } }, required: ['catalogId'] } }],
@@ -68,6 +69,19 @@ export function updateUiOpenApi(spec: any) {
         ...(input ? { requestBody: { required: true, content: { 'application/json': { schema: input } } } } : {}),
         responses: { '200': { description: 'Owner-scoped UI result', content: { 'application/json': { schema: output } } }, default: { $ref: '#/components/responses/Error' } } });
     const ok = obj({ ok: { const: true } });
+    defs.UiRefreshMeta = obj({ token: { ...str(512), pattern: '^[\\x21-\\x7e]+$' }, kind: en('data', 'search'), asOf: date,
+        minIntervalSeconds: { type: 'integer', minimum: 60 } }, ['token', 'kind', 'minIntervalSeconds']);
+    defs.UiRefreshResult = { oneOf: [
+        obj({ surfaceId, status: { const: 'updated' }, ui: ref('UiPayload'), uiRefresh: ref('UiRefreshMeta') }),
+        obj({ surfaceId, status: { const: 'unchanged' }, uiRefresh: ref('UiRefreshMeta') }),
+        obj({ surfaceId, status: { const: 'tooEarly' }, retryAfterSeconds: { type: 'integer', minimum: 1 } }),
+        obj({ surfaceId, status: en('gone', 'failed') }),
+    ] };
+    spec.paths['/ui/refresh'] = { post: route('post', obj({ items: array(obj({ token: { ...str(512), pattern: '^[\\x21-\\x7e]+$' }, surfaceId }), 10), ui: ref('UiRequest') }),
+        obj({ results: array(ref('UiRefreshResult'), 10) })) };
+    for (const name of ['Message', 'HistoryMessage']) if (defs[name]?.properties) defs[name].properties.uiRefresh = ref('UiRefreshMeta');
+    const historySchema = spec.paths['/history']?.get.responses['200'].content['application/json'].schema;
+    if (historySchema?.properties?.messages?.items?.properties) historySchema.properties.messages.items.properties.uiRefresh = ref('UiRefreshMeta');
     const pathParam = (name: string, schema: any) => ({ name, in: 'path', required: true, schema });
     spec.paths['/ui-feedback'] = { post: route('post', ref('UiFeedback'), ok) };
     spec.paths['/ui/devices'] = { get: route('get', null, obj({ devices: array(ref('UiDevice'), 32, 0) })) };
@@ -87,7 +101,7 @@ export function updateUiOpenApi(spec: any) {
         messages: array(obj({ id: { type: 'integer', maximum: -1 }, type: { const: 'text' }, text: str(12000), ui: ref('UiPayload') }, ['id', 'type', 'ui']), 1) }, ['seq', 'kind', 'createdAt', 'messages']), 50, 0);
     jobsSchema.properties.uiNextCursor = { type: 'string' };
     const jobSchema = defs.DialogueJob ?? jobsSchema.properties.jobs?.items;
-    if (jobSchema?.properties) { jobSchema.properties.ui = ref('UiPayload'); jobSchema.properties.uiMessageId = { type: 'integer', maximum: -1 }; }
+    if (jobSchema?.properties) { jobSchema.properties.ui = ref('UiPayload'); jobSchema.properties.uiMessageId = { type: 'integer', maximum: -1 }; jobSchema.properties.uiRefresh = ref('UiRefreshMeta'); }
     return spec;
 }
 if (require.main === module) {
