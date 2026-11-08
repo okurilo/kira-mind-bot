@@ -13,9 +13,11 @@ import * as history from '../utils/history';
 import * as reconsolidation from '../services/MemoryReconsolidationService';
 import * as orchestrator from '../orchestrator';
 import * as completion from '../ai/chatCompletion';
-import { UI_CATALOG_ID } from '../generative-ui/contracts';
+import { UI_CATALOG_ID, UI_CATALOG_V2 } from '../generative-ui/contracts';
 import { getActiveAiPresetName } from '../services/aiRuntimeConfigService';
 import { parsePhotoTurn } from '../api/photos';
+import { UiService } from '../generative-ui/service';
+import { MemoryUiStore } from './helpers/generativeUi';
 
 const ui = { enabled: true as const, catalogId: UI_CATALOG_ID };
 const owner = 730001, token = 'synthetic-ui-token-with-at-least-32-characters';
@@ -41,8 +43,10 @@ function fixture(t: TestContext) {
         id: 1234567890, is_bot: true, first_name: 'Synthetic', username: 'synthetic_bot',
     } as any });
     bot.api.config.use(async () => { assert.fail('UI cannot send Telegram traffic'); });
-    const backend = new BotApiBackend(bot, options, { read: async () => ({ preset: 'gpt-lean', revision: 'synthetic' }) } as any);
-    return { backend, saved: () => saved! };
+    let time = Date.now();
+    const widgets = new UiService(owner, new MemoryUiStore(), () => time);
+    const backend = new BotApiBackend(bot, options, { read: async () => ({ preset: 'gpt-lean', revision: 'synthetic' }) } as any, undefined, widgets);
+    return { backend, widgets, advance: () => { time += 60_000; }, saved: () => saved! };
 }
 class Receipts implements ApiOperationStore {
     rows = new Map<string, { fingerprint: string; result: ApiReply }>();
@@ -54,6 +58,7 @@ class Receipts implements ApiOperationStore {
         }
         const result = await work(); this.rows.set(key, { fingerprint, result: structuredClone(result) }); return result;
     }
+    runJson<T>(key: string, fingerprint: string, work: () => Promise<T>): Promise<T> { return this.run(key, fingerprint, work as any) as Promise<T>; }
 }
 async function http(t: TestContext, backend: BotApiBackend) {
     const server = createExternalApiServer(options, backend, new Receipts());
@@ -170,4 +175,82 @@ test('repeated text binds UI to its new message, and retained presentation snaps
     for (let i = 0; i < 21; i++) await f.backend.message(`Ещё план ${i}`, { ui });
     assert.equal(f.saved().messageHistory.filter(item => item.ui).length, 20);
     assert.ok(f.saved().messageHistory.filter(item => item.role === 'bot').length > 20);
+});
+
+test('v2 HTTP forms validate before receipts and submit a normal turn, with exact durable replay after expiry', async t => {
+    const f = fixture(t), requests: string[] = [], v2 = { enabled: true as const, catalogId: UI_CATALOG_V2 };
+    t.mock.method(orchestrator, 'processMessage', async (ctx: BotContext, text: string) => {
+        requests.push(text); assert.equal(ctx.allowDeferredDialogue, false);
+        assert.equal((ctx as any).allowExternalDelivery, undefined);
+        return { responseText: answer, skipOptionalFollowups: true };
+    });
+    t.mock.method(completion, 'createChatCompletionForTask', async () => ({ choices: [{ message: { content: JSON.stringify({ components: [
+        { id: 'root', component: 'Column', children: ['minutes', 'confirm', 'submit'] },
+        { id: 'minutes', component: 'Slider', label: 'Минуты', min: 10, max: 60, step: 5, value: 20 },
+        { id: 'confirm', component: 'Toggle', label: 'Разминка', value: true },
+        { id: 'submit', component: 'Button', child: 'label', action: { type: 'submit', text: 'Составь план', fields: ['minutes', 'confirm'] } },
+        { id: 'label', component: 'Text', text: 'Составить план' },
+    ] }) } }] }) as any);
+    const post = await http(t, f.backend);
+    const first = await (await post('/messages', { text: 'Подбери план', ui: v2 }, 'form-create-001')).json() as any;
+    const actionToken = first.messages[0].ui.messages[0].createSurface.components.find((c: any) => c.id === 'submit').action.event.context.actionToken;
+    const values = { minutes: 25, confirm: false }, key = 'form-submit-001';
+    for (const bad of [{ ...values, minutes: 26 }, { ...values, confirm: 'no' }, { ...values, injected: {} }, { minutes: 25 }]) {
+        assert.equal((await post('/actions', { actionToken, values: bad }, key)).status, 400);
+    }
+    const sent = await post('/actions', { actionToken, values }, key); assert.equal(sent.status, 200);
+    const result = await sent.json(); assert.equal(requests.length, 2); assert.match(requests[1], /Минуты: 25\nРазминка: Нет/);
+    assert.equal((await post('/actions', { actionToken, values: { ...values, minutes: 30 } }, key)).status, 409);
+    const originalNow = Date.now(); t.mock.method(Date, 'now', () => originalNow + 20 * 60_000);
+    assert.deepEqual(await (await post('/actions', { actionToken, values }, key)).json(), result);
+    assert.deepEqual(await (await post('/actions', { actionToken, values }, 'form-new-key-001')).json(), result);
+    assert.equal(requests.length, 2);
+    await assert.rejects(f.backend.action(actionToken, undefined, values), (e: any) => e.code === 'action_expired');
+});
+
+test('v2 HTTP devices, feedback, revision polling and history share owner state and exact route contracts', async t => {
+    const f = fixture(t), receipts = new Receipts();
+    t.mock.method(DialogueJobRepository, 'list', async () => []);
+    t.mock.method(orchestrator, 'processMessage', async () => ({ responseText: 'Учебный прогноз на 2041-04-12T19:00:00Z.', skipOptionalFollowups: true }));
+    t.mock.method(completion, 'createChatCompletionForTask', async () => ({ choices: [{ message: { content: JSON.stringify({ components: [
+        { id: 'root', component: 'Progress', label: 'Учебная цель', value: 0.5 },
+    ], meta: { asOf: '2041-04-12T19:00:00Z' } }) } }] }) as any);
+    const server = createExternalApiServer(options, f.backend, receipts);
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => { server.closeAllConnections(); return new Promise<void>(resolve => server.close(() => resolve())); });
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1`;
+    let seq = 0;
+    const call = (path: string, method = 'GET', body?: unknown, key = 'v2-http-key-' + (++seq), auth = token) => fetch(base + path, {
+        method, headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json', 'idempotency-key': key },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const deviceId = '11111111-1111-4111-8111-111111111111';
+    assert.equal((await call('/ui/devices', 'GET', undefined, undefined, 'wrong')).status, 401);
+    const prefs = { catalogId: UI_CATALOG_V2, proactive: true, diagnostics: true };
+    const registration = await call('/ui/devices/' + deviceId, 'PUT', prefs, 'device-register-001'); assert.equal(registration.status, 200);
+    const { device } = await registration.json() as any;
+    assert.deepEqual(await (await call('/ui/devices/' + deviceId, 'PUT', prefs, 'device-register-001')).json(), { device });
+    assert.equal((await call('/ui/devices/' + deviceId, 'PUT', { ...prefs, proactive: false })).status, 409);
+    const ui = { enabled: true, catalogId: UI_CATALOG_V2, device: { id: deviceId, bindingId: device.bindingId } };
+    const reply = await (await call('/messages', 'POST', { text: 'Прогноз', ui }, 'v2-initial-001')).json() as any;
+    const message = reply.messages[0], surfaceId = message.ui.messages[0].createSurface.surfaceId;
+    assert.equal((await call('/messages', 'POST', { text: 'Прогноз', ui: { ...ui, metadata: true } }, 'v2-initial-001')).status, 409);
+    const feedback = { surfaceId, messageId: message.id, verdict: 'not_shown', reason: 'rendererError', device: ui.device };
+    assert.equal((await call('/ui-feedback', 'POST', feedback, 'feedback-http-001')).status, 200);
+    assert.equal((await call('/ui-feedback', 'POST', feedback, 'feedback-http-001')).status, 200);
+    assert.equal((await call('/ui-feedback', 'POST', { ...feedback, reason: 'private text' })).status, 400);
+    assert.equal((await call('/ui-feedback', 'POST', { ...feedback, messageId: -1 })).status, 404);
+    assert.equal((await (await call('/ui/feedback-metrics')).json() as any).rejectedOnDevice, 1);
+    f.advance();
+    assert.equal((await call('/messages', 'POST', { text: 'Обнови', ui: { ...ui, target: { surfaceId, revision: 1 } } })).status, 200);
+    const pollPath = `/dialogue-jobs?uiAfter=0&uiDeviceId=${deviceId}&uiBindingId=${device.bindingId}`;
+    const poll = await (await call(pollPath)).json() as any;
+    assert.equal(poll.uiEvents.length, 1); assert.equal(poll.uiEvents[0].messages[0].ui.revision, 2);
+    assert.equal((await f.backend.history(20)).messages.find(m => m.ui)!.ui!.revision, 2);
+    assert.equal((await call(`/ui/surfaces/${surfaceId}?expectedRevision=1`, 'DELETE')).status, 409);
+    assert.equal((await call(`/ui/surfaces/${surfaceId}?expectedRevision=2`, 'DELETE')).status, 200);
+    assert.ok((await f.backend.history(20)).messages.every(m => !m.ui));
+    assert.equal((await call('/ui/devices/' + deviceId, 'DELETE')).status, 200);
+    assert.equal((await call(pollPath)).status, 409);
+    assert.equal((await call('/ui/devices/' + deviceId + '/extra', 'PUT', prefs)).status, 404);
 });

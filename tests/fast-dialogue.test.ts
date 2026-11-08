@@ -24,6 +24,11 @@ import type { BotContext } from '../types';
 import { BotApiBackend } from '../api/backend';
 import * as communication from '../services/communicationProfileService';
 import * as gaps from '../utils/memoryGapDetector';
+import * as uiDialogue from '../generative-ui/dialogue';
+import { UiService } from '../generative-ui/service';
+import { MemoryUiStore } from './helpers/generativeUi';
+import { ApiActionTokens } from '../api/actionTokens';
+import { UI_CATALOG_V2 } from '../generative-ui/contracts';
 
 const OWNER = 740001;
 const classification = (): MessageClassification => ({ intent: 'РАЗГОВОР', confidenceLevel: 'ВЫСОКИЙ',
@@ -109,6 +114,19 @@ test('deferred work snapshots grounded search focus instead of retaining a live 
     assert.equal(saved.input.memoryRecallFocus.query, 'Тестовая тема');
     context.session.memoryRecallFocus.query = 'Изменённая тема';
     assert.equal(saved.input.memoryRecallFocus.query, 'Тестовая тема');
+});
+
+test('deferred API admission snapshots only v2 UI capabilities and the originating action version', async t => {
+    environment(t); t.mock.method(features, 'getBackgroundFeaturePreference', async () => true);
+    t.mock.method(preset, 'getActiveAiPresetName', async () => 'gpt-balanced');
+    let saved: any;
+    t.mock.method(DialogueJobRepository, 'stage', async (values: any) => { saved = values; return { id: 'snapshot-ui-job', status: 'staged' } as DialogueJob; });
+    const c = ctx(); c.sessionStorageKey = `api:${OWNER}`; c.allowDeferredDialogue = true; c.session.apiActionVersion = 'ui-turn-version';
+    c.generativeUiRequest = { enabled: true, catalogId: UI_CATALOG_V2, metadata: true };
+    const value = classification(); value.fastReply = { mode: 'defer' }; value.details.responseComplexity = 'complex';
+    await tryFastDialogueResult(c, { userText: 'Проанализируй учебный план' }, value, { source: 'stable_general', requiresWeb: false, requestedFacets: [], reason: 'synthetic' }, []);
+    assert.deepEqual(saved.input.ui, { request: c.generativeUiRequest, version: 'ui-turn-version' });
+    delete c.generativeUiRequest.metadata; assert.equal(saved.input.ui.request.metadata, true);
 });
 
 test('ordinary arrival updates do not trigger memory/deep jobs even when the classifier requests them', async t => {
@@ -245,6 +263,24 @@ function worker(t: TestContext, value: DialogueJob) {
         sent, stored: () => stored, replace: (next: DialogueJob) => { stored = next; },
     };
 }
+
+test('deferred API worker stores generated UI in the ready job and restores the same snapshot in delivered history', async t => {
+    const value = job(true); value.channel = `api:${OWNER}`;
+    value.input.ui = { request: { enabled: true, catalogId: UI_CATALOG_V2 }, version: 'ui-turn-version' };
+    const deps = worker(t, value), service = new UiService(OWNER, new MemoryUiStore()), actual = uiDialogue.composeDialogueUi;
+    t.mock.method(uiDialogue, 'composeDialogueUi', (job: DialogueJob, answer: string, active: () => Promise<boolean>) => actual(job, answer, active, {
+        service, actions: new ApiActionTokens('synthetic-deferred-key-long-enough', OWNER),
+        complete: async () => JSON.stringify({ components: [{ id: 'root', component: 'Text', text: answer }] }),
+    }));
+    await executeDialogueJob({} as any, value, deps);
+    assert.equal(deps.stored().status, 'ready');
+    const ready = publicDialogueJob(deps.stored()); assert.ok(ready.ui); assert.ok(ready.uiMessageId! < 0);
+    let restored: any;
+    t.mock.method(session, 'appendPersistedHistory', async (_channel: unknown, _role: unknown, _answer: unknown, options: unknown) => { restored = options; });
+    const delivery = { ...deps.stored(), status: 'delivering' as const }; deps.replace(delivery);
+    await executeDialogueJob({} as any, delivery, deps);
+    assert.equal(deps.stored().status, 'completed'); assert.deepEqual(restored, { ui: ready.ui, apiMessageId: ready.uiMessageId });
+});
 
 test('deep answer reuses prepared memory without paying for an unnecessary tool-planning loop', async t => {
     const value = job(true); const deps = worker(t, value);

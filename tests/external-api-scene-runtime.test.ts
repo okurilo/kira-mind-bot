@@ -15,7 +15,9 @@ import * as imageSettings from '../services/imageRecognitionConfigService';
 import { lmstudioProviderAdapter } from '../ai/providers/lmstudio';
 import * as aiUsage from '../services/aiUsageLogService';
 import { imageAgent } from '../agents/imageAgent';
-import { UI_CATALOG_ID } from '../generative-ui/contracts';
+import { UI_CATALOG_ID, UI_CATALOG_V2 } from '../generative-ui/contracts';
+import { UiService } from '../generative-ui/service';
+import { MemoryUiStore } from './helpers/generativeUi';
 
 const owner = 730001;
 const botToken = '1234567890:abcdefghijklmnopqrstuvwxyzABCDE';
@@ -47,7 +49,7 @@ function fixture(t: TestContext, actions: unknown[] = []) {
     const bot = new Bot<BotContext>(botToken, { botInfo });
     bot.api.config.use(async () => { assert.fail('a room turn must never call Telegram'); });
     const models: any = { read: async () => ({ preset: 'gpt-lean', revision: 'synthetic' }) };
-    const backend = new BotApiBackend(bot, { token: 'synthetic-scene-token-with-at-least-32-characters', ownerId: owner, host: '127.0.0.1', port: 0 }, models);
+    const backend = new BotApiBackend(bot, { token: 'synthetic-scene-token-with-at-least-32-characters', ownerId: owner, host: '127.0.0.1', port: 0 }, models, undefined, new UiService(owner, new MemoryUiStore()));
     return { backend, rows, chosen };
 }
 
@@ -71,6 +73,24 @@ test('AR text and camera turns negotiate the same literal UI profile without mod
     }
     assert.equal(calls, 2);
     assert.throws(() => parseSceneTurn({ text: 'План', scene: scene(), ui: { ...ui, catalogId: 'unknown' } }));
+});
+
+test('v2 placement names only a present object from the current scene and remains separate from avatar actions', async t => {
+    const f = fixture(t);
+    t.mock.method(orchestrator, 'processMessage', async () => ({ responseText: 'Учебный список для стула.', skipOptionalFollowups: true }));
+    let target = chair;
+    t.mock.method(completion, 'createChatCompletionForTask', async (_task: string, params: any) => {
+        const data = JSON.parse(params.messages[1].content);
+        assert.deepEqual(data.sceneObjects, [{ id: chair, label: 'Синтетический стул' }]);
+        return { choices: [{ message: { content: JSON.stringify({ components: [{ id: 'root', component: 'Text', text: 'Учебный список' }], placement: { objectId: target, side: 'top' } }) } }] } as any;
+    });
+    const input = { text: 'Поставь карточку на стул', scene: scene(), ui: { enabled: true, catalogId: UI_CATALOG_V2 } };
+    const reply = await f.backend.sceneTurn(parseSceneTurn(input), 'gpt-lean') as any;
+    assert.deepEqual(reply.widgetPlacement, { surfaceId: reply.messages[0].ui.messages[0].createSurface.surfaceId, objectId: chair, side: 'top' });
+    assert.deepEqual(reply.actions, []); assert.equal((await f.backend.sceneCapabilities() as any).widgetPlacement, true);
+    target = '55555555-5555-4555-8555-555555555555';
+    const unbound = await f.backend.sceneTurn(parseSceneTurn(input), 'gpt-lean') as any;
+    assert.ok(unbound.messages[0].ui); assert.equal(unbound.widgetPlacement, undefined);
 });
 
 test('words in the AR room go through the same text handlers and dialogue as the chat, with the room as context', async t => {

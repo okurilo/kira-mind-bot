@@ -377,9 +377,9 @@ export function framePoint(point: unknown, box: unknown): FramePoint | undefined
 /** The app's one dialogue as a room turn uses it: the same handlers as POST /messages and POST /photos. */
 export interface SceneChannel {
     /** The owner's words, answered as in the chat, with the room as the turn's context. */
-    say(text: string, room: { context: string; frame: false }, preset: AiPresetName | null, ui?: UiRequest): Promise<ApiReply>;
+    say(text: string, room: { context: string; frame: false; uiObjects?: Array<{ id: string; label: string }> }, preset: AiPresetName | null, ui?: UiRequest): Promise<ApiReply>;
     /** The camera frame with the owner's words as its caption, read as a photo sent to Kira. */
-    look(frame: Buffer, text: string, room: { context: string; frame: true }, preset: AiPresetName | null, ui?: UiRequest): Promise<ApiReply>;
+    look(frame: Buffer, text: string, room: { context: string; frame: true; uiObjects?: Array<{ id: string; label: string }> }, preset: AiPresetName | null, ui?: UiRequest): Promise<ApiReply>;
     /** The model that reads a photo under the current mode. */
     visionRoute(): Promise<VisionRoute>;
     /** The dialogue, newest first. */
@@ -525,7 +525,7 @@ export class SceneService {
         const preset = appPreset ?? await getActiveAiPresetName();
         const vision = await runWithChannelPreset(appPreset, () => this.channel.visionRoute())
             .catch((): VisionRoute => ({ available: false, reason: 'Не удалось определить модель для анализа кадра.' }));
-        return { version: SCENE_API_VERSION, frame: { mime: ['image/jpeg'], maxBytes: MAX_FRAME_BYTES }, actions: SCENE_ACTION_KINDS, autoSeat: true, pointing: true,
+        return { version: SCENE_API_VERSION, widgetPlacement: true, frame: { mime: ['image/jpeg'], maxBytes: MAX_FRAME_BYTES }, actions: SCENE_ACTION_KINDS, autoSeat: true, pointing: true,
             // the words are understood before any frame: stage "prepare", then the turn with its plan
             intentPlanning: { version: 1, intents: SCENE_INTENTS, planTtlSeconds: PLAN_TTL_MS / 1000, controlOnly: true },
             mode: { preset, title: aiPresets[preset].title, appSelected: appPreset !== null }, vision,
@@ -562,17 +562,18 @@ export class SceneService {
 
     private async execute(turn: SceneTurn, appPreset: AiPresetName | null, decided?: SceneDecision): Promise<ApiReply & Record<string, unknown>> {
         let reply: ApiReply, planned: Awaited<ReturnType<SceneService['plan']>>, route: VisionRoute | undefined;
+        const uiObjects = turn.ui?.catalogId === 'urn:kira:ui:catalog:2' ? turn.scene.objects.filter(o => o.present).map(o => ({ id: o.id, label: o.name })) : undefined;
         if (turn.frame) {
             // with a frame the body's choice and the search on it come first (the photo answer is the slow part anyway):
             // the words then say what the arm will do, or ask which one / for a better view
             planned = await this.plan(turn, appPreset, decided);
             const frame = turn.frame;
             [reply, route] = await Promise.all([
-                this.channel.look(frame.data, turn.text, { context: roomContext(turn, planned.search, decided?.intent), frame: true }, appPreset, turn.ui),
+                this.channel.look(frame.data, turn.text, { context: roomContext(turn, planned.search, decided?.intent), frame: true, ...(uiObjects ? { uiObjects } : {}) }, appPreset, turn.ui),
                 runWithChannelPreset(appPreset, () => this.channel.visionRoute()),
             ]);
         } else {
-            [reply, planned] = await Promise.all([this.channel.say(turn.text, { context: roomContext(turn, undefined, decided?.intent), frame: false }, appPreset, turn.ui), this.plan(turn, appPreset, decided)]);
+            [reply, planned] = await Promise.all([this.channel.say(turn.text, { context: roomContext(turn, undefined, decided?.intent), frame: false, ...(uiObjects ? { uiObjects } : {}) }, appPreset, turn.ui), this.plan(turn, appPreset, decided)]);
         }
         const { actions, rejected, seen } = planned;
         const scene = await this.storage.read(this.sceneKey);

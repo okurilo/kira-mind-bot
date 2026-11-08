@@ -21,9 +21,16 @@ export class ApiActionTokens {
     }
 
     verify(token: string): ActionClaims {
+        const claims = this.inspect(token);
+        if (claims.expires <= Date.now()) throw new ApiError(410, 'action_expired', 'Кнопка устарела. Повтори исходный запрос.');
+        return claims;
+    }
+
+    /** Signature/owner verification for form type-checking before a receipt. Never authorizes execution. */
+    inspect(token: string): ActionClaims {
         const [body, signature, extra] = token.split('.');
         const expected = body ? this.signature(body) : '';
-        if (!signature || extra || signature.length !== expected.length
+        if (!signature || extra || signature.length !== expected.length || Buffer.byteLength(signature) !== Buffer.byteLength(expected)
             || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
             throw new ApiError(400, 'invalid_action', 'Некорректное подтверждение действия.');
         }
@@ -33,7 +40,7 @@ export class ApiActionTokens {
         if (!claims || claims.owner !== this.owner || !Number.isSafeInteger(claims.messageId)
             || claims.messageId >= 0 || typeof claims.version !== 'string'
             || typeof claims.data !== 'string' || typeof claims.text !== 'string'
-            || !Number.isFinite(claims.expires) || claims.expires <= Date.now()) {
+            || !Number.isFinite(claims.expires)) {
             throw new ApiError(410, 'action_expired', 'Кнопка устарела. Повтори исходный запрос.');
         }
         return claims;

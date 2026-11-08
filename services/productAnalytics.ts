@@ -157,6 +157,7 @@ export async function sendProactiveWithAnalytics(bot: Bot<BotContext>, chatId: n
     if (chatId === config.allowedUserId) task.persisted = await safely(() => store.startTask(AppDataSource, task));
     try {
         const sent = await bot.api.sendMessage(chatId, text);
+        (await import('./uiNotifications')).queueUiNotification(chatId, text, `proactive:${sent.message_id}`);
         await updateTask({ productAnalytics: task }, { status: 'delivered', delivered: true });
         return sent;
     } catch (error) { await updateTask({ productAnalytics: task }, { status: 'failed', technicalOk: false }); throw error; }

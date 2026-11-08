@@ -1,0 +1,1 @@
+{"protocol":"a2ui","version":"1.0","catalogId":"urn:kira:ui:catalog:2","revision":1,"messages":[{"version":"1.0","createSurface":{"surfaceId":"kira_11111111111141118111111111111111","catalogId":"urn:kira:ui:catalog:2","components":[{"id":"root","component":"Countdown","until":"2041-02-30T19:00:00Z","label":"Учебный таймер"}]}}]}

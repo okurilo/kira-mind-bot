@@ -19,8 +19,13 @@ import type { ApiSettings } from '../api/settings';
 import { parsePreferences } from '../ai/modelPreferences';
 import { CommunicationProfileService } from '../services/communicationProfileService';
 import { DataSource } from 'typeorm';
+import { UiHttpApi } from '../api/ui';
+import { UiService } from '../generative-ui/service';
+import { MemoryUiStore } from './helpers/generativeUi';
+import { UI_CATALOG_V2 } from '../generative-ui/contracts';
 
 class MemoryApiOperations implements ApiOperationStore {
+    runJson<T extends object>(key: string, fingerprint: string, work: () => Promise<T>): Promise<T> { return this.run(key, fingerprint, work as any) as Promise<T>; }
     private results = new Map<string, { fingerprint: string; result: ApiReply }>();
     async run(key: string, fingerprint: string, work: () => Promise<ApiReply>): Promise<ApiReply> {
         const existing = this.results.get(key);
@@ -204,6 +209,7 @@ test('existing API accounts login, public password signup is closed, and paired 
             const internalToken = secrets.derive(id, 'api');
             let settings: ApiSettings = { budgetMode: 'normal', budgetModes: [], activityMode: 'custom', activityModes: [], telegram: { personalSessionConfigured: false }, features: [] };
             const worker = createExternalApiServer({ token: internalToken, ownerId: Number(store.accounts.get(id)!.owner_id), host: '127.0.0.1', port: 0 }, {
+                uiApi: new UiHttpApi(new UiService(Number(store.accounts.get(id)!.owner_id), new MemoryUiStore())),
                 status: async () => ({ accountId: id }), history: async () => ({ messages: [{ text: id }] }),
                 capabilities: async () => ({}), reminders: async () => ({ reminders: [id] }), tasks: async () => ({ tasks: [id] }),
                 communicationProfile: () => communication.read(), updateCommunicationProfile: p => communication.patch(p),
@@ -234,6 +240,18 @@ test('existing API accounts login, public password signup is closed, and paired 
             endpoints.set(id, { port: (worker.address() as AddressInfo).port, token: internalToken });
         }
         assert.equal((await call('/api/v1/model-preferences')).status, 401);
+        assert.equal((await call('/api/v1/ui/devices')).status, 401);
+        const uiDeviceId = '11111111-1111-4111-8111-111111111111';
+        const uiPrefs = { catalogId: UI_CATALOG_V2, proactive: true, diagnostics: false };
+        const uiRegistration = await call('/api/v1/ui/devices/' + uiDeviceId, 'PUT', a, uiPrefs, 'same-ui-device-key');
+        assert.equal(uiRegistration.status, 200);
+        assert.deepEqual((await call('/api/v1/ui/devices', 'GET', b)).data.devices, []);
+        assert.equal((await call('/api/v1/ui/devices/' + uiDeviceId, 'PUT', b, { ...uiPrefs, proactive: false }, 'same-ui-device-key')).status, 200);
+        assert.equal((await call('/api/v1/ui/devices', 'GET', a)).data.devices[0].proactive, true);
+        assert.equal((await call('/api/v1/ui/devices', 'GET', b)).data.devices[0].proactive, false);
+        assert.equal((await call('/api/v1/ui/devices/' + uiDeviceId, 'DELETE', a, undefined, 'ui-revoke-device')).status, 200);
+        assert.equal((await call('/api/v1/ui/devices', 'GET', b)).data.devices[0].enabled, true);
+        assert.equal((await call('/api/v1/ui/devices/' + uiDeviceId + '/extra', 'PUT', a, uiPrefs, 'ui-spoofed-path')).status, 404);
         assert.equal((await call('/api/v1/profile/communication')).status, 401);
         const initialA = await call('/api/v1/profile/communication', 'GET', a);
         const initialB = await call('/api/v1/profile/communication', 'GET', b);

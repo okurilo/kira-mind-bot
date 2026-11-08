@@ -586,7 +586,7 @@ async function sendPlainFallbackBlocks(
     return result;
 }
 
-function renderPlainText(blocks: RichBlock[]): string {
+export function renderPlainText(blocks: RichBlock[]): string {
     return decodeKnownHtmlEntities(
         renderFallbackHtml(blocks)
             .replace(/<br\s*\/?>/gi, "\n")

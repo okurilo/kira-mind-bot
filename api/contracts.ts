@@ -33,11 +33,14 @@ export interface ApiMessage {
 }
 
 export interface ApiReply {
+    widgetPlacement?: import('../generative-ui/contracts').UiPlacement;
     messages: ApiMessage[];
     backgroundJob?: { id: string; status: string; required: boolean };
 }
 
 export interface ApiBackend {
+    uiApi?: import('./ui').UiHttpApi;
+    validateAction?(token: string, values: import('../generative-ui/contracts').UiValues | undefined): Promise<void> | void;
     workouts?: import('./workouts/http').WorkoutHttpApi;
     browserSession?: import('./browser').BrowserSessionApi;
     status(): Promise<unknown>;
@@ -45,7 +48,7 @@ export interface ApiBackend {
     history(limit: number): Promise<unknown>;
     reminders(): Promise<unknown>;
     tasks(): Promise<unknown>;
-    dialogueJobs?(): Promise<unknown>;
+    dialogueJobs?(ui?: { deviceId?: string; bindingId?: string; after?: string }): Promise<unknown>;
     cancelDialogueJob?(id: string): Promise<unknown>;
     settings?(): Promise<ApiSettings>;
     modelPreferences?(): Promise<unknown>;
@@ -56,7 +59,7 @@ export interface ApiBackend {
     message(text: string, options?: { deferredDialogue?: boolean; liveBrowserRequest?: { operationId: string }; ui?: import('../generative-ui/contracts').UiRequest }): Promise<ApiReply>;
     photoReady(): Promise<import('../ai/modelPresets').AiPresetName | null>;
     photo(buffer: Buffer, caption?: string, preset?: import('../ai/modelPresets').AiPresetName | null, ui?: import('../generative-ui/contracts').UiRequest): Promise<ApiReply>;
-    action(token: string, ui?: import('../generative-ui/contracts').UiRequest): Promise<ApiReply>;
+    action(token: string, ui?: import('../generative-ui/contracts').UiRequest, values?: import('../generative-ui/contracts').UiValues): Promise<ApiReply>;
     file(id: string): Promise<{ data: Buffer; filename: string }>;
     /** The app's text mode (API_AI_MODEL_PRESET): catalog, its selection and the server's global mode. */
     modelSettings(): Promise<unknown>;

@@ -1,5 +1,5 @@
 {
-  "openapi": "3.0.3",
+  "openapi": "3.1.0",
   "info": {
     "title": "Kira owner API",
     "version": "1.0.0",
@@ -464,6 +464,9 @@
                   },
                   "ui": {
                     "$ref": "#/components/schemas/UiRequest"
+                  },
+                  "values": {
+                    "$ref": "#/components/schemas/UiValues"
                   }
                 }
               }
@@ -1492,13 +1495,123 @@
                       "items": {
                         "$ref": "#/components/schemas/DialogueJob"
                       }
+                    },
+                    "uiEvents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "seq": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "widget-note",
+                              "ui-update"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 24,
+                            "format": "date-time",
+                            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$"
+                          },
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+                          },
+                          "bindingId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+                          },
+                          "messages": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer",
+                                  "maximum": -1
+                                },
+                                "type": {
+                                  "const": "text"
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 12000
+                                },
+                                "ui": {
+                                  "$ref": "#/components/schemas/UiPayload"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "type",
+                                "ui"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 1
+                          }
+                        },
+                        "required": [
+                          "seq",
+                          "kind",
+                          "createdAt",
+                          "messages"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 50
+                    },
+                    "uiNextCursor": {
+                      "type": "string"
                     }
                   }
                 }
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "uiAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{1,16}$"
+            }
+          },
+          {
+            "name": "uiDeviceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "name": "uiBindingId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+            }
+          }
+        ]
       }
     },
     "/dialogue-jobs/{id}": {
@@ -1846,9 +1959,6 @@
           "401": {
             "description": "Unauthorized"
           },
-          "503": {
-            "description": "communication_profile_unavailable: failed read/write is not an empty profile"
-          },
           "429": {
             "description": "rate_limited: shared authenticated REST budget exceeded before profile/memory/storage work",
             "headers": {
@@ -1860,6 +1970,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "communication_profile_unavailable: failed read/write is not an empty profile"
           }
         }
       },
@@ -1920,14 +2033,11 @@
               }
             }
           },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "503": {
-            "description": "communication_profile_unavailable: failed read/write is not an empty profile"
-          },
           "400": {
             "description": "invalid_communication_profile"
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "409": {
             "description": "revision_conflict with current profile",
@@ -1976,6 +2086,340 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "communication_profile_unavailable: failed read/write is not an empty profile"
+          }
+        }
+      }
+    },
+    "/ui-feedback": {
+      "post": {
+        "operationId": "postUi1",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UiFeedback"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ui/devices": {
+      "get": {
+        "operationId": "getUi2",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "devices": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UiDevice"
+                      },
+                      "minItems": 0,
+                      "maxItems": 32
+                    }
+                  },
+                  "required": [
+                    "devices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ui/devices/{deviceId}": {
+      "put": {
+        "operationId": "putUi3",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "catalogId": {
+                    "const": "urn:kira:ui:catalog:2"
+                  },
+                  "proactive": {
+                    "type": "boolean"
+                  },
+                  "diagnostics": {
+                    "type": "boolean"
+                  },
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "catalogId",
+                  "proactive",
+                  "diagnostics"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "device": {
+                      "$ref": "#/components/schemas/UiDevice"
+                    }
+                  },
+                  "required": [
+                    "device"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteUi4",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ui/feedback-metrics": {
+      "get": {
+        "operationId": "getUi5",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiFeedbackMetrics"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ui/surfaces": {
+      "get": {
+        "operationId": "getUi6",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "surfaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "surfaceId": {
+                            "type": "string",
+                            "pattern": "^kira_[a-f0-9]{32}$"
+                          },
+                          "messageId": {
+                            "type": "integer",
+                            "maximum": -1
+                          },
+                          "revision": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "deleted": {
+                            "type": "boolean"
+                          },
+                          "ui": {
+                            "$ref": "#/components/schemas/UiPayload"
+                          }
+                        },
+                        "required": [
+                          "surfaceId",
+                          "messageId",
+                          "revision",
+                          "deleted"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 0,
+                      "maxItems": 128
+                    }
+                  },
+                  "required": [
+                    "surfaces"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/ui/surfaces/{surfaceId}": {
+      "delete": {
+        "operationId": "deleteUi7",
+        "parameters": [
+          {
+            "name": "surfaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^kira_[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "expectedRevision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped UI result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2094,6 +2538,34 @@
               }
             },
             "description": "Продолжение ответа. Получайте состояние через GET /dialogue-jobs; повторный POST /messages вернёт первоначальную квитанцию."
+          },
+          "widgetPlacement": {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "pattern": "^kira_[a-f0-9]{32}$"
+              },
+              "objectId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+              },
+              "side": {
+                "type": "string",
+                "enum": [
+                  "front",
+                  "top",
+                  "wall"
+                ]
+              }
+            },
+            "required": [
+              "surfaceId",
+              "objectId",
+              "side"
+            ],
+            "additionalProperties": false
           }
         }
       },
@@ -2739,6 +3211,13 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "ui": {
+            "$ref": "#/components/schemas/UiPayload"
+          },
+          "uiMessageId": {
+            "type": "integer",
+            "maximum": -1
           }
         }
       },
@@ -3122,135 +3601,111 @@
         }
       },
       "UiRequest": {
-        "description": "Opt-in per request. enabled=true requires catalogId. With UI, the complete answer is synchronous even with Prefer: respond-async. Unknown catalogs are refused before execution.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean",
-                "enum": [
-                  true
-                ]
-              },
-              "catalogId": {
-                "type": "string",
-                "enum": [
-                  "urn:kira:ui:catalog:1"
-                ]
-              }
-            },
-            "required": [
-              "enabled",
-              "catalogId"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "enabled": {
-                "type": "boolean",
-                "enum": [
-                  false
-                ]
-              },
-              "catalogId": {
-                "type": "string",
-                "enum": [
-                  "urn:kira:ui:catalog:1"
-                ]
-              }
-            },
-            "required": [
-              "enabled"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "UiPayload": {
-        "description": "Graph integrity, matched chart/table lengths, donut constraints and the UTF-8 byte budget are additionally checked by the server and renderer.",
         "type": "object",
         "properties": {
-          "protocol": {
-            "enum": [
-              "a2ui"
-            ],
-            "type": "string"
-          },
-          "version": {
-            "enum": [
-              "1.0"
-            ],
-            "type": "string"
+          "enabled": {
+            "type": "boolean"
           },
           "catalogId": {
+            "type": "string",
             "enum": [
-              "urn:kira:ui:catalog:1"
-            ],
-            "type": "string"
+              "urn:kira:ui:catalog:1",
+              "urn:kira:ui:catalog:2"
+            ]
           },
-          "messages": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "version": {
-                  "enum": [
-                    "1.0"
-                  ],
-                  "type": "string"
-                },
-                "createSurface": {
-                  "type": "object",
-                  "properties": {
-                    "surfaceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 64,
-                      "pattern": "^kira_[a-f0-9]{32}$"
-                    },
-                    "catalogId": {
-                      "enum": [
-                        "urn:kira:ui:catalog:1"
-                      ],
-                      "type": "string"
-                    },
-                    "components": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/UiComponent"
-                      },
-                      "minItems": 1,
-                      "maxItems": 64
-                    }
-                  },
-                  "required": [
-                    "surfaceId",
-                    "catalogId",
-                    "components"
-                  ],
-                  "additionalProperties": false
-                }
+          "metadata": {
+            "type": "boolean"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "pattern": "^kira_[a-f0-9]{32}$"
               },
-              "required": [
-                "version",
-                "createSurface"
-              ],
-              "additionalProperties": false
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
             },
-            "minItems": 1,
-            "maxItems": 1
+            "required": [
+              "surfaceId",
+              "revision"
+            ],
+            "additionalProperties": false
+          },
+          "device": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+              },
+              "bindingId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+              }
+            },
+            "required": [
+              "id",
+              "bindingId"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
-          "protocol",
-          "version",
-          "catalogId",
-          "messages"
+          "enabled"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "enabled": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "catalogId"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "target"
+              ]
+            },
+            "then": {
+              "properties": {
+                "catalogId": {
+                  "const": "urn:kira:ui:catalog:2"
+                }
+              },
+              "required": [
+                "catalogId"
+              ]
+            }
+          }
+        ],
+        "description": "Per-turn opt-in. V1 metadata requires metadata:true. Only v2 supports async UI and target updates. Preserve all flags on idempotent retries."
+      },
+      "UiPayload": {
+        "oneOf": [
+          {
+            "$ref": "../docs/generative-ui.schema.json"
+          },
+          {
+            "$ref": "../docs/generative-ui.metadata.schema.json"
+          },
+          {
+            "$ref": "../docs/generative-ui.v2.schema.json"
+          }
+        ]
       },
       "UiAction": {
         "oneOf": [
@@ -3631,8 +4086,8 @@
                       "type": "array",
                       "items": {
                         "type": "number",
-                        "minimum": -1000000000000000.0,
-                        "maximum": 1000000000000000.0
+                        "minimum": -1000000000000000,
+                        "maximum": 1000000000000000
                       },
                       "minItems": 1,
                       "maxItems": 48
@@ -3692,6 +4147,167 @@
             "additionalProperties": false
           }
         ]
+      },
+      "UiValues": {
+        "type": "object",
+        "maxProperties": 8,
+        "propertyNames": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+        },
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "number",
+              "minimum": -1000000000000000,
+              "maximum": 1000000000000000
+            }
+          ]
+        }
+      },
+      "UiDevice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+          },
+          "bindingId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "catalogId": {
+            "const": "urn:kira:ui:catalog:2"
+          },
+          "proactive": {
+            "type": "boolean"
+          },
+          "diagnostics": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "bindingId",
+          "revision",
+          "catalogId",
+          "proactive",
+          "diagnostics",
+          "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "UiFeedback": {
+        "type": "object",
+        "properties": {
+          "surfaceId": {
+            "type": "string",
+            "pattern": "^kira_[a-f0-9]{32}$"
+          },
+          "messageId": {
+            "type": "integer",
+            "maximum": -1
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "useful",
+              "not_useful",
+              "not_shown"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "device": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+              },
+              "bindingId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$"
+              }
+            },
+            "required": [
+              "id",
+              "bindingId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "surfaceId",
+          "messageId",
+          "verdict"
+        ],
+        "additionalProperties": false,
+        "description": "Only structured reason codes, never answer/widget text. not_shown requires an enabled diagnostics device binding and reason."
+      },
+      "UiFeedbackMetrics": {
+        "type": "object",
+        "properties": {
+          "useful": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "notUseful": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "shownOnDevice": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rejectedOnDevice": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rejectionReasons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "unknownUnreported": {
+            "const": true
+          }
+        },
+        "required": [
+          "useful",
+          "notUseful",
+          "shownOnDevice",
+          "rejectedOnDevice",
+          "rejectionReasons",
+          "unknownUnreported"
+        ],
+        "additionalProperties": false
       }
     }
   }

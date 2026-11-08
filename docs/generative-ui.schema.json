@@ -90,7 +90,8 @@
                     "actionToken": {
                       "type": "string",
                       "minLength": 1,
-                      "maxLength": 32000
+                      "maxLength": 32000,
+                      "pattern": "^[\\x21-\\x7e]+$"
                     }
                   },
                   "required": [
@@ -421,8 +422,8 @@
                     "type": "array",
                     "items": {
                       "type": "number",
-                      "minimum": -1000000000000000.0,
-                      "maximum": 1000000000000000.0
+                      "minimum": -1000000000000000,
+                      "maximum": 1000000000000000
                     },
                     "minItems": 1,
                     "maxItems": 48

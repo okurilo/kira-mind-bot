@@ -15,6 +15,7 @@ import { buildKnowledgeSourcePrompt, decideKnowledgeSource } from '../utils/know
 import { runKiraRuntime } from '../orchestration/runtime/kernel';
 import { appendPersistedHistory } from './SessionStorage';
 import { recordDeferredOutcome } from './productAnalytics';
+import { composeDialogueUi } from '../generative-ui/dialogue';
 
 const active = new Map<string, AbortController>();
 const MAX_CONCURRENT = 2;
@@ -28,7 +29,8 @@ let retryPollAt = 0;
 export function publicDialogueJob(job: DialogueJob) {
     return { id: job.id, turnId: job.turnId, messageId: job.messageId, status: job.status, phase: job.phase,
         required: job.input.required, notice: job.notice ?? undefined, result: job.resultText ?? undefined,
-        error: job.error ?? undefined, createdAt: job.createdAt, updatedAt: job.updatedAt };
+        error: job.error ?? undefined, createdAt: job.createdAt, updatedAt: job.updatedAt,
+        ...(job.input.uiResult ? { ui: job.input.uiResult.ui, uiMessageId: job.input.uiResult.messageId } : {}) };
 }
 
 /** Register before commands as well as text: any new user turn supersedes older analysis in this channel. */
@@ -153,7 +155,8 @@ export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob,
         if (job.status === 'delivering') {
             await send(job, job.resultText || 'Не удалось завершить разбор. Повтори вопрос, если он ещё актуален.', false);
             if (!job.channel.startsWith('api:')) await recordDeferredOutcome(job.input.analyticsTaskId, job.userId, job.error ? 'failed' : 'delivered', true);
-            if (job.channel.startsWith('api:') && job.resultText) await appendPersistedHistory(job.channel, 'bot', job.resultText);
+            if (job.channel.startsWith('api:') && job.resultText) await appendPersistedHistory(job.channel, 'bot', job.resultText,
+                job.input.uiResult && 'createSurface' in job.input.uiResult.ui.messages[0] ? { ui: job.input.uiResult.ui as import('../generative-ui/contracts').UiPayload, apiMessageId: job.input.uiResult.messageId } : {});
             await repository.update(job, { status: 'completed' });
             return;
         }
@@ -182,7 +185,10 @@ export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob,
             const result = job.input.required ? { material: true, answer } : await (deps.addition ?? addition)(job, answer);
             if (!await valid()) return;
             if (!result.material || !result.answer.trim()) { await repository.update(job, { status: 'completed', resultText: null }); return; }
-            await repository.update(job, { status: 'ready', phase: 'deep', resultText: result.answer });
+            const uiResult = await composeDialogueUi(job, result.answer, valid);
+            if (!await valid()) return;
+            await repository.update(job, { status: 'ready', phase: 'deep', resultText: result.answer,
+                ...(uiResult ? { input: { ...job.input, uiResult } } : {}) });
         })));
     } catch (error) {
         if (backgroundQuotaError(error) && !job.input.required) {

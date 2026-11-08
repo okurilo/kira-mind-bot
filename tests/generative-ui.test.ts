@@ -8,7 +8,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import snapshotSchema from '../docs/generative-ui.schema.json';
 import { evaluateGenerativeUi } from '../scripts/evalGenerativeUi';
 
-const binding = { urls: new Set(['https://example.org/weather']), actions: ['server-signed-token'], replyToken: (text: string) => `signed:${text}` };
+const binding = { urls: new Set(['https://example.org/weather']), actions: ['server-signed-token'], replyToken: (text: string) => `signed.${Buffer.from(text).toString('base64url')}` };
 const tree = (...children: any[]) => ({ components: [{ id: 'root', component: 'Column', children: children.map(item => item.id) }, ...children] });
 
 test('semantic evaluation never counts provider failures or malformed UI as correct abstentions', async () => {
@@ -45,7 +45,7 @@ test('catalog composes layouts, metrics, tables, charts and three bounded action
     assert.equal(payload.messages[0].createSurface.catalogId, UI_CATALOG_ID);
     assert.match(payload.messages[0].createSurface.surfaceId, /^kira_[a-f0-9]{32}$/);
     for (const [draft, expected] of [
-        [{ type: 'reply', text: 'Покажи завтра' }, { event: { name: 'kira.reply', context: { actionToken: 'signed:Покажи завтра' } } }],
+        [{ type: 'reply', text: 'Покажи завтра' }, { event: { name: 'kira.reply', context: { actionToken: binding.replyToken('Покажи завтра') } } }],
         [{ type: 'existing', index: 0 }, { event: { name: 'kira.action', context: { actionToken: 'server-signed-token' } } }],
         [{ type: 'openUrl', url: 'https://example.org/weather' }, { functionCall: { '@call': 'openUrl', args: { url: 'https://example.org/weather' } } }],
     ]) {

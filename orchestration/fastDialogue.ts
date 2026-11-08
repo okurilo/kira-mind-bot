@@ -79,7 +79,9 @@ export async function tryFastDialogueResult(ctx: BotContext, turn: ConversationT
                     ...(knowledge.requiresWeb ? { knowledgeSource: 'external_current' as const } : {}) };
                 const job = await DialogueJobRepository.stage({ channel: ctx.sessionStorageKey ?? String(ctx.chat!.id), turnId: ctx.dialogueTurnId!,
                     userId: ctx.from!.id, chatId: ctx.chat!.id, messageId: ctx.message?.message_id,
-                    input: { analyticsTaskId: ctx.productAnalytics?.id, message: turn.userText, initialAnswer: required ? '' : answer, required, classification: cleanClassification,
+                    input: { ...(ctx.generativeUiRequest?.catalogId === 'urn:kira:ui:catalog:2' && ctx.sessionStorageKey?.startsWith('api:') && typeof ctx.session.apiActionVersion === 'string'
+                        ? { ui: { request: structuredClone(ctx.generativeUiRequest), version: ctx.session.apiActionVersion } } : {}),
+                        analyticsTaskId: ctx.productAnalytics?.id, message: turn.userText, initialAnswer: required ? '' : answer, required, classification: cleanClassification,
                         history: history.slice(-8).map(({ role, content }) => ({ role, content: content.slice(0, 1800) })),
                         topic: turn.currentTopic?.slice(0, 400), memoryRecallFocus: validMemoryFocus(ctx) ? structuredClone(validMemoryFocus(ctx)) : undefined,
                         preset: await getActiveAiPresetName(), modelPolicy: await getModelPolicy() } });

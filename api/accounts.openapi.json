@@ -361,6 +361,24 @@
     },
     "/notifications/{id}/read": {
       "$ref": "./public-accounts.openapi.json#/paths/~1notifications~1{id}~1read"
+    },
+    "/ui-feedback": {
+      "$ref": "./openapi.json#/paths/~1ui-feedback"
+    },
+    "/ui/devices": {
+      "$ref": "./openapi.json#/paths/~1ui~1devices"
+    },
+    "/ui/devices/{deviceId}": {
+      "$ref": "./openapi.json#/paths/~1ui~1devices~1{deviceId}"
+    },
+    "/ui/feedback-metrics": {
+      "$ref": "./openapi.json#/paths/~1ui~1feedback-metrics"
+    },
+    "/ui/surfaces": {
+      "$ref": "./openapi.json#/paths/~1ui~1surfaces"
+    },
+    "/ui/surfaces/{surfaceId}": {
+      "$ref": "./openapi.json#/paths/~1ui~1surfaces~1{surfaceId}"
     }
   },
   "components": {

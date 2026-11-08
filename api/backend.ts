@@ -38,11 +38,17 @@ import { PgWorkoutStore } from '../services/workouts/store';
 import { AppDataSource } from '../data-source';
 import { getActiveBotProfile } from '../utils/botIdentity';
 import { isApiOnlyRuntime } from '../utils/runtimeIdentity';
-import { UI_CAPABILITY, type UiRequest } from '../generative-ui/contracts';
+import { UI_CAPABILITY, UI_CATALOG_V2, type UiRequest, type UiValues, type UiPlacement } from '../generative-ui/contracts';
 import { composeUi } from '../generative-ui/compose';
+import { UiService } from '../generative-ui/service';
+import { UiHttpApi } from './ui';
+import { submissionText, validateSubmission } from '../generative-ui/forms';
 
 /** Same handlers, orchestrator, identity and knowledge; only the delivery and session channel differ. */
 export class BotApiBackend implements ApiBackend {
+    private uiHttp?: UiHttpApi;
+    private get widgets() { return this.uiService ??= new UiService(this.options.ownerId); }
+    get uiApi() { return this.uiHttp ??= new UiHttpApi(this.widgets); }
     private workoutApi?: WorkoutHttpApi;
     get workouts() { return this.workoutApi ??= new WorkoutHttpApi(new WorkoutService(new PgWorkoutStore(AppDataSource), { profile: getActiveBotProfile(), ownerId: this.options.ownerId })); }
     readonly browserSession: BrowserSessionApi;
@@ -56,7 +62,7 @@ export class BotApiBackend implements ApiBackend {
 
     constructor(private readonly bot: Bot<BotContext>, private readonly options: ExternalApiOptions,
                 private readonly models: ApiModelSettingsStore = new BotSettingsApiModelStore(),
-                private readonly catalog = new ApiModelCatalog()) {
+                private readonly catalog = new ApiModelCatalog(), private uiService?: UiService) {
         this.sessionKey = `api:${options.ownerId}`;
         this.browserSession = new BrowserSessionApi(options.ownerId, this.sessionKey, async work => {
             const preset = await apiTurnPreset(this.models);
@@ -126,10 +132,14 @@ export class BotApiBackend implements ApiBackend {
 
     async history(limit: number) {
         const session = await this.storage.read(this.sessionKey);
-        return { messages: (session?.messageHistory ?? []).slice(0, limit).reverse().map(item => ({
-            role: item.role === 'bot' ? 'assistant' : item.role,
-            text: item.content, createdAt: item.timestamp.toISOString(),
-            ...(item.ui ? { ui: item.ui, id: item.apiMessageId } : {}),
+        return { messages: await Promise.all((session?.messageHistory ?? []).slice(0, limit).reverse().map(async item => {
+            let ui = item.ui;
+            if (ui?.catalogId === UI_CATALOG_V2) {
+                const surface = await this.widgets.surface(ui.messages[0].createSurface.surfaceId).catch(() => undefined);
+                ui = surface && !surface.deleted ? surface.ui : undefined;
+            }
+            return { role: item.role === 'bot' ? 'assistant' : item.role, text: item.content, createdAt: item.timestamp.toISOString(),
+                ...(ui ? { ui } : {}), ...(item.apiMessageId ? { id: item.apiMessageId } : {}) };
         })) };
     }
 
@@ -148,11 +158,11 @@ export class BotApiBackend implements ApiBackend {
         })), hasMore: tasks.length > 100 };
     }
 
-    async dialogueJobs() {
+    async dialogueJobs(ui?: { deviceId?: string; bindingId?: string; after?: string }) {
         const jobs = await DialogueJobRepository.list(this.sessionKey);
         for (const job of jobs) if (job.input.required && job.status === 'completed')
             await recordDeferredOutcome(job.input.analyticsTaskId, this.options.ownerId, job.error ? 'failed' : 'delivered', true);
-        return { jobs: jobs.map(publicDialogueJob) };
+        return { jobs: jobs.map(publicDialogueJob), ...(ui ? await this.widgets.events(ui) : {}) };
     }
     async cancelDialogueJob(id: string) { return { cancelled: await DialogueJobRepository.cancel(this.sessionKey, id) }; }
 
@@ -164,11 +174,26 @@ export class BotApiBackend implements ApiBackend {
             message_id: nextApiMessageId(), date: Math.floor(Date.now() / 1000),
             from: this.owner(), chat: this.chat(), text,
             ...(command ? { entities: [{ type: 'bot_command', offset: 0, length: command[0].length }] } : {}),
-        } }, false, options.expectedVersion, options.deferredDialogue === true, options.preset, options.arRoom, options.liveBrowserRequest, options.ui);
+        } }, { expectedVersion: options.expectedVersion, deferredDialogue: options.deferredDialogue === true, selectedPreset: options.preset,
+            arRoom: options.arRoom, liveBrowserRequest: options.liveBrowserRequest, ui: options.ui });
     }
 
-    async action(token: string, ui?: UiRequest): Promise<ApiReply> {
+    validateAction(token: string, values?: UiValues) {
+        const action = this.actions.inspect(token);
+        if (action.data.startsWith('ui.submit:')) {
+            let submission;
+            try { submission = validateSubmission(JSON.parse(action.data.slice('ui.submit:'.length))); }
+            catch { throw new ApiError(400, 'invalid_ui_values', 'Некорректная форма.'); }
+            submissionText(submission, values);
+        } else if (values !== undefined) throw new ApiError(400, 'invalid_ui_values', 'Эта кнопка не принимает поля формы.');
+    }
+    async action(token: string, ui?: UiRequest, values?: UiValues): Promise<ApiReply> {
         const action = this.actions.verify(token);
+        this.validateAction(token, values);
+        if (action.data.startsWith('ui.submit:')) {
+            const submission = validateSubmission(JSON.parse(action.data.slice('ui.submit:'.length)));
+            return this.message(submissionText(submission, values), { expectedVersion: action.version, ui });
+        }
         // A quick reply is a new owner message through the canonical pipeline, never a privileged callback.
         if (action.data.startsWith('ui.reply:')) {
             return this.message(action.data.slice('ui.reply:'.length), { expectedVersion: action.version, ui });
@@ -180,7 +205,7 @@ export class BotApiBackend implements ApiBackend {
                 message_id: action.messageId, date: Math.floor(Date.now() / 1000),
                 from: this.botInfo, chat: this.chat(), text: action.text,
             },
-        } }, true, action.data.startsWith('pa:') ? undefined : action.version, false, undefined, undefined, undefined, ui);
+        } }, { confirmation: true, expectedVersion: action.data.startsWith('pa:') ? undefined : action.version, ui });
     }
 
     async photo(buffer: Buffer, caption = '', preset?: AiPresetName | null, ui?: UiRequest, arRoom?: BotContext['arRoom']): Promise<ApiReply> {
@@ -191,7 +216,7 @@ export class BotApiBackend implements ApiBackend {
             return await this.dispatch({ update_id: 0, message: {
                 message_id: nextApiMessageId(), date: Math.floor(Date.now() / 1000), from: this.owner(), chat: this.chat(),
                 ...(caption ? { caption } : {}), photo: [{ file_id: fileId, file_unique_id: fileId, width: 16, height: 16 }],
-            } }, false, undefined, false, selected, arRoom, undefined, ui);
+            } }, { selectedPreset: selected, arRoom, ui });
         } finally { this.photoInputs.delete(fileId); }
     }
 
@@ -215,8 +240,10 @@ export class BotApiBackend implements ApiBackend {
     private owner() { return { id: this.options.ownerId, is_bot: false, first_name: 'Владелец' }; }
     private chat() { return { id: this.options.ownerId, type: 'private' as const, first_name: 'Владелец' }; }
 
-    private async dispatch(update: Update, confirmation = false, expectedVersion?: string, deferredDialogue = false, selectedPreset?: AiPresetName | null,
-                           arRoom?: BotContext['arRoom'], liveBrowserRequest?: BotContext['liveBrowserRequest'], ui?: UiRequest): Promise<ApiReply> {
+    private async dispatch(update: Update, { confirmation = false, expectedVersion, deferredDialogue = false, selectedPreset, arRoom, liveBrowserRequest, ui }: {
+        confirmation?: boolean; expectedVersion?: string; deferredDialogue?: boolean; selectedPreset?: AiPresetName | null;
+        arRoom?: BotContext['arRoom']; liveBrowserRequest?: BotContext['liveBrowserRequest']; ui?: UiRequest;
+    } = {}): Promise<ApiReply> {
         const persisted = await this.storage.read(this.sessionKey);
         if (expectedVersion !== undefined && persisted?.apiActionVersion !== expectedVersion) {
             throw new ApiError(410, 'action_expired', 'Кнопка относится к предыдущему запросу. Повтори исходный запрос.');
@@ -235,24 +262,37 @@ export class BotApiBackend implements ApiBackend {
         });
         ctx.sessionStorageKey = this.sessionKey;
         // v1 widgets are atomic snapshots of a complete answer. Prefer is optional; do not stage a text-only job.
-        ctx.allowDeferredDialogue = deferredDialogue && !ui;
+        ctx.allowDeferredDialogue = deferredDialogue && (!ui || ui.catalogId === UI_CATALOG_V2);
+        ctx.generativeUiRequest = ui;
         ctx.arRoom = arRoom;
         ctx.liveBrowserRequest = liveBrowserRequest;
         const priorHistory = new Set(ctx.session.messageHistory);
+        let widgetPlacement: UiPlacement | undefined;
         // The app's own text mode, read once per turn; null follows the server's global preset.
         const preset = selectedPreset === undefined ? await apiTurnPreset(this.models) : selectedPreset;
         await runWithChannelPreset(preset, async () => {
             await this.dispatcher.middleware()(ctx, async () => {});
-            if (ui) {
+            if (ui && !ctx.dialogueJobId) {
                 const message = transport.result().messages.filter(item => item.type === 'text' && item.text && item.replacesMessageId === undefined).at(-1);
                 if (message) {
+                    const fileIds = new Set(transport.result().messages.filter(m => m.type === 'photo' || /\.(png|jpe?g|gif|webp)$/i.test(m.filename ?? ''))
+                        .flatMap(m => m.fileUrl?.match(/^\/api\/v1\/files\/([a-f0-9-]{36})$/)?.[1] ?? []));
                     const payload = await composeUi(update.message?.text ?? update.message?.caption ?? '', message,
-                        text => this.actions.sign(message.id, `ui.reply:${text}`, message.text ?? '', version));
+                        text => this.actions.sign(message.id, `ui.reply:${text}`, message.text ?? '', version), undefined, {
+                            request: ui, files: fileIds, sceneObjects: arRoom?.uiObjects,
+                            onPlacement: value => { widgetPlacement = value; },
+                            submitToken: (text, fields) => this.actions.sign(message.id, 'ui.submit:' + JSON.stringify({ text, fields }), message.text ?? '', version),
+                        });
                     if (payload) {
-                        message.ui = payload;
-                        const historyEntry = ctx.session.messageHistory.find(item => !priorHistory.has(item) && item.role === 'bot' && item.content === message.text);
-                        if (historyEntry) { historyEntry.ui = payload; historyEntry.apiMessageId = message.id; }
-                        else ctx.session.messageHistory.unshift({ role: 'bot', content: message.text!, timestamp: new Date(), ui: payload, apiMessageId: message.id });
+                        try {
+                            if (ui.target) { await this.widgets.update(ui.target.surfaceId, ui.target.revision, payload); widgetPlacement = undefined; }
+                            else {
+                                await this.widgets.record(payload, message.id, ui); message.ui = payload;
+                                const historyEntry = ctx.session.messageHistory.find(item => !priorHistory.has(item) && item.role === 'bot' && item.content === message.text);
+                                if (historyEntry) { historyEntry.ui = payload; historyEntry.apiMessageId = message.id; }
+                                else ctx.session.messageHistory.unshift({ role: 'bot', content: message.text!, timestamp: new Date(), ui: payload, apiMessageId: message.id });
+                            }
+                        } catch { widgetPlacement = undefined; /* Optional visual persistence cannot discard a completed answer. */ }
                     }
                 }
                 // Bound presentation storage independently of text history. Existing session merge/JSON handles it.
@@ -265,6 +305,7 @@ export class BotApiBackend implements ApiBackend {
         await this.storage.write(this.sessionKey, ctx.session);
         if (ctx.dialogueJobId) await activateDialogueJob(ctx, ctx.dialogueJobId);
         const result = transport.result();
+        if (widgetPlacement) result.widgetPlacement = widgetPlacement;
         if (ctx.dialogueJobId) {
             const job = await DialogueJobRepository.find(ctx.dialogueJobId, this.sessionKey);
             if (job) result.backgroundJob = { id: job.id, status: job.status, required: job.input.required };

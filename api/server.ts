@@ -9,6 +9,8 @@ import { MAX_PHOTO_BODY_BYTES, parsePhotoTurn } from './photos';
 import { workoutRouteAllowed } from './workouts/http';
 import { accountAuthority, accountHttpOperation } from '../ai/accountPolicy';
 import { parseUiRequest } from '../generative-ui/request';
+import { actionValues } from '../generative-ui/forms';
+import { uiRouteAllowed, parseUiPoll, uiRequestFingerprint } from './ui';
 
 const PREFIX = '/api/v1';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -87,6 +89,10 @@ export function createExternalApiServer(
                 req.resume();
                 throw new ApiError(429, 'rate_limited', 'Слишком много запросов.');
             }
+            if (uiRouteAllowed(req.method ?? '', path)) {
+                if (!backend.uiApi) throw new ApiError(404, 'not_found', 'Карточки недоступны.');
+                return json(200, await backend.uiApi.request(req.method!, path, url.searchParams, () => readBody(req), req.headers['idempotency-key'], operations));
+            }
             if (workoutRouteAllowed(req.method ?? '', path)) {
                 if (!backend.workouts) throw new ApiError(404, 'not_found', 'Тренировки недоступны.');
                 return json(200, await backend.workouts.request(req.method!, path, url.searchParams, () => readBody(req), req.headers['idempotency-key'], operations));
@@ -147,7 +153,7 @@ export function createExternalApiServer(
                 if (path === `${PREFIX}/capabilities`) return json(200, await backend.capabilities());
                 if (path === `${PREFIX}/reminders`) return json(200, await backend.reminders());
                 if (path === `${PREFIX}/tasks`) return json(200, await backend.tasks());
-                if (path === `${PREFIX}/dialogue-jobs` && backend.dialogueJobs) return json(200, await backend.dialogueJobs());
+                if (path === `${PREFIX}/dialogue-jobs` && backend.dialogueJobs) return json(200, await backend.dialogueJobs(parseUiPoll(url.searchParams)));
                 if (path === `${PREFIX}/model-settings`) return json(200, await backend.modelSettings());
                 if (path === `${PREFIX}/scene`) return json(200, await backend.sceneCapabilities());
                 if (path === `${PREFIX}/history`) {
@@ -247,14 +253,17 @@ export function createExternalApiServer(
             }
             const body = await readBody(req);
             const isAction = path.endsWith('/actions');
+            const values = isAction ? actionValues(body.values) : undefined;
             const ui = parseUiRequest(body.ui);
             const deferredDialogue = !isAction && typeof req.headers.prefer === 'string' && req.headers.prefer.split(',').some(value => value.trim().toLowerCase() === 'respond-async');
             const field = isAction ? 'actionToken' : 'text';
             const value = body[field];
-            if (Object.keys(body).some(key => key !== field && key !== 'ui') || typeof value !== 'string'
+            if (Object.keys(body).some(key => key !== field && key !== 'ui' && !(isAction && key === 'values')) || typeof value !== 'string'
                 || !value.trim() || value.length > (isAction ? 32_000 : 8_000)) {
                 throw new ApiError(400, 'invalid_body', `Передай только непустое поле ${field}.`);
             }
+            if (isAction && backend.validateAction) await backend.validateAction(value, values);
+            else if (values !== undefined) throw new ApiError(400, 'invalid_ui_values', 'Этот формат формы недоступен.');
             const idempotencyKey = req.headers['idempotency-key'];
             if (typeof idempotencyKey !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(idempotencyKey)) {
                 throw new ApiError(400, 'idempotency_key_required', 'Нужен Idempotency-Key: 8–128 букв, цифр, _ или -.');
@@ -268,10 +277,11 @@ export function createExternalApiServer(
             try {
                 // Actions also deduplicate across different client keys: one button may execute only once.
                 // Keep legacy fingerprints for callers without UI. Negotiated UI participates in the receipt.
-                const fingerprint = `${deferredDialogue ? 'async:' : ''}${ui ? `ui:${ui.catalogId}:` : ''}${hash(`${path}:${value}`)}`;
+                const extensions = ui && (ui.metadata || ui.target || ui.device) ? `ext:${uiRequestFingerprint(ui)}:` : '';
+                const fingerprint = `${deferredDialogue ? 'async:' : ''}${ui ? `ui:${ui.catalogId}:` : ''}${extensions}${values === undefined ? '' : `values:${uiRequestFingerprint(values)}:`}${hash(`${path}:${value}`)}`;
                 const result = await operations.run(`${options.ownerId}:request:${hash(idempotencyKey)}`, fingerprint,
                     () => isAction
-                        ? operations.run(`${options.ownerId}:action:${hash(value)}`, fingerprint, () => backend.action(value, ui))
+                        ? operations.run(`${options.ownerId}:action:${hash(value)}`, fingerprint, () => backend.action(value, ui, values))
                         : backend.message(value.trim(), { deferredDialogue,
                             ...(ui ? { ui } : {}),
                             ...(req.headers['x-kira-browser-session'] === 'v1' ? { liveBrowserRequest: { operationId: idempotencyKey } } : {}) }));

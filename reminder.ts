@@ -1,4 +1,5 @@
 import { isApiOnlyRuntime } from './utils/runtimeIdentity';
+import { queueUiNotification } from './services/uiNotifications';
 import { Bot, InlineKeyboard } from "grammy";
 import { BotContext } from "./types";
 import { devLog } from "./utils";
@@ -287,6 +288,7 @@ async function sendReminder(bot: Bot<BotContext>, reminder: Reminder): Promise<v
 
         // Сохраняем ID сообщения для последующих обновлений
         reminder.messageId = (sentMessage as { message_id?: number })?.message_id;
+        queueUiNotification(reminder.chatId, [prefix, messageText].filter(Boolean).join('\n'), `reminder:${reminder.id}:${new Date(reminder.dueDate).toISOString()}`);
         await (await import('./services/productAnalytics')).recordBackgroundDelivery('reminder_delivery', 'reminder', config.allowedUserId,
             `${reminder.id}:${new Date(reminder.dueDate).toISOString()}`, Date.now());
         reminder.status = ReminderStatus.Sent;

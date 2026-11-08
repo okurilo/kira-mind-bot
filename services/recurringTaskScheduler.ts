@@ -23,6 +23,7 @@ import {
     normalizeRecurringExecutionPrompt,
 } from "../utils/recurringTaskPrompt";
 import { esc, footer, heading, paragraph, sendStructured } from "../utils/richMessage";
+import { queueUiNotification } from './uiNotifications';
 import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
 import { config } from '../config';
 
@@ -152,6 +153,7 @@ async function sendRecurringResult(
         footer(`Регулярная задача · ${esc(formatRecurringSchedule(task.schedule))}`),
     ], result.keyboard ? { replyMarkup: result.keyboard } : undefined);
     const messageId = (sent as { message_id?: number } | undefined)?.message_id;
+    if (messageId) queueUiNotification(task.chatId, responseText, `recurring:${task.id}:${messageId}`);
     if (messageId) {
         const storedText = `Регулярная задача «${task.title}»:\n${responseText}`.slice(0, 8_000);
         await appendPersistedSentMessageContext(task.chatId, {

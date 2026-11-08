@@ -370,6 +370,7 @@ export interface ForwardedMessageGroup {
 }
 
 export type BotContext = Context & SessionFlavor<SessionData> & {
+    generativeUiRequest?: import('./generative-ui/contracts').UiRequest;
     /** Transport-only live browser opt-in; never persisted or accepted as an account identity. */
     liveBrowserRequest?: { operationId: string };
     /** Validated by the existing semantic intake, never taken from an API request body. */
@@ -398,7 +399,7 @@ export type BotContext = Context & SessionFlavor<SessionData> & {
     allowDeferredDialogue?: boolean;
     /** A turn said in the app's AR room: the room and Kira's 3D body as this turn's context (never stored), and
      *  whether the turn's photo is the phone's camera frame, whose reading stays visual context, not facts. */
-    arRoom?: { context: string; frame: boolean };
+    arRoom?: { context: string; frame: boolean; uiObjects?: Array<{ id: string; label: string }> };
 };
 
 // Интерфейс для хранения истории сообщений

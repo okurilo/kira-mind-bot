@@ -9,7 +9,8 @@ import { getBotPersona, getCommunicationStyle } from "../persona";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
 import { getZonedDateKey, getZonedDateTimeParts } from "../utils/time";
-import { esc, paragraph, table, heading, RichBlock, sendStructured } from "../utils/richMessage";
+import { esc, paragraph, table, heading, RichBlock, sendStructured, renderPlainText } from "../utils/richMessage";
+import { queueUiNotification } from './uiNotifications';
 
 let timer: NodeJS.Timeout | undefined;
 let lastSentDate = "";
@@ -110,6 +111,7 @@ async function runDigest(bot: Bot<BotContext>): Promise<void> {
     blocks.push(...buildDigestRemindersBlocks(todayReminders));
 
     await sendStructured(bot.api as any, chatId, blocks);
+    queueUiNotification(chatId, renderPlainText(blocks), `morning-digest:${dateKey}`);
     lastSentDate = dateKey;
     console.info("[morning-digest] sent");
 }

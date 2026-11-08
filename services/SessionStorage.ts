@@ -647,7 +647,7 @@ export async function appendPersistedHistory(
     chatId: number | string,
     role: string,
     content: string,
-    options: { kind?: 'image' } = {},
+    options: { kind?: 'image'; ui?: import('../generative-ui/contracts').UiPayload; apiMessageId?: number } = {},
 ): Promise<void> {
     try {
         const repo = AppDataSource.getRepository(SessionEntity);
