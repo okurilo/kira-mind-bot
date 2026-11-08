@@ -38,6 +38,8 @@ import { PgWorkoutStore } from '../services/workouts/store';
 import { AppDataSource } from '../data-source';
 import { getActiveBotProfile } from '../utils/botIdentity';
 import { isApiOnlyRuntime } from '../utils/runtimeIdentity';
+import { UI_CAPABILITY, type UiRequest } from '../generative-ui/contracts';
+import { composeUi } from '../generative-ui/compose';
 
 /** Same handlers, orchestrator, identity and knowledge; only the delivery and session channel differ. */
 export class BotApiBackend implements ApiBackend {
@@ -86,7 +88,7 @@ export class BotApiBackend implements ApiBackend {
         const vision: VisionRoute = await this.photoRoute().catch((error: unknown) => ({ available: false,
             reason: error instanceof ApiError ? error.message : 'Не удалось определить модель для анализа фото.' }));
         return { input: ['text', 'actions', 'photo'], photo: { mime: ['image/jpeg'], maxBytes: MAX_PHOTO_BYTES, vision, notes: PHOTO_STORAGE_NOTE }, output: ['text', 'photo', 'document', 'voice'],
-            browserSession: this.browserSession.capability, commerce: { version: 1, services: commerceCatalog() }, workouts: this.workouts.capability, profile: { communication: COMMUNICATION_CAPABILITY }, settings: ['modelMode', 'modelPreferences'], scene: { version: 1 }, deferredDialogue: { preference: 'respond-async', results: '/api/v1/dialogue-jobs', cancellation: true }, capabilities: BOT_CAPABILITIES };
+            generativeUi: UI_CAPABILITY, browserSession: this.browserSession.capability, commerce: { version: 1, services: commerceCatalog() }, workouts: this.workouts.capability, profile: { communication: COMMUNICATION_CAPABILITY }, settings: ['modelMode', 'modelPreferences'], scene: { version: 1 }, deferredDialogue: { preference: 'respond-async', results: '/api/v1/dialogue-jobs', cancellation: true }, capabilities: BOT_CAPABILITIES };
     }
 
     settings() { return readUserSettings(); }
@@ -127,6 +129,7 @@ export class BotApiBackend implements ApiBackend {
         return { messages: (session?.messageHistory ?? []).slice(0, limit).reverse().map(item => ({
             role: item.role === 'bot' ? 'assistant' : item.role,
             text: item.content, createdAt: item.timestamp.toISOString(),
+            ...(item.ui ? { ui: item.ui, id: item.apiMessageId } : {}),
         })) };
     }
 
@@ -155,17 +158,21 @@ export class BotApiBackend implements ApiBackend {
 
     file(id: string) { return this.files.read(id); }
 
-    async message(text: string, options: { deferredDialogue?: boolean; preset?: AiPresetName | null; arRoom?: BotContext['arRoom']; liveBrowserRequest?: BotContext['liveBrowserRequest'] } = {}): Promise<ApiReply> {
+    async message(text: string, options: { deferredDialogue?: boolean; preset?: AiPresetName | null; arRoom?: BotContext['arRoom']; liveBrowserRequest?: BotContext['liveBrowserRequest']; ui?: UiRequest; expectedVersion?: string } = {}): Promise<ApiReply> {
         const command = text.match(/^\/[a-zA-Z0-9_]+(?:@[a-zA-Z0-9_]+)?/);
         return this.dispatch({ update_id: 0, message: {
             message_id: nextApiMessageId(), date: Math.floor(Date.now() / 1000),
             from: this.owner(), chat: this.chat(), text,
             ...(command ? { entities: [{ type: 'bot_command', offset: 0, length: command[0].length }] } : {}),
-        } }, false, undefined, options.deferredDialogue === true, options.preset, options.arRoom, options.liveBrowserRequest);
+        } }, false, options.expectedVersion, options.deferredDialogue === true, options.preset, options.arRoom, options.liveBrowserRequest, options.ui);
     }
 
-    async action(token: string): Promise<ApiReply> {
+    async action(token: string, ui?: UiRequest): Promise<ApiReply> {
         const action = this.actions.verify(token);
+        // A quick reply is a new owner message through the canonical pipeline, never a privileged callback.
+        if (action.data.startsWith('ui.reply:')) {
+            return this.message(action.data.slice('ui.reply:'.length), { expectedVersion: action.version, ui });
+        }
         return this.dispatch({ update_id: 0, callback_query: {
             id: String(nextApiMessageId()), from: this.owner(), chat_instance: 'external-api',
             data: action.data,
@@ -173,10 +180,10 @@ export class BotApiBackend implements ApiBackend {
                 message_id: action.messageId, date: Math.floor(Date.now() / 1000),
                 from: this.botInfo, chat: this.chat(), text: action.text,
             },
-        } }, true, action.data.startsWith('pa:') ? undefined : action.version);
+        } }, true, action.data.startsWith('pa:') ? undefined : action.version, false, undefined, undefined, undefined, ui);
     }
 
-    async photo(buffer: Buffer, caption = '', preset?: AiPresetName | null, arRoom?: BotContext['arRoom']): Promise<ApiReply> {
+    async photo(buffer: Buffer, caption = '', preset?: AiPresetName | null, ui?: UiRequest, arRoom?: BotContext['arRoom']): Promise<ApiReply> {
         const selected = preset === undefined ? await this.photoReady() : preset;
         const fileId = `api-photo-${randomUUID()}`;
         this.photoInputs.set(fileId, buffer);
@@ -184,15 +191,15 @@ export class BotApiBackend implements ApiBackend {
             return await this.dispatch({ update_id: 0, message: {
                 message_id: nextApiMessageId(), date: Math.floor(Date.now() / 1000), from: this.owner(), chat: this.chat(),
                 ...(caption ? { caption } : {}), photo: [{ file_id: fileId, file_unique_id: fileId, width: 16, height: 16 }],
-            } }, false, undefined, false, selected, arRoom);
+            } }, false, undefined, false, selected, arRoom, undefined, ui);
         } finally { this.photoInputs.delete(fileId); }
     }
 
     /** Room turns as turns of this same dialogue: words as /messages, a frame as /photos, the room as their context. */
     private sceneChannel(): SceneChannel {
         return {
-            say: (text, room, preset) => this.message(text, { preset, arRoom: room }),
-            look: (frame, text, room, preset) => this.photo(frame, text, preset, room),
+            say: (text, room, preset, ui) => this.message(text, { preset, arRoom: room, ui }),
+            look: (frame, text, room, preset, ui) => this.photo(frame, text, preset, ui, room),
             visionRoute: () => photoVisionRoute(),   // under the mode the scene service sets
             recent: async () => (await this.storage.read(this.sessionKey))?.messageHistory ?? [],
             note: async line => {
@@ -209,7 +216,7 @@ export class BotApiBackend implements ApiBackend {
     private chat() { return { id: this.options.ownerId, type: 'private' as const, first_name: 'Владелец' }; }
 
     private async dispatch(update: Update, confirmation = false, expectedVersion?: string, deferredDialogue = false, selectedPreset?: AiPresetName | null,
-                           arRoom?: BotContext['arRoom'], liveBrowserRequest?: BotContext['liveBrowserRequest']): Promise<ApiReply> {
+                           arRoom?: BotContext['arRoom'], liveBrowserRequest?: BotContext['liveBrowserRequest'], ui?: UiRequest): Promise<ApiReply> {
         const persisted = await this.storage.read(this.sessionKey);
         if (expectedVersion !== undefined && persisted?.apiActionVersion !== expectedVersion) {
             throw new ApiError(410, 'action_expired', 'Кнопка относится к предыдущему запросу. Повтори исходный запрос.');
@@ -227,12 +234,34 @@ export class BotApiBackend implements ApiBackend {
             apiActionVersion: version,
         });
         ctx.sessionStorageKey = this.sessionKey;
-        ctx.allowDeferredDialogue = deferredDialogue;
+        // v1 widgets are atomic snapshots of a complete answer. Prefer is optional; do not stage a text-only job.
+        ctx.allowDeferredDialogue = deferredDialogue && !ui;
         ctx.arRoom = arRoom;
         ctx.liveBrowserRequest = liveBrowserRequest;
+        const priorHistory = new Set(ctx.session.messageHistory);
         // The app's own text mode, read once per turn; null follows the server's global preset.
         const preset = selectedPreset === undefined ? await apiTurnPreset(this.models) : selectedPreset;
-        await runWithChannelPreset(preset, async () => { await this.dispatcher.middleware()(ctx, async () => {}); });
+        await runWithChannelPreset(preset, async () => {
+            await this.dispatcher.middleware()(ctx, async () => {});
+            if (ui) {
+                const message = transport.result().messages.filter(item => item.type === 'text' && item.text && item.replacesMessageId === undefined).at(-1);
+                if (message) {
+                    const payload = await composeUi(update.message?.text ?? update.message?.caption ?? '', message,
+                        text => this.actions.sign(message.id, `ui.reply:${text}`, message.text ?? '', version));
+                    if (payload) {
+                        message.ui = payload;
+                        const historyEntry = ctx.session.messageHistory.find(item => !priorHistory.has(item) && item.role === 'bot' && item.content === message.text);
+                        if (historyEntry) { historyEntry.ui = payload; historyEntry.apiMessageId = message.id; }
+                        else ctx.session.messageHistory.unshift({ role: 'bot', content: message.text!, timestamp: new Date(), ui: payload, apiMessageId: message.id });
+                    }
+                }
+                // Bound presentation storage independently of text history. Existing session merge/JSON handles it.
+                let retained = 0;
+                for (const item of ctx.session.messageHistory) if (item.ui && ++retained > 20) {
+                    delete item.ui; delete item.apiMessageId;
+                }
+            }
+        });
         await this.storage.write(this.sessionKey, ctx.session);
         if (ctx.dialogueJobId) await activateDialogueJob(ctx, ctx.dialogueJobId);
         const result = transport.result();

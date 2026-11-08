@@ -15,6 +15,7 @@ import * as imageSettings from '../services/imageRecognitionConfigService';
 import { lmstudioProviderAdapter } from '../ai/providers/lmstudio';
 import * as aiUsage from '../services/aiUsageLogService';
 import { imageAgent } from '../agents/imageAgent';
+import { UI_CATALOG_ID } from '../generative-ui/contracts';
 
 const owner = 730001;
 const botToken = '1234567890:abcdefghijklmnopqrstuvwxyzABCDE';
@@ -49,6 +50,28 @@ function fixture(t: TestContext, actions: unknown[] = []) {
     const backend = new BotApiBackend(bot, { token: 'synthetic-scene-token-with-at-least-32-characters', ownerId: owner, host: '127.0.0.1', port: 0 }, models);
     return { backend, rows, chosen };
 }
+
+test('AR text and camera turns negotiate the same literal UI profile without model-supplied spatial effects', async t => {
+    const f = fixture(t);
+    t.mock.method(orchestrator, 'processMessage', async () => ({ responseText: 'План: чтение 20 минут.', skipOptionalFollowups: true }));
+    t.mock.method(orchestrator, 'processImage', async () => ({ responseText: 'На фото учебная карточка: чтение 20 минут.' }));
+    let calls = 0;
+    t.mock.method(completion, 'createChatCompletionForTask', async () => {
+        calls++;
+        return { choices: [{ message: { content: JSON.stringify({ components: [{ id: 'root', component: 'Metric', label: 'Чтение', value: '20 минут' }] }) } }] } as any;
+    });
+    const ui = { enabled: true, catalogId: UI_CATALOG_ID };
+    for (const framed of [false, true]) {
+        const turn = parseSceneTurn({ text: 'Покажи план', scene: scene(), ui,
+            ...(framed ? { frame: { mime: 'image/jpeg', data: jpeg.toString('base64'), capturedAt: new Date().toISOString(), width: 16, height: 16 } } : {}) });
+        assert.deepEqual(turn.ui, ui);
+        const reply = await f.backend.sceneTurn(turn, 'gpt-lean') as any;
+        assert.ok(reply.messages.some((message: any) => message.ui));
+        assert.deepEqual(reply.actions, []);
+    }
+    assert.equal(calls, 2);
+    assert.throws(() => parseSceneTurn({ text: 'План', scene: scene(), ui: { ...ui, catalogId: 'unknown' } }));
+});
 
 test('words in the AR room go through the same text handlers and dialogue as the chat, with the room as context', async t => {
     const f = fixture(t);

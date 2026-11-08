@@ -140,6 +140,10 @@
                     },
                     "photo": {
                       "$ref": "#/components/schemas/PhotoInput"
+                    },
+                    "generativeUi": {
+                      "type": "object",
+                      "description": "Pinned A2UI protocol/version/catalog, component/action allowlists, snapshot mode and bounds; see docs/generative-ui.md."
                     }
                   }
                 }
@@ -197,6 +201,14 @@
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
+                          },
+                          "ui": {
+                            "$ref": "#/components/schemas/UiPayload"
+                          },
+                          "id": {
+                            "type": "integer",
+                            "format": "int64",
+                            "description": "Original API message ID for persisted UI; present with ui."
                           }
                         }
                       }
@@ -339,7 +351,7 @@
     "/messages": {
       "post": {
         "operationId": "sendMessage",
-        "description": "Runs the complete shared text/command flow. Retry the exact body with the same key after a connection loss. Does not cancel work when the client disconnects.",
+        "description": "Runs the complete shared text/command flow. Retry the exact body with the same key after a connection loss. Does not cancel work when the client disconnects. Optional ui enables a pinned A2UI snapshot; preserve it on idempotent retries.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -372,6 +384,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 8000
+                  },
+                  "ui": {
+                    "$ref": "#/components/schemas/UiRequest"
                   }
                 }
               }
@@ -425,7 +440,7 @@
     "/actions": {
       "post": {
         "operationId": "invokeAction",
-        "description": "Invoke a signed button from the latest API turn, within 15 minutes. The same token cannot execute twice, even with a different idempotency key.",
+        "description": "Invoke a signed button from the latest API turn, within 15 minutes. The same token cannot execute twice, even with a different idempotency key. Optional ui enables a pinned A2UI snapshot; preserve it on idempotent retries.",
         "parameters": [
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -446,6 +461,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 32000
+                  },
+                  "ui": {
+                    "$ref": "#/components/schemas/UiRequest"
                   }
                 }
               }
@@ -1047,6 +1065,9 @@
                     "type": "boolean",
                     "default": false,
                     "description": "stage prepare only. Semantic control probe for an interjection: classifies with the same context but does not supersede or register an executable plan. Its plan has frame:false and executable:false; only a later explicit cancel request cancels the original. Its id cannot execute a turn."
+                  },
+                  "ui": {
+                    "$ref": "#/components/schemas/UiRequest"
                   }
                 }
               }
@@ -2129,6 +2150,9 @@
           },
           "filename": {
             "type": "string"
+          },
+          "ui": {
+            "$ref": "#/components/schemas/UiPayload"
           }
         }
       },
@@ -2793,6 +2817,9 @@
                 "maximum": 4096
               }
             }
+          },
+          "ui": {
+            "$ref": "#/components/schemas/UiRequest"
           }
         }
       },
@@ -3093,6 +3120,578 @@
             }
           }
         }
+      },
+      "UiRequest": {
+        "description": "Opt-in per request. enabled=true requires catalogId. With UI, the complete answer is synchronous even with Prefer: respond-async. Unknown catalogs are refused before execution.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "enum": [
+                  true
+                ]
+              },
+              "catalogId": {
+                "type": "string",
+                "enum": [
+                  "urn:kira:ui:catalog:1"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "catalogId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "enum": [
+                  false
+                ]
+              },
+              "catalogId": {
+                "type": "string",
+                "enum": [
+                  "urn:kira:ui:catalog:1"
+                ]
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "UiPayload": {
+        "description": "Graph integrity, matched chart/table lengths, donut constraints and the UTF-8 byte budget are additionally checked by the server and renderer.",
+        "type": "object",
+        "properties": {
+          "protocol": {
+            "enum": [
+              "a2ui"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "1.0"
+            ],
+            "type": "string"
+          },
+          "catalogId": {
+            "enum": [
+              "urn:kira:ui:catalog:1"
+            ],
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "enum": [
+                    "1.0"
+                  ],
+                  "type": "string"
+                },
+                "createSurface": {
+                  "type": "object",
+                  "properties": {
+                    "surfaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^kira_[a-f0-9]{32}$"
+                    },
+                    "catalogId": {
+                      "enum": [
+                        "urn:kira:ui:catalog:1"
+                      ],
+                      "type": "string"
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/UiComponent"
+                      },
+                      "minItems": 1,
+                      "maxItems": 64
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "catalogId",
+                    "components"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "version",
+                "createSurface"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 1
+          }
+        },
+        "required": [
+          "protocol",
+          "version",
+          "catalogId",
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "UiAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "kira.reply",
+                      "kira.action"
+                    ]
+                  },
+                  "context": {
+                    "type": "object",
+                    "properties": {
+                      "actionToken": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32000
+                      }
+                    },
+                    "required": [
+                      "actionToken"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "name",
+                  "context"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "functionCall": {
+                "type": "object",
+                "properties": {
+                  "@call": {
+                    "enum": [
+                      "openUrl"
+                    ],
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048,
+                        "format": "uri",
+                        "pattern": "^https://"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "@call",
+                  "args"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "functionCall"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "UiComponent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Column"
+                ],
+                "type": "string"
+              },
+              "children": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+                },
+                "minItems": 1,
+                "maxItems": 16
+              },
+              "gap": {
+                "type": "string",
+                "enum": [
+                  "small",
+                  "medium",
+                  "large"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "children"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Row"
+                ],
+                "type": "string"
+              },
+              "children": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+                },
+                "minItems": 1,
+                "maxItems": 16
+              },
+              "gap": {
+                "type": "string",
+                "enum": [
+                  "small",
+                  "medium",
+                  "large"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "children"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Card"
+                ],
+                "type": "string"
+              },
+              "child": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "child"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Text"
+                ],
+                "type": "string"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 3000
+              },
+              "variant": {
+                "type": "string",
+                "enum": [
+                  "title",
+                  "body",
+                  "caption"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Divider"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "component"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Metric"
+                ],
+                "type": "string"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "tone": {
+                "type": "string",
+                "enum": [
+                  "neutral",
+                  "positive",
+                  "negative"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Table"
+                ],
+                "type": "string"
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "minItems": 1,
+                "maxItems": 6
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "minItems": 1,
+                  "maxItems": 6
+                },
+                "minItems": 1,
+                "maxItems": 24
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "columns",
+              "rows"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Chart"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "line",
+                  "bar",
+                  "donut"
+                ]
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                },
+                "minItems": 1,
+                "maxItems": 48
+              },
+              "series": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160
+                    },
+                    "values": {
+                      "type": "array",
+                      "items": {
+                        "type": "number",
+                        "minimum": -1000000000000000.0,
+                        "maximum": 1000000000000000.0
+                      },
+                      "minItems": 1,
+                      "maxItems": 48
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "values"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 4
+              },
+              "unit": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "kind",
+              "labels",
+              "series"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "component": {
+                "enum": [
+                  "Button"
+                ],
+                "type": "string"
+              },
+              "child": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "action": {
+                "$ref": "#/components/schemas/UiAction"
+              }
+            },
+            "required": [
+              "id",
+              "component",
+              "child",
+              "action"
+            ],
+            "additionalProperties": false
+          }
+        ]
       }
     }
   }

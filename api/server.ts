@@ -8,6 +8,7 @@ import { MAX_SCENE_BODY_BYTES, parseScenePlanCancel, parseScenePreparation, pars
 import { MAX_PHOTO_BODY_BYTES, parsePhotoTurn } from './photos';
 import { workoutRouteAllowed } from './workouts/http';
 import { accountAuthority, accountHttpOperation } from '../ai/accountPolicy';
+import { parseUiRequest } from '../generative-ui/request';
 
 const PREFIX = '/api/v1';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -138,7 +139,7 @@ export function createExternalApiServer(
                 busy = true;
                 try {
                     return json(200, await operations.run(`${options.ownerId}:photo:${hash(key)}`, hash(JSON.stringify(body)),
-                        () => backend.photo(turn.photo.data, turn.text, preset)));
+                        () => backend.photo(turn.photo.data, turn.text, preset, turn.ui)));
                 } finally { busy = false; }
             }
             if (req.method === 'GET') {
@@ -246,10 +247,11 @@ export function createExternalApiServer(
             }
             const body = await readBody(req);
             const isAction = path.endsWith('/actions');
+            const ui = parseUiRequest(body.ui);
             const deferredDialogue = !isAction && typeof req.headers.prefer === 'string' && req.headers.prefer.split(',').some(value => value.trim().toLowerCase() === 'respond-async');
             const field = isAction ? 'actionToken' : 'text';
             const value = body[field];
-            if (Object.keys(body).some(key => key !== field) || typeof value !== 'string'
+            if (Object.keys(body).some(key => key !== field && key !== 'ui') || typeof value !== 'string'
                 || !value.trim() || value.length > (isAction ? 32_000 : 8_000)) {
                 throw new ApiError(400, 'invalid_body', `Передай только непустое поле ${field}.`);
             }
@@ -265,11 +267,13 @@ export function createExternalApiServer(
             busy = true;
             try {
                 // Actions also deduplicate across different client keys: one button may execute only once.
-                const fingerprint = `${deferredDialogue ? 'async:' : ''}${hash(`${path}:${value}`)}`;
+                // Keep legacy fingerprints for callers without UI. Negotiated UI participates in the receipt.
+                const fingerprint = `${deferredDialogue ? 'async:' : ''}${ui ? `ui:${ui.catalogId}:` : ''}${hash(`${path}:${value}`)}`;
                 const result = await operations.run(`${options.ownerId}:request:${hash(idempotencyKey)}`, fingerprint,
                     () => isAction
-                        ? operations.run(`${options.ownerId}:action:${hash(value)}`, fingerprint, () => backend.action(value))
+                        ? operations.run(`${options.ownerId}:action:${hash(value)}`, fingerprint, () => backend.action(value, ui))
                         : backend.message(value.trim(), { deferredDialogue,
+                            ...(ui ? { ui } : {}),
                             ...(req.headers['x-kira-browser-session'] === 'v1' ? { liveBrowserRequest: { operationId: idempotencyKey } } : {}) }));
                 if (deferredDialogue && result.backgroundJob) res.setHeader('Preference-Applied', 'respond-async');
                 json(200, result);

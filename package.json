@@ -26,6 +26,7 @@
     "eval:memory:answers": "ts-node scripts/runMemoryAnswerEval.ts",
     "eval:decisions": "node scripts/researchDecisions.cjs",
     "eval:telegram-reminders": "ts-node scripts/runTelegramReminderEval.ts",
+    "eval:generative-ui": "ts-node scripts/evalGenerativeUi.ts",
     "lint": "npm run typecheck",
     "check:privacy": "node scripts/checkPrivacy.js",
     "typecheck": "npm exec tsc -- --noEmit --project tsconfig.server.json && npm --prefix admin-panel exec tsc -- -b",
@@ -72,6 +73,7 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "ajv": "^8.20.0",
     "@types/fast-levenshtein": "^0.0.4",
     "@types/jaro-winkler": "^0.2.4",
     "@types/node": "^20.17.16",

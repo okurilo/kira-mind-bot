@@ -20,6 +20,8 @@ export interface ApiButton {
 }
 
 export interface ApiMessage {
+    /** Optional native UI; text stays the canonical readable/spoken answer. */
+    ui?: import('../generative-ui/contracts').UiPayload;
     id: number;
     type: 'text' | 'photo' | 'document' | 'voice' | 'notice' | 'delete';
     text?: string;
@@ -51,10 +53,10 @@ export interface ApiBackend {
     updateSettings?(patch: ApiSettingsPatch): Promise<ApiSettings>;
     communicationProfile?(): Promise<import('../services/communicationProfileService').CommunicationProfile>;
     updateCommunicationProfile?(patch: import('../services/communicationProfileService').CommunicationPatch): Promise<import('../services/communicationProfileService').CommunicationProfile>;
-    message(text: string, options?: { deferredDialogue?: boolean; liveBrowserRequest?: { operationId: string } }): Promise<ApiReply>;
+    message(text: string, options?: { deferredDialogue?: boolean; liveBrowserRequest?: { operationId: string }; ui?: import('../generative-ui/contracts').UiRequest }): Promise<ApiReply>;
     photoReady(): Promise<import('../ai/modelPresets').AiPresetName | null>;
-    photo(buffer: Buffer, caption?: string, preset?: import('../ai/modelPresets').AiPresetName | null): Promise<ApiReply>;
-    action(token: string): Promise<ApiReply>;
+    photo(buffer: Buffer, caption?: string, preset?: import('../ai/modelPresets').AiPresetName | null, ui?: import('../generative-ui/contracts').UiRequest): Promise<ApiReply>;
+    action(token: string, ui?: import('../generative-ui/contracts').UiRequest): Promise<ApiReply>;
     file(id: string): Promise<{ data: Buffer; filename: string }>;
     /** The app's text mode (API_AI_MODEL_PRESET): catalog, its selection and the server's global mode. */
     modelSettings(): Promise<unknown>;

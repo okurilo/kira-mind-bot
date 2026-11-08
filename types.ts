@@ -403,6 +403,9 @@ export type BotContext = Context & SessionFlavor<SessionData> & {
 
 // Интерфейс для хранения истории сообщений
 export interface MessageHistory {
+    /** API presentation metadata only; never appended to text, memory or model history. */
+    ui?: import('./generative-ui/contracts').UiPayload;
+    apiMessageId?: number;
     sourceMessageId?: string;
     role: string;
     content: string;

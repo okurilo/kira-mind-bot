@@ -10,6 +10,8 @@
 
 ## Архитектурные решения
 
+- Генеративный UI включается только request-local `ui` opt-in API, не выводится из устройства или текста и не сохраняет разрешение на следующий ход. Ограниченный A2UI 1.0 snapshot использует собственный versioned catalog `urn:kira:ui:catalog:1`; compositor работает после канонического ответа только с его текстом и уже выданными кнопками, не получает права инструментов. `kira.reply` возвращается в обычный text handler без external-delivery authority, `kira.action` переиспользует подписанный callback. Schema/graph/action bounds, history presentation metadata и sync-only v1: docs/generative-ui.md; задача клиенту: docs/mobile-generative-ui-task.md.
+
 - Готовность tenant-worker ограничена heartbeat его event loop: отсутствие сигнала 45 секунд отзывает ready/endpoint, manager перезапускает только этот worker. Сигнал не зависит от Telegram/AI и не переносит содержимое; долгий async-запрос сам по себе не считается зависанием. Startup timeout и квитанции неизвестных эффектов сохраняют прежнюю семантику.
 - Квоты аккаунта разделены на dialogue/background, receipt задачи фиксирует пул и день. `ai` в API — совместимый alias dialogue, старые неразмеченные расходы сохраняются в legacyAi без переноса в новые пулы. `withBackgroundAiTask` резервирует до чтения очереди/сдвига watermark; обязательный async-ответ и подтверждённое продолжение сохраняют исходный foreground ID, необязательная работа получает background ID. Каждый send повторно проверяет согласие/состояние и общий предел вызовов задачи. Квоты не меняют сохранённые режимы. Контракт: docs/ai-task-quotas.md.
 

@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kira:ui:snapshot:1",
+  "title": "Kira A2UI literal snapshot profile v1",
+  "description": "Graph integrity, matched chart/table lengths, donut constraints and the UTF-8 byte budget are additionally checked by the server and renderer.",
+  "type": "object",
+  "properties": {
+    "protocol": {
+      "const": "a2ui"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "catalogId": {
+      "const": "urn:kira:ui:catalog:1"
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "const": "1.0"
+          },
+          "createSurface": {
+            "type": "object",
+            "properties": {
+              "surfaceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^kira_[a-f0-9]{32}$"
+              },
+              "catalogId": {
+                "const": "urn:kira:ui:catalog:1"
+              },
+              "components": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Component"
+                },
+                "minItems": 1,
+                "maxItems": 64
+              }
+            },
+            "required": [
+              "surfaceId",
+              "catalogId",
+              "components"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "version",
+          "createSurface"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 1
+    }
+  },
+  "required": [
+    "protocol",
+    "version",
+    "catalogId",
+    "messages"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "kira.reply",
+                    "kira.action"
+                  ]
+                },
+                "context": {
+                  "type": "object",
+                  "properties": {
+                    "actionToken": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32000
+                    }
+                  },
+                  "required": [
+                    "actionToken"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "name",
+                "context"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "functionCall": {
+              "type": "object",
+              "properties": {
+                "@call": {
+                  "const": "openUrl"
+                },
+                "args": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "uri",
+                      "pattern": "^https://"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "@call",
+                "args"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "functionCall"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Component": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Column"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "gap": {
+              "type": "string",
+              "enum": [
+                "small",
+                "medium",
+                "large"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Row"
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            },
+            "gap": {
+              "type": "string",
+              "enum": [
+                "small",
+                "medium",
+                "large"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "children"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Card"
+            },
+            "child": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "child"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Text"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 3000
+            },
+            "variant": {
+              "type": "string",
+              "enum": [
+                "title",
+                "body",
+                "caption"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Divider"
+            }
+          },
+          "required": [
+            "id",
+            "component"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Metric"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "tone": {
+              "type": "string",
+              "enum": [
+                "neutral",
+                "positive",
+                "negative"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "label",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Table"
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "minItems": 1,
+              "maxItems": 6
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "minItems": 1,
+                "maxItems": 6
+              },
+              "minItems": 1,
+              "maxItems": 24
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "columns",
+            "rows"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Chart"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "line",
+                "bar",
+                "donut"
+              ]
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "minItems": 1,
+              "maxItems": 48
+            },
+            "series": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "minimum": -1000000000000000.0,
+                      "maximum": 1000000000000000.0
+                    },
+                    "minItems": 1,
+                    "maxItems": 48
+                  }
+                },
+                "required": [
+                  "label",
+                  "values"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 4
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "kind",
+            "labels",
+            "series"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "component": {
+              "const": "Button"
+            },
+            "child": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,47}$"
+            },
+            "action": {
+              "$ref": "#/$defs/Action"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "child",
+            "action"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

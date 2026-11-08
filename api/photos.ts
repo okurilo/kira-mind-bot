@@ -2,12 +2,15 @@ import { ApiError } from './contracts';
 import { resolveImageRecognitionRoute } from '../ai/imageRecognitionRouting';
 import { getAiProviderAdapter } from '../ai/providers/registry';
 import type { VisionRoute } from './scene';
+import { parseUiRequest } from '../generative-ui/request';
+import type { UiRequest } from '../generative-ui/contracts';
 
 export const MAX_PHOTO_BYTES = 2_000_000;
 export const MAX_PHOTO_BODY_BYTES = 3 * 1024 * 1024;
 export const PHOTO_STORAGE_NOTE = 'Фото анализируется один раз и не сохраняется; в историю попадает только текст.';
 
 export interface PhotoTurn {
+    ui?: UiRequest;
     text?: string;
     photo: { mime: 'image/jpeg'; data: Buffer; width: number; height: number };
 }
@@ -17,7 +20,8 @@ function invalid(): ApiError { return new ApiError(400, 'invalid_photo', 'Пер
 export function parsePhotoTurn(value: unknown): PhotoTurn {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid();
     const root = value as Record<string, unknown>;
-    if (Object.keys(root).some(key => !['text', 'photo'].includes(key))) throw invalid();
+    if (Object.keys(root).some(key => !['text', 'photo', 'ui'].includes(key))) throw invalid();
+    const ui = parseUiRequest(root.ui);
     if (root.text !== undefined && (typeof root.text !== 'string' || !root.text.trim() || root.text.trim().length > 8000)) throw invalid();
     if (!root.photo || typeof root.photo !== 'object' || Array.isArray(root.photo)) throw invalid();
     const photo = root.photo as Record<string, unknown>;
@@ -29,7 +33,7 @@ export function parsePhotoTurn(value: unknown): PhotoTurn {
     if (data.length < 3 || data[0] !== 0xff || data[1] !== 0xd8 || data[2] !== 0xff) throw new ApiError(415, 'unsupported_photo', 'Данные фото не являются JPEG.');
     if (!Number.isInteger(photo.width) || !Number.isInteger(photo.height) || Number(photo.width) < 16 || Number(photo.width) > 4096
         || Number(photo.height) < 16 || Number(photo.height) > 4096) throw invalid();
-    return { ...(typeof root.text === 'string' ? { text: root.text.trim() } : {}), photo: { mime: 'image/jpeg', data, width: Number(photo.width), height: Number(photo.height) } };
+    return { ...(ui ? { ui } : {}), ...(typeof root.text === 'string' ? { text: root.text.trim() } : {}), photo: { mime: 'image/jpeg', data, width: Number(photo.width), height: Number(photo.height) } };
 }
 
 /** Both imageAgent and healthPhotoAgent read pixels through the conversation task, including skills runtime. */

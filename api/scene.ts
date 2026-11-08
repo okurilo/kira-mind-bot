@@ -8,6 +8,8 @@ import { getActiveAiPresetName, runWithChannelPreset } from '../services/aiRunti
 import { TypeORMSessionStorage } from '../services/SessionStorage';
 import type { MessageHistory, SessionData } from '../types';
 import { ApiError, type ApiReply } from './contracts';
+import { parseUiRequest } from '../generative-ui/request';
+import type { UiRequest } from '../generative-ui/contracts';
 import { apiTurnPreset, type ApiModelSettingsStore } from './modelSettings';
 
 /**
@@ -57,7 +59,7 @@ export interface SceneFrame { mime: 'image/jpeg'; data: Buffer; capturedAt: stri
 export interface SceneFollowUp { label: string; reason: 'ambiguous' | 'unsure' | 'not_found' | 'shown' }
 /** `plan`: the id of a prepared turn (stage "prepare") whose decision this execution uses. `avoid`: the previous
  *  shown thing's position on the new frame (0–1); the current request decides whether to repeat or exclude it. */
-export interface SceneTurn { text: string; scene: SceneSnapshot; frame?: SceneFrame; followUp?: SceneFollowUp; plan?: string; avoid?: { x: number; y: number } }
+export interface SceneTurn { text: string; scene: SceneSnapshot; frame?: SceneFrame; followUp?: SceneFollowUp; plan?: string; avoid?: { x: number; y: number }; ui?: UiRequest }
 /** A control probe classifies an interjection without replacing or registering an executable turn. */
 export interface ScenePreparation extends SceneTurn { controlOnly?: boolean }
 /** Why a point was not proposed, for the phone to ask for a better view or a clarification:
@@ -111,7 +113,8 @@ function date(value: unknown, what: string): string {
 
 /** Strict parse of the scene turn body: metres, Y up, the phone's ARKit world of `coordinateSpaceId`. */
 export function parseSceneTurn(body: Record<string, unknown>, now = Date.now()): SceneTurn {
-    const root = only(body, ['text', 'scene'], ['frame', 'followUp', 'plan', 'avoid'], 'запрос');
+    const root = only(body, ['text', 'scene'], ['frame', 'followUp', 'plan', 'avoid', 'ui'], 'запрос');
+    const ui = parseUiRequest(root.ui);
     const question = text(root.text, 'text', MAX_TEXT);
     const s = only(root.scene, ['roomId', 'roomVersion', 'coordinateSpaceId', 'tracking', 'observedAt', 'avatar', 'objects', 'seats'], ['camera', 'things'], 'scene');
     if (!Number.isInteger(s.roomVersion) || (s.roomVersion as number) < 1) throw bad('roomVersion');
@@ -187,7 +190,7 @@ export function parseSceneTurn(body: Record<string, unknown>, now = Date.now()):
         if (x < 0 || y < 0) throw bad('avoid');
         avoid = { x, y };
     }
-    return { text: question, scene, frame, ...(followUp ? { followUp } : {}), ...(plan ? { plan } : {}), ...(avoid ? { avoid } : {}) };
+    return { text: question, scene, frame, ...(ui ? { ui } : {}), ...(followUp ? { followUp } : {}), ...(plan ? { plan } : {}), ...(avoid ? { avoid } : {}) };
 }
 
 /** Stage "cancel": only the plan's id. */
@@ -374,9 +377,9 @@ export function framePoint(point: unknown, box: unknown): FramePoint | undefined
 /** The app's one dialogue as a room turn uses it: the same handlers as POST /messages and POST /photos. */
 export interface SceneChannel {
     /** The owner's words, answered as in the chat, with the room as the turn's context. */
-    say(text: string, room: { context: string; frame: false }, preset: AiPresetName | null): Promise<ApiReply>;
+    say(text: string, room: { context: string; frame: false }, preset: AiPresetName | null, ui?: UiRequest): Promise<ApiReply>;
     /** The camera frame with the owner's words as its caption, read as a photo sent to Kira. */
-    look(frame: Buffer, text: string, room: { context: string; frame: true }, preset: AiPresetName | null): Promise<ApiReply>;
+    look(frame: Buffer, text: string, room: { context: string; frame: true }, preset: AiPresetName | null, ui?: UiRequest): Promise<ApiReply>;
     /** The model that reads a photo under the current mode. */
     visionRoute(): Promise<VisionRoute>;
     /** The dialogue, newest first. */
@@ -565,11 +568,11 @@ export class SceneService {
             planned = await this.plan(turn, appPreset, decided);
             const frame = turn.frame;
             [reply, route] = await Promise.all([
-                this.channel.look(frame.data, turn.text, { context: roomContext(turn, planned.search, decided?.intent), frame: true }, appPreset),
+                this.channel.look(frame.data, turn.text, { context: roomContext(turn, planned.search, decided?.intent), frame: true }, appPreset, turn.ui),
                 runWithChannelPreset(appPreset, () => this.channel.visionRoute()),
             ]);
         } else {
-            [reply, planned] = await Promise.all([this.channel.say(turn.text, { context: roomContext(turn, undefined, decided?.intent), frame: false }, appPreset), this.plan(turn, appPreset, decided)]);
+            [reply, planned] = await Promise.all([this.channel.say(turn.text, { context: roomContext(turn, undefined, decided?.intent), frame: false }, appPreset, turn.ui), this.plan(turn, appPreset, decided)]);
         }
         const { actions, rejected, seen } = planned;
         const scene = await this.storage.read(this.sceneKey);
