@@ -125,7 +125,7 @@ async function addition(job: DialogueJob, answer: string) {
     return result;
 }
 
-async function deliver(bot: Bot<BotContext>, job: DialogueJob, text: string, notice: boolean): Promise<void> {
+async function deliver(bot: Bot<BotContext>, job: DialogueJob, text: string, notice: boolean, active: () => Promise<boolean>): Promise<void> {
     if (job.channel.startsWith('api:')) return; // The API polls its own result; never leak it into Telegram.
     // Keep delivery one request: uncertainty cannot cause automatic duplicate messages.
     const message = text.length > 4000 ? `${text.slice(0, 3900)}\n\n…Ответ сокращён.` : text;
@@ -138,7 +138,7 @@ async function deliver(bot: Bot<BotContext>, job: DialogueJob, text: string, not
             : { id: job.input.required ? `dialogue:${job.id}` : backgroundAiTaskId('dialogue-review', job.id), background: !job.input.required };
         await withAccountAiTask(operation, () => runWithChannelPreset(job.input.preset, () => runWithModelPolicy(job.input.modelPolicy ?? null,
             () => telegramUi.deliver(job.userId, bot.api.raw as unknown as WidgetApi, job.input.message, text, sent.message_id, undefined,
-                job.turnId, () => DialogueJobRepository.isActive(job)))))
+                job.turnId, active))))
             .catch(() => { console.warn('[telegram-ui] Отложенная карточка недоступна'); });
     }
 }
@@ -147,7 +147,7 @@ async function deliver(bot: Bot<BotContext>, job: DialogueJob, text: string, not
 export async function executeDialogueJob(bot: Bot<BotContext>, job: DialogueJob, deps: DialogueJobDependencies = {}): Promise<void> {
     const repository = deps.repository ?? DialogueJobRepository;
     const enabled = deps.enabled ?? (() => isBackgroundFeatureEnabled('dialogueDeepReview'));
-    const send = deps.deliver ?? ((value, text, notice) => deliver(bot, value, text, notice));
+    const send = deps.deliver ?? ((value, text, notice) => deliver(bot, value, text, notice, valid));
     const controller = new AbortController();
     active.set(job.id, controller);
     const timeout = setTimeout(() => controller.abort(), MAX_WORK_MS); timeout.unref?.();

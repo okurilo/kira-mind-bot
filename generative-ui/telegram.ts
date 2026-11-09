@@ -140,7 +140,10 @@ export function registerTelegramWidgetBridge(bot: Bot<BotContext>, service = tel
         try { result = await service.query(owner, query); }
         catch { result = { error: 'Хранилище карточек временно недоступно.' }; }
         // Acknowledge before the ordinary handler can perform long-running AI/tools.
-        try { await api.answerWidgetQuery({ widget_query_id: query.id, data: JSON.stringify({ state: result.state, error: result.error }) }, AbortSignal.timeout(2500)); }
+        const answer = { state: result.state, error: result.error };
+        // chat_data has its own 1 KB allowance; an ACK also needs room for the enclosing object/error.
+        if (Buffer.byteLength(JSON.stringify(answer)) > 1024 && answer.state?.n) answer.state = { ...answer.state, n: undefined };
+        try { await api.answerWidgetQuery({ widget_query_id: query.id, data: JSON.stringify(answer) }, AbortSignal.timeout(2500)); }
         catch { return; }
         if (result.changed && result.state && query.chat?.id === owner && query.message_id) {
             await api.editMessageWidgetData({ chat_id: owner, message_id: query.message_id, chat_data: JSON.stringify(result.state) }, AbortSignal.timeout(2500))

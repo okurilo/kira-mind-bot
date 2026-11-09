@@ -1,6 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { validateUiPayload, safeUiUrl } from './validate';
 import type { UiAction, UiComponent, UiInput, UiPayload } from './contracts';
+import { utcDate } from './forms';
 
 /** Telegram profile 1: fixed, trusted code; never execute model-produced HTML/JS. */
 export const TELEGRAM_WIDGET_LIMITS = { html: 32768, compressed: 3800, units: 100, url: 256 } as const;
@@ -26,7 +27,7 @@ export function widgetValue(f: UiInput, value: WidgetValue): string | number | b
     }
     if (f.component === 'Toggle') { if (value !== 0 && value !== 1) throw Error('invalid_widget_toggle'); return !!value; }
     const v = new Date(value).toISOString();
-    if (f.min && value < Date.parse(f.min) || f.max && value > Date.parse(f.max)) throw Error('invalid_widget_date');
+    if (!utcDate(v) || f.min && value < Date.parse(f.min) || f.max && value > Date.parse(f.max)) throw Error('invalid_widget_date');
     return v;
 }
 

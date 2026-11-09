@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Bot, session } from 'grammy';
 import type { BotContext, SessionData } from '../types';
 import { TelegramUiService, registerTelegramWidgetBridge, TELEGRAM_WIDGET_TTL_MS, type WidgetApi } from '../generative-ui/telegram';
-import { renderTelegramWidget, TELEGRAM_WIDGET_LIMITS } from '../generative-ui/telegramRender';
+import { renderTelegramWidget, TELEGRAM_WIDGET_LIMITS, widgetValue } from '../generative-ui/telegramRender';
 import { compileUi } from '../generative-ui/validate';
 import { UI_CATALOG_V2 } from '../generative-ui/contracts';
 import { MemoryUiStore } from './helpers/generativeUi';
@@ -114,6 +114,7 @@ test('widgets reject another owner/chat, shared/inline/wallet queries, arbitrary
 });
 
 test('all form values are validated and persisted with revision CAS before a canonical plain text submission', async () => {
+    assert.throws(() => widgetValue({ id: 'time', label: 'Когда', component: 'DateTime' }, 8640000000000000));
     const f = await fixture(formDraft()); await f.deliver(); assert.equal(f.sent.length, 1);
     assert.equal((await f.service.query(owner, f.query('a:0:0'))).dispatch, undefined); // required Choice missing
     const picked = await f.service.query(owner, f.query('f:0:0:1')); assert.equal(picked.state?.r, 1);
@@ -192,4 +193,22 @@ test('callback status is durable, bounded, owner-scoped and cannot claim complet
     assert.equal((await new TelegramUiService(f.store).query(owner, f.query('a:0:0'))).state?.n, status?.n);
     await f.store.transact(owner, tx => tx.put('canonical', 'turn', 'tg:2'));
     assert.equal(await f.service.notice(owner, 20, 'Устарело'), undefined);
+});
+
+test('a query answer reserves space for its envelope/error even when chat_data nearly fills Telegram allowance', async t => {
+    const f = await fixture();
+    const state = { r: 99, v: Array(50).fill(253402300799999), done: true, n: 'я'.repeat(80) };
+    assert.ok(Buffer.byteLength(JSON.stringify(state)) <= 1024);
+    const error = 'Запрос уже принят. Проверь ответ в чате.';
+    assert.ok(Buffer.byteLength(JSON.stringify({ state, error })) > 1024);
+    t.mock.method(f.service, 'query', async () => ({ state, error }));
+    const bot = new Bot<BotContext>('1234567890:abcdefghijklmnopqrstuvwxyzABCDE', { botInfo: { id: 1234567890, is_bot: true, first_name: 'Synthetic', username: 'synthetic_bot' } as any });
+    bot.api.config.use(async (_prev, _method, payload) => {
+        const data = (payload as any).data; assert.ok(Buffer.byteLength(data) <= 1024);
+        assert.deepEqual(JSON.parse(data), { state: { r: 99, v: state.v, done: true }, error });
+        return { ok: true, result: true } as any;
+    });
+    registerTelegramWidgetBridge(bot, f.service, owner);
+    await bot.handleUpdate({ update_id: 2, widget_query: f.query('a:0:0') } as any);
+    assert.equal(state.n, 'я'.repeat(80)); // The durable state is unchanged.
 });

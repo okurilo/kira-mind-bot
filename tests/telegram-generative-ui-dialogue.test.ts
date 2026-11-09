@@ -84,7 +84,8 @@ test('a delivered deferred Telegram answer composes its widget under the origina
     t.mock.method(storage, 'appendPersistedHistory', async () => {});
     t.mock.method(preset, 'runWithChannelPreset', async (_preset: any, work: () => Promise<unknown>) => work());
     t.mock.method(policy, 'runWithModelPolicy', async (_policy: any, work: () => Promise<unknown>) => work());
-    const active = t.mock.method(DialogueJobRepository, 'isActive', async () => true);
+    let live = true, allowed = true;
+    const active = t.mock.fn(async () => live);
     const visuals: any[] = [];
     let expectedOperation = { id: 'synthetic-original-turn', background: false };
     t.mock.method(telegramUi, 'deliver', async (...args: any[]) => { visuals.push(args); assert.deepEqual(currentAccountAiOperation(), expectedOperation); return undefined; });
@@ -93,13 +94,15 @@ test('a delivered deferred Telegram answer composes its widget under the origina
     bot.api.config.use(async (_prev, method, payload) => { sends.push({ method, payload }); return { ok: true, result: { message_id: 101 } } as any; });
     const job: any = { id: 'synthetic-job', userId: owner, chatId: owner, channel: String(owner), turnId: 'tg:1', messageId: 10, status: 'delivering', lease: 'synthetic-lease',
         resultText: 'Учебная цена 18 USD.', input: { required: true, message: 'Покажи цену', preset: 'gpt-lean', accountAiOperation: { id: 'synthetic-original-turn', background: false } } };
-    const deps = { enabled: async () => true, repository: { isActive: async () => true, update: async () => true } as any };
+    const deps = { enabled: async () => allowed, repository: { isActive: active, update: async () => true } as any };
     await executeDialogueJob(bot, job, deps);
     assert.equal(visuals.length, 1); assert.equal(visuals[0][4], 101); assert.equal(visuals[0][6], 'tg:1');
     assert.equal(await visuals[0][7](), true); assert.ok(active.mock.callCount() > 0);
+    live = false; assert.equal(await visuals[0][7](), false); live = true;
     expectedOperation = { id: backgroundAiTaskId('dialogue-review', job.id), background: true };
     await executeDialogueJob(bot, { ...job, input: { ...job.input, required: false } }, deps);
     assert.equal(visuals.length, 2);
+    allowed = false; assert.equal(await visuals[1][7](), false); allowed = true;
     await executeDialogueJob(bot, { ...job, channel: 'api:' + owner }, deps);
     assert.equal(visuals.length, 2); assert.equal(sends.filter(s => s.method === 'sendMessage').length, 2);
 });
