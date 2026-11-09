@@ -97,7 +97,7 @@ test('each worker has independent storage/identity and never inherits operator p
         KIRA_SELF_MEMORY_PATH: '/operator/private.json', PERSONALITY_FILE: '/operator/personality.json',
         BROWSER_PROFILE_DIR: '/operator/browser', KIRA_PLATFORM_MASTER_KEY: 'operator-secret',
         DB_PASSWORD: 'operator-db-password', OPENAI_API_KEY: 'shared-provider-key', KIMI_API_KEY: 'synthetic-shared-kimi-key', KIRA_BROWSER_PROXY_URL: 'http://127.0.0.1:1234',
-        KIRA_REFLECTION_TRIAGE_DECISIONS_ENABLED: 'false' };
+        KIRA_REFLECTION_TRIAGE_DECISIONS_ENABLED: 'false', KIRA_TELEGRAM_WIDGETS_ENABLED: 'false' };
     first.owner_id = second.owner_id = '10001'; // Same human may own independent bots/accounts.
     first.bot_username = 'synthetic_first_bot'; second.bot_username = 'synthetic_second_bot';
     const a = tenantEnvironment(operator, first, { botToken: 'first-bot' }, '/synthetic/one', secrets);
@@ -110,6 +110,7 @@ test('each worker has independent storage/identity and never inherits operator p
     assert.equal(a.OPENAI_API_KEY, 'shared-provider-key');
     assert.equal(a.KIMI_API_KEY, 'synthetic-shared-kimi-key');
     assert.equal(a.KIRA_REFLECTION_TRIAGE_DECISIONS_ENABLED, 'false');
+    assert.equal(a.KIRA_TELEGRAM_WIDGETS_ENABLED, 'false');
     assert.equal(a.TELEGRAM_SESSION_STRING, undefined);
     assert.equal(b.TELEGRAM_SESSION_STRING, undefined);
     const own = tenantEnvironment(operator, first, { botToken: 'first-bot', telegram: {

@@ -17,6 +17,7 @@ import { appendPersistedHistory } from './SessionStorage';
 import { recordDeferredOutcome } from './productAnalytics';
 import { composeDialogueUi } from '../generative-ui/dialogue';
 import { withUiRefreshCapture } from '../generative-ui/refreshEvidence';
+import { telegramUi, type WidgetApi } from '../generative-ui/telegram';
 
 const active = new Map<string, AbortController>();
 const MAX_CONCURRENT = 2;
@@ -51,6 +52,7 @@ export function registerDialogueLifecycle(bot: Bot<BotContext>): void {
         try {
             const turnId = ctx.session.apiActionVersion ?? (ctx.update.update_id ? `tg:${ctx.update.update_id}` : randomUUID());
             await DialogueJobRepository.beginTurn(channel, turnId);
+            if (!channel.startsWith('api:')) ctx.telegramUiTurnId = turnId;
             if (fastDialogueEnabled()) ctx.dialogueTurnId = turnId;
         } catch { /* A missing/unavailable job store falls back to the normal synchronous pipeline. */ }
         await next();
@@ -127,10 +129,18 @@ async function deliver(bot: Bot<BotContext>, job: DialogueJob, text: string, not
     if (job.channel.startsWith('api:')) return; // The API polls its own result; never leak it into Telegram.
     // Keep delivery one request: uncertainty cannot cause automatic duplicate messages.
     const message = text.length > 4000 ? `${text.slice(0, 3900)}\n\n…Ответ сокращён.` : text;
-    await bot.api.sendMessage(job.chatId, message, {
+    const sent = await bot.api.sendMessage(job.chatId, message, {
         ...(job.messageId ? { reply_parameters: { message_id: job.messageId, allow_sending_without_reply: true } } : {}),
     });
     if (!notice) await appendPersistedHistory(job.channel, 'bot', message);
+    if (!notice && job.chatId === job.userId && job.channel === String(job.chatId)) {
+        const operation = job.input.required && job.input.accountAiOperation ? job.input.accountAiOperation
+            : { id: job.input.required ? `dialogue:${job.id}` : backgroundAiTaskId('dialogue-review', job.id), background: !job.input.required };
+        await withAccountAiTask(operation, () => runWithChannelPreset(job.input.preset, () => runWithModelPolicy(job.input.modelPolicy ?? null,
+            () => telegramUi.deliver(job.userId, bot.api.raw as unknown as WidgetApi, job.input.message, text, sent.message_id, undefined,
+                job.turnId, () => DialogueJobRepository.isActive(job)))))
+            .catch(() => { console.warn('[telegram-ui] Отложенная карточка недоступна'); });
+    }
 }
 
 /** Reentrant by lease. Only read-only computation may be recovered; uncertain delivery never replays. */

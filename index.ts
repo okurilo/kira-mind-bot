@@ -35,6 +35,7 @@ import { initReflectionMode } from "./services/reflectionModeService";
 import { REACTIONS_ENABLED, ALLOWED_REACTIONS } from "./handlers/shared";
 import { isApiOnlyRuntime } from './utils/runtimeIdentity';
 import { startRuntimeHeartbeat } from './services/runtimeHeartbeat';
+import { TELEGRAM_ALLOWED_UPDATES } from './generative-ui/telegram';
 
 
 // Загрузка переменных окружения
@@ -152,7 +153,7 @@ async function startBot() {
                 await bot.api.getUpdates({ offset, timeout: 0, limit: 1 });
             }
             await bot.start({
-                allowed_updates: ['message', 'edited_message', 'callback_query', 'message_reaction', 'message_reaction_count'],
+                allowed_updates: TELEGRAM_ALLOWED_UPDATES as any,
                 onStart: () => {
                     const address = apiServer?.address();
                     if (address && typeof address !== 'string') process.send?.({ type: 'kira-ready', port: address.port });
@@ -160,7 +161,7 @@ async function startBot() {
             });
         } else {
             await bot.api.setMyCommands(getTelegramMenuCommands());
-            await bot.start();
+            await bot.start({ allowed_updates: TELEGRAM_ALLOWED_UPDATES as any });
         }
 
         console.log("✅ Бот успешно запущен и готов к работе!");

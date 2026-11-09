@@ -8,6 +8,7 @@ export class MemoryUiStore implements UiStore {
         const run = this.tail.then(async () => {
             const rows = structuredClone(this.rows.get(owner) ?? new Map<string, unknown>());
             const tx: UiTransaction = {
+                dialogueTurn: async () => rows.get('canonical:turn') as string | undefined,
                 get: async <V>(kind: string, id: string) => structuredClone(rows.get(kind + ':' + id)) as V | undefined,
                 put: async (kind, id, value) => { rows.delete(kind + ':' + id); rows.set(kind + ':' + id, structuredClone(value)); },
                 delete: async (kind, id) => { rows.delete(kind + ':' + id); },

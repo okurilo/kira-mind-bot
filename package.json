@@ -27,6 +27,7 @@
     "eval:decisions": "node scripts/researchDecisions.cjs",
     "eval:telegram-reminders": "ts-node scripts/runTelegramReminderEval.ts",
     "eval:generative-ui": "ts-node scripts/evalGenerativeUi.ts",
+    "test:telegram-widgets": "npm run build:server && node scripts/testTelegramWidgets.cjs",
     "eval:widget-refresh": "ts-node scripts/evalWidgetRefresh.ts",
     "ui:examples": "ts-node scripts/generateUiExamples.ts",
     "ui:schemas": "ts-node scripts/generateUiSchemas.ts",

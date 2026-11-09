@@ -4,6 +4,8 @@ import { scopedBotKey } from '../utils/botIdentity';
 import type { DataSource, EntityManager } from 'typeorm';
 
 export interface UiTransaction {
+    /** Canonical dialogue marker, read under the same channel lock. */
+    dialogueTurn?(): Promise<string | undefined>;
     get<T>(kind: string, id: string): Promise<T | undefined>;
     put(kind: string, id: string, value: unknown): Promise<void>;
     delete(kind: string, id: string): Promise<void>;
@@ -13,14 +15,16 @@ export interface UiTransaction {
 export interface UiStore { transact<T>(owner: number, work: (tx: UiTransaction) => Promise<T>): Promise<T> }
 /** Existing tenant-owned bot_settings storage and grants; no tenant DDL, second auth store or worker registry access. */
 export class PgUiStore implements UiStore {
-    constructor(private source: DataSource = AppDataSource) {}
+    constructor(private source: DataSource = AppDataSource, private channel: 'api' | 'telegram' = 'api') {}
     transact<T>(owner: number, work: (tx: UiTransaction) => Promise<T>): Promise<T> {
-        const prefix = scopedBotKey(`ui:${owner}:`);
+        const prefix = scopedBotKey(this.channel === 'api' ? `ui:${owner}:` : `ui:telegram:${owner}:`);
+        const dialogueKey = scopedBotKey(`dialogue:${this.channel === 'api' ? 'api:' : ''}${owner}`);
         return this.source.transaction(async manager => {
+            if (this.channel === 'telegram') await manager.query("SET LOCAL lock_timeout = '2500ms'");
             // The canonical API turn marker uses this lock too: late deferred UI cannot overtake a new turn.
-            await manager.query('/* ui-private */ SELECT pg_advisory_xact_lock(hashtext($1))', [scopedBotKey(`dialogue:api:${owner}`)]);
+            await manager.query('/* ui-private */ SELECT pg_advisory_xact_lock(hashtext($1))', [dialogueKey]);
             await manager.query('/* ui-private */ SELECT pg_advisory_xact_lock(hashtext($1))', [prefix]);
-            return work(new PgUiTransaction(manager, prefix));
+            return work(new PgUiTransaction(manager, prefix, dialogueKey));
         }).catch(error => {
             if (error instanceof ApiError) throw error;
             throw new ApiError(503, 'ui_storage_unavailable', 'Хранилище карточек временно недоступно.');
@@ -28,7 +32,11 @@ export class PgUiStore implements UiStore {
     }
 }
 class PgUiTransaction implements UiTransaction {
-    constructor(private manager: EntityManager, private prefix: string) {}
+    constructor(private manager: EntityManager, private prefix: string, private dialogueKey: string) {}
+    async dialogueTurn(): Promise<string | undefined> {
+        const [row] = await this.manager.query('/* ui-private */ SELECT value FROM bot_settings WHERE key=$1', [this.dialogueKey]);
+        return row?.value;
+    }
     private key(kind: string, id: string) {
         if (!/^[a-z]+$/.test(kind) || !/^[A-Za-z0-9_:.-]{1,128}$/.test(id)) throw Error('invalid_ui_storage_key');
         return this.prefix + kind + ':' + id;

@@ -24,6 +24,7 @@ import {
 } from '../utils/reminderConfirmation';
 import { esc, paragraph } from '../utils/richMessage';
 import { RUNTIME_DATA_DIR } from '../utils/runtimeData';
+import { deliverTelegramResultWidget } from '../generative-ui/telegram';
 
 // ── Константы ──────────────────────────────────────────────
 
@@ -412,7 +413,9 @@ export async function sendResultToUser(
     result: ProcessingResult,
     voiceRequested = false,
 ): Promise<{ message_id: number }> {
-    return recordResultDelivery(ctx, result, () => sendResultPayload(ctx, result, voiceRequested));
+    const sent = await recordResultDelivery(ctx, result, () => sendResultPayload(ctx, result, voiceRequested));
+    await deliverTelegramResultWidget(ctx, result, sent.message_id);
+    return sent;
 }
 
 async function sendResultPayload(ctx: BotContext, result: ProcessingResult, voiceRequested: boolean): Promise<{ message_id: number }> {

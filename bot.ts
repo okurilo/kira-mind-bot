@@ -19,6 +19,7 @@ import { resolveRuntimeIdentity, isApiOnlyRuntime } from './utils/runtimeIdentit
 import { registerProductAnalytics } from './services/productAnalytics';
 import { API_ONLY_BOT_INFO, installApiOnlyTransport } from './services/apiOnlyTransport';
 import { withAccountAiOperation } from './ai/accountPolicy';
+import { registerTelegramWidgetBridge } from './generative-ui/telegram';
 
 const DISMISSAL_VARIANTS = [
   "занята важными делами",
@@ -184,6 +185,7 @@ export function createBot() {
 
 function setupBot(bot: Bot<BotContext>, config: any) {
   bot.use((ctx,next)=>withAccountAiOperation({id:`telegram:${ctx.update.update_id}`,background:false},next));
+  registerTelegramWidgetBridge(bot);
   // Без собственного error handler grammY останавливает long polling после
   // первой непойманной ошибки middleware. Команды управления не должны делать
   // весь бот недоступным из-за сбоя БД или одного некорректного Telegram payload.

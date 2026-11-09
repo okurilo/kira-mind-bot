@@ -370,6 +370,8 @@ export interface ForwardedMessageGroup {
 }
 
 export type BotContext = Context & SessionFlavor<SessionData> & {
+    /** Canonical Telegram turn captured before optional widget generation. */
+    telegramUiTurnId?: string;
     generativeUiRequest?: import('./generative-ui/contracts').UiRequest;
     /** Transport-only live browser opt-in; never persisted or accepted as an account identity. */
     liveBrowserRequest?: { operationId: string };
