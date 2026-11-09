@@ -72,8 +72,10 @@ test('fast answers receive fresh canonical communication settings in their exist
     t.mock.method(communication, 'communicationProfileContext', async (c: BotContext) => { assert.equal(c.from?.id, OWNER); return preference; });
     const prompts: string[] = [];
     calls.ai.mock.mockImplementation(async (task: string, args: any) => { assert.equal(task, 'fastDialogue'); prompts.push(args.messages[0].content); return classification() as any; });
-    await processMessage(ctx(), 'Объясни рекурсию', false, '', [], undefined, { fastDialogue: true });
+    const presentationContext = ctx(); presentationContext.session.isAllowedUser = true;
+    await processMessage(presentationContext, 'Объясни рекурсию', false, '', [], undefined, { fastDialogue: true });
     assert.ok(prompts[0].includes(preference));
+    assert.ok(prompts[0].includes('Не рисуй интерфейс в тексте'));
     preference = '{"name":null,"replyLength":"detailed"}';
     await processMessage(ctx(), 'Объясни циклы', false, '', [], undefined, { fastDialogue: true });
     assert.ok(prompts[1].includes(preference)); assert.ok(!prompts[1].includes('Синтетическое имя'));

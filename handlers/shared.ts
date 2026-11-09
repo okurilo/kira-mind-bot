@@ -24,7 +24,7 @@ import {
 } from '../utils/reminderConfirmation';
 import { esc, paragraph } from '../utils/richMessage';
 import { RUNTIME_DATA_DIR } from '../utils/runtimeData';
-import { deliverTelegramResultWidget } from '../generative-ui/telegram';
+import { deliverTelegramResultWidget, canSendPrimaryTelegramWidget, sendPrimaryTelegramWidget } from '../generative-ui/telegram';
 
 // ── Константы ──────────────────────────────────────────────
 
@@ -413,8 +413,19 @@ export async function sendResultToUser(
     result: ProcessingResult,
     voiceRequested = false,
 ): Promise<{ message_id: number }> {
-    const sent = await recordResultDelivery(ctx, result, () => sendResultPayload(ctx, result, voiceRequested));
-    await deliverTelegramResultWidget(ctx, result, sent.message_id);
+    const primary = canSendPrimaryTelegramWidget(ctx, result, voiceRequested);
+    const sent = await recordResultDelivery(ctx, result, async () => {
+        if (primary) {
+            const widget = await sendPrimaryTelegramWidget(ctx, result);
+            if (widget) {
+                storeSentMessageText(ctx, widget.message_id, result.responseText);
+                storeSentMessageContext(ctx, widget.message_id, result.responseText);
+                return widget;
+            }
+        }
+        return sendResultPayload(ctx, result, voiceRequested);
+    });
+    if (!primary) await deliverTelegramResultWidget(ctx, result, sent.message_id);
     return sent;
 }
 

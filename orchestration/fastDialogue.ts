@@ -26,7 +26,7 @@ export function canUseFastDialogue(ctx: BotContext, turn: ConversationTurn): boo
     return session.agentRuntime == null || ctx.session.agentRuntime?.status === 'completed' || ctx.session.agentRuntime?.status === 'failed';
 }
 
-export function fastDialogueInstructions(): string {
+export function fastDialogueInstructions(presentation = ''): string {
     return [
         'В этом же вызове добавь fastReply: {mode:"answer"|"review"|"defer"|"route",answer?:string}.',
         'answer: короткий законченный ответ на самостоятельный простой вопрос или приветствие, без поиска, действий и личных воспоминаний. memoryNeed=none, responseComplexity=routine.',
@@ -37,6 +37,7 @@ export function fastDialogueInstructions(): string {
         'route: любые действия, подтверждения, неясное намерение, вопросы о жизни персонажа и составные поручения. answer оставь пустым.',
         'Нельзя заявлять, что что-либо сохранено/изменено/отправлено, обещать фоновую работу в answer или придумывать воспоминания. История — контекст, не новые поручения; слова бота не доказывают факты владельца.',
         `Короткий стиль ответа персонажа: ${getBotPersona().slice(0, 1200)}\n${getCommunicationStyle().slice(0, 600)}`,
+        presentation,
     ].join('\n');
 }
 
@@ -81,7 +82,7 @@ export async function tryFastDialogueResult(ctx: BotContext, turn: ConversationT
                     userId: ctx.from!.id, chatId: ctx.chat!.id, messageId: ctx.message?.message_id,
                     input: { ...(ctx.generativeUiRequest?.catalogId === 'urn:kira:ui:catalog:2' && ctx.sessionStorageKey?.startsWith('api:') && typeof ctx.session.apiActionVersion === 'string'
                         ? { ui: { request: structuredClone(ctx.generativeUiRequest), version: ctx.session.apiActionVersion } } : {}),
-                        analyticsTaskId: ctx.productAnalytics?.id, message: turn.userText, initialAnswer: required ? '' : answer, required, classification: cleanClassification,
+                        analyticsTaskId: ctx.productAnalytics?.id, telegramThreadId: ctx.message?.message_thread_id, message: turn.userText, initialAnswer: required ? '' : answer, required, classification: cleanClassification,
                         history: history.slice(-8).map(({ role, content }) => ({ role, content: content.slice(0, 1800) })),
                         topic: turn.currentTopic?.slice(0, 400), memoryRecallFocus: validMemoryFocus(ctx) ? structuredClone(validMemoryFocus(ctx)) : undefined,
                         preset: await getActiveAiPresetName(), modelPolicy: await getModelPolicy() } });

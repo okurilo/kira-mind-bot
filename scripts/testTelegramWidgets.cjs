@@ -7,6 +7,7 @@ const { compileUi } = require('../dist/generative-ui/validate');
 const { renderTelegramWidget } = require('../dist/generative-ui/telegramRender');
 const { TelegramUiService } = require('../dist/generative-ui/telegram');
 const { MemoryUiStore } = require('../dist/tests/helpers/generativeUi');
+const { compactTelegramDraft, compactTelegramAnswer } = require('../dist/tests/fixtures/telegramWidgetPresentation');
 const owner = 730001;
 const malicious = '</script><script>window.exploited=true</script>';
 const draft = { components: [
@@ -41,7 +42,7 @@ async function run() {
         if(r.dispatch)dispatches.push(r.dispatch);
         return {result:JSON.stringify({state:r.state,error:r.error})};
       });
-      const palette = `:root{--tg-theme-bg-color:${dark?'#18222d':'#ffffff'};--tg-theme-text-color:${dark?'#ffffff':'#18222d'};--tg-theme-hint-color:${dark?'#aabbcc':'#556677'};--tg-theme-accent-text-color:${dark?'#80caff':'#1263a0'};--tg-theme-secondary-bg-color:${dark?'#26384a':'#eef4f9'}}body{background:var(--tg-theme-bg-color)}`;
+      const palette = `:root{--tg-theme-bg-color:${dark?'#18222d':'#ffffff'};--tg-theme-text-color:${dark?'#ffffff':'#18222d'};--tg-theme-hint-color:${dark?'#aabbcc':'#556677'};--tg-theme-accent-text-color:${dark?'#80caff':'#1263a0'};--tg-theme-secondary-bg-color:${dark?'#26384a':'#eef4f9'};--tg-theme-section-separator-color:${dark?'#415165':'#d8e1e9'}}body{background:var(--tg-theme-bg-color);font-family:system-ui}`;
       const shim = `<script>window.TelegramWidget={chatData:${JSON.stringify(payload.chat_data)},request:data=>window.widgetQuery(data),onEvent:(_n,f)=>window.syncData=f,ready:()=>{},openLink:()=>{}}</script>`;
       await page.setContent(payload.html.replace('<head>','<head><style>'+palette+'</style>'+shim));
       await page.waitForTimeout(60); assert.equal(queries.length,0,'No automatic action requests');
@@ -74,7 +75,24 @@ async function run() {
       const widePages=Number((await page.locator('#num').textContent()).split('/')[1]);
       for(let p=0;p<widePages;p++){await checkPage();if(p<widePages-1)await page.locator('#next').click()}
       assert.deepEqual(errors,[]);
+      const compact=compileUi(compactTelegramDraft,{urls:new Set(),actions:[],replyToken:()=> 'w0'},{enabled:true,catalogId:'urn:kira:ui:catalog:2'});
+      await page.goto('about:blank');await page.setContent(renderTelegramWidget(compact).html.replace('<head>','<head><style>'+palette+'</style>'));
+      assert.equal(await page.locator('h3').count(),1);assert.equal(await page.locator('.metrics>.metric').count(),2);
+      assert.equal(await page.locator('#nav').isVisible(),false);assert.equal(await page.locator('#status').isVisible(),false);await checkPage();
+      const table=compileUi({components:[{id:'root',component:'Table',columns:['Период','Температура'],rows:[['Сейчас','18 °C'],['Днём','21 °C'],['Ночью','13 °C']]}]},
+        {urls:new Set(),actions:[],replyToken:()=> 'w0'},{enabled:true,catalogId:'urn:kira:ui:catalog:2'});
+      await page.goto('about:blank');await page.setContent(renderTelegramWidget(table).html.replace('<head>','<head><style>'+palette+'</style>'));
+      assert.equal(await page.locator('thead:visible').count(),1);assert.equal(await page.locator('#nav').isVisible(),false);await checkPage();
       await page.close();
+    }
+    const preview=process.argv.find(a=>a.startsWith('--preview='))?.slice('--preview='.length);
+    if(preview){
+      const page=await browser.newPage({viewport:{width:360,height:700},deviceScaleFactor:2});
+      const ui=compileUi(compactTelegramDraft,{urls:new Set(),actions:[],replyToken:()=> 'w0'},{enabled:true,catalogId:'urn:kira:ui:catalog:2'});
+      const palette=':root{--tg-theme-bg-color:#18222d;--tg-theme-text-color:#f2f6fa;--tg-theme-hint-color:#aabbcc;--tg-theme-accent-text-color:#80caff;--tg-theme-secondary-bg-color:#26384a;--tg-theme-section-separator-color:#415165}body{background:var(--tg-theme-bg-color);font-family:system-ui}';
+      await page.setContent(renderTelegramWidget(ui).html.replace('<head>','<head><style>'+palette+'</style>'));
+      await page.evaluate(text=>{const p=document.createElement('p');p.textContent=text;p.style.marginTop='12px';document.body.append(p)},compactTelegramAnswer);
+      await page.locator('body').screenshot({path:preview});await page.close();
     }
     console.log('Telegram widget DOM checks passed: 4 widths × 2 themes, pagination, offline bridge, form submit, hostile text.');
   } finally {await browser.close()}

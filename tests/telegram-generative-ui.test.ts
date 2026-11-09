@@ -90,12 +90,24 @@ test('Telegram escapes adversarial text in markup, attributes and script data; r
 test('a reply widget is sent once, bound to the original answer and canonical Telegram turn, with no public data', async () => {
     const f = await fixture(); const sent = await f.deliver(); assert.equal(sent?.message_id, 20); assert.equal(f.calls(), 1);
     assert.equal(f.sent[0].chat_id, owner); assert.equal(f.sent[0].protect_content, true); assert.equal(f.sent[0].allow_queries, true);
-    assert.equal(f.sent[0].reply_parameters.message_id, 10); assert.equal(f.sent[0].public_data, undefined);
+    assert.equal(f.sent[0].reply_parameters, undefined); assert.equal(f.sent[0].caption, undefined); assert.equal(f.sent[0].public_data, undefined);
     assert.ok(Buffer.byteLength(f.sent[0].chat_data) <= 1024);
     const replies = await Promise.all([f.service.query(owner, f.query('a:0:0')), f.service.query(owner, f.query('a:0:0', { id: 'another-query' }))]);
     assert.equal(replies.filter(r => r.dispatch).length, 1);
     assert.deepEqual(replies.find(r => r.dispatch)!.dispatch!.action, { kind: 'reply', text: 'Покажи прогноз на завтра' });
+    assert.equal(replies.find(r => r.dispatch)!.dispatch!.sourceId, 10);
     assert.equal((await new TelegramUiService(f.store).query(owner, f.query('a:0:0'))).dispatch, undefined);
+});
+
+test('a primary widget binds legacy actions to itself and preserves a private topic without a quoted duplicate answer', async () => {
+    const f = await fixture(widgetDraft({ type: 'existing', index: 0 }));
+    const keyboard = { inline_keyboard: [[{ text: 'Подтвердить', callback_data: 'canonical_confirmation' }]] };
+    await f.service.deliver(owner, f.api, 'Учебный вопрос', 'Подготовлено учебное действие.', undefined, keyboard, 'tg:1', undefined, 42);
+    assert.equal(f.sent[0].message_thread_id, 42); assert.equal(f.sent[0].caption, 'Подготовлено учебное действие.');
+    assert.deepEqual(f.sent[0].reply_markup, keyboard);
+    const result = await f.service.query(owner, f.query('a:0:0'));
+    assert.equal(result.dispatch?.sourceId, 20); assert.equal(result.dispatch?.threadId, 42);
+    assert.deepEqual(result.dispatch?.action, { kind: 'callback', data: 'canonical_confirmation' });
 });
 
 test('widgets reject another owner/chat, shared/inline/wallet queries, arbitrary commands, stale turns, expiry and invisible actions', async () => {

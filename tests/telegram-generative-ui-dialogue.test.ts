@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Bot, session } from 'grammy';
+import { Bot, session, InlineKeyboard } from 'grammy';
 import { config } from '../config';
 import type { BotContext, SessionData } from '../types';
 import { registerTextMessageHandler } from '../handlers/textMessages';
@@ -19,6 +19,7 @@ import * as policy from '../services/modelPreferenceService';
 import { currentAccountAiOperation, backgroundAiTaskId } from '../ai/accountPolicy';
 import { sendResultToUser } from '../handlers/shared';
 import * as tts from '../services/elevenLabsTts';
+import { ApiError } from '../api/contracts';
 
 const owner = 730001;
 const botInfo = { id: 1234567890, is_bot: true as const, first_name: 'Synthetic', username: 'synthetic_bot' } as any;
@@ -52,9 +53,10 @@ test('a real Telegram text handler sends its answer + widget; a widget reply bec
     const waitFor = async (condition: () => boolean) => { const until = Date.now() + 6000; while (!condition() && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20)); assert.ok(condition(), 'The ordinary handler must complete'); };
     await bot.handleUpdate({ update_id: 1, message: { message_id: 10, date: 1, chat: { id: owner, type: 'private', first_name: 'Synthetic' }, from: { id: owner, is_bot: false, first_name: 'Synthetic' }, text: 'Покажи учебную цену наглядно' } });
     await waitFor(() => calls.some(c => c.method === 'sendWidget'));
-    const sentText = calls.find(c => c.method === 'sendMessage' && c.payload.text === 'Учебная цена — 18 USD.'); assert.ok(sentText);
+    assert.equal(calls.filter(c => c.method === 'sendMessage' && c.payload.text === 'Учебная цена — 18 USD.').length, 0);
     const firstWidget = calls.find(c => c.method === 'sendWidget')!;
     assert.equal(firstWidget.payload.chat_id, owner); assert.match(firstWidget.payload.html, /18 USD/);
+    assert.equal(firstWidget.payload.caption, 'Учебная цена — 18 USD.'); assert.equal(firstWidget.payload.reply_parameters, undefined);
     const widgetId = id;
     const query = { id: 'synthetic-query', from: { id: owner, is_bot: false, first_name: 'Synthetic' }, chat: { id: owner, type: 'private', first_name: 'Synthetic' },
         message_id: widgetId, chat_instance: 'private', type: { type: 'data' }, data: 'a:0:0' };
@@ -96,7 +98,7 @@ test('a delivered deferred Telegram answer composes its widget under the origina
         resultText: 'Учебная цена 18 USD.', input: { required: true, message: 'Покажи цену', preset: 'gpt-lean', accountAiOperation: { id: 'synthetic-original-turn', background: false } } };
     const deps = { enabled: async () => allowed, repository: { isActive: active, update: async () => true } as any };
     await executeDialogueJob(bot, job, deps);
-    assert.equal(visuals.length, 1); assert.equal(visuals[0][4], 101); assert.equal(visuals[0][6], 'tg:1');
+    assert.equal(visuals.length, 1); assert.equal(visuals[0][4], undefined); assert.equal(visuals[0][6], 'tg:1');
     assert.equal(await visuals[0][7](), true); assert.ok(active.mock.callCount() > 0);
     live = false; assert.equal(await visuals[0][7](), false); live = true;
     expectedOperation = { id: backgroundAiTaskId('dialogue-review', job.id), background: true };
@@ -129,5 +131,42 @@ test('the canonical spoken text is delivered before the optional widget, and wid
         const before = events.length;
         assert.equal((await sendResultToUser(ctx, { responseText: text }, true)).message_id, 101);
         assert.deepEqual(events.slice(before), ['voice']);
+    }
+});
+
+test('a short answer is one widget with its canonical caption; known refusals fall back once, uncertain sends never repeat', async t => {
+    const prior = config.allowedUserId; config.allowedUserId = owner; t.after(() => { config.allowedUserId = prior; });
+    for (const mode of ['widget', 'decline', 'refused', 'unknown', 'record-failure', 'long', 'legacy']) {
+        const store = new MemoryUiStore(); await store.transact(owner, tx => tx.put('canonical', 'turn', 'tg:1'));
+        let modelCalls = 0; const events: any[] = [];
+        if (mode === 'record-failure') {
+            const transact = store.transact.bind(store);
+            store.transact = (id, work) => transact(id, tx => work({ ...tx, put: async (kind, key, value) => {
+                if (kind === 'cards') throw Error('synthetic persistence failure'); return tx.put(kind, key, value);
+            } }));
+        }
+        const service = new TelegramUiService(store, async () => { modelCalls++; return JSON.stringify(mode === 'decline' ? { components: null } : draft); });
+        t.mock.method(telegramUi, 'deliver', (...args: Parameters<TelegramUiService['deliver']>) => service.deliver(...args));
+        const text = mode === 'long' ? 'Длинный учебный ответ. '.repeat(60) : 'Учебная цена — 18 USD.';
+        const ctx = { from: { id: owner }, chat: { id: owner, type: 'private' }, message: { text: 'Покажи учебную цену' }, telegramUiTurnId: 'tg:1',
+            session: { sentMessages: {}, messageHistory: [] },
+            api: { raw: { sendWidget: async (payload: any) => {
+                events.push({ method: 'widget', payload });
+                if (mode === 'refused') throw Object.assign(Error('method not supported'), { error_code: 400 });
+                if (mode === 'unknown') throw Error('transport timeout');
+                return { message_id: 201 };
+            } } },
+            reply: async (text: string) => { events.push({ method: 'text', text }); return { message_id: 101 }; },
+        } as unknown as BotContext;
+        if (mode === 'unknown') {
+            await assert.rejects(sendResultToUser(ctx, { responseText: text }), (e: any) => e.code === 'telegram_widget_delivery_unknown');
+            assert.deepEqual(events.map(e => e.method), ['widget']);
+        } else {
+            await sendResultToUser(ctx, { responseText: text, ...(mode === 'legacy' ? { keyboard: new InlineKeyboard().text('Подтвердить', 'synthetic_confirmation') } : {}) });
+            assert.deepEqual(events.map(e => e.method), mode === 'decline' ? ['text'] : mode === 'refused' ? ['widget', 'text'] : ['long', 'legacy'].includes(mode) ? ['text', 'widget'] : ['widget']);
+            const widget = events.find(e => e.method === 'widget');
+            if (widget) { assert.equal(widget.payload.reply_parameters, undefined); assert.equal(widget.payload.caption, ['long', 'legacy'].includes(mode) ? undefined : text); }
+        }
+        assert.equal(modelCalls, 1);
     }
 });

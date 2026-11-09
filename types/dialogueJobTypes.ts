@@ -7,6 +7,7 @@ export interface FastReplyDecision {
     answer?: string;
 }
 export interface DialogueJobInput {
+    telegramThreadId?: number;
     ui?: { request: import('../generative-ui/contracts').UiRequest; version: string };
     uiResult?: { ui: import('../generative-ui/contracts').UiPayload | import('../generative-ui/contracts').UiChange; messageId: number; uiRefresh?: import('../generative-ui/contracts').UiRefreshMeta };
     accountAiOperation?: import('../ai/accountPolicy').AccountAiOperation;

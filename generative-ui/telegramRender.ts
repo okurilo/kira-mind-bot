@@ -31,13 +31,13 @@ export function widgetValue(f: UiInput, value: WidgetValue): string | number | b
     return v;
 }
 
-const STYLE = `body{margin:10px 12px;color:var(--tg-theme-text-color);font-size:14px}*{box-sizing:border-box}p,h3{margin:0}button{min-height:40px;max-width:100%;white-space:normal;overflow-wrap:anywhere}section{padding:5px 0;overflow-wrap:anywhere}.metric{padding:10px;border-radius:12px;background:var(--tg-theme-secondary-bg-color)}.value{font-size:26px;font-weight:bold}.hint,small{color:var(--tg-theme-hint-color);font-size:12px}.track{height:8px;background:var(--tg-theme-secondary-bg-color);border-radius:8px}.fill{height:8px;background:var(--tg-theme-accent-text-color);border-radius:8px}.pair{display:flex;gap:8px;flex-wrap:wrap}.pair>*{flex:1}table{width:100%;table-layout:fixed;font-size:12px}td,th{overflow-wrap:anywhere;padding:4px;text-align:left}svg{width:100%;height:150px}#nav{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:6px}#status{font-size:12px;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}button[aria-pressed=true]{font-weight:bold;border:2px solid var(--tg-theme-accent-text-color)}`;
+const STYLE = `body{margin:10px 12px;padding-bottom:16px;color:var(--tg-theme-text-color);font-size:15px;line-height:1.35}*{box-sizing:border-box}p,h3{margin:0}h3{font-size:18px;line-height:1.25;font-weight:700}[hidden]{display:none}button{min-height:40px;max-width:100%;white-space:normal;overflow-wrap:anywhere}section{padding:5px 0;overflow-wrap:anywhere}section[data-table]{padding:0}.metric{padding:10px;border-radius:12px;background:var(--tg-theme-secondary-bg-color)}.value{font-size:30px;line-height:1.25;font-weight:700;margin-top:4px}.metrics{display:flex;flex-wrap:wrap;gap:8px}.metrics>.metric{flex:1 1 110px;min-width:0}.hint,small{color:var(--tg-theme-hint-color);font-size:12px}.track{height:8px;background:var(--tg-theme-secondary-bg-color);border-radius:8px}.fill{height:8px;background:var(--tg-theme-accent-text-color);border-radius:8px}.pair{display:flex;gap:8px;flex-wrap:wrap}.pair>*{flex:1}table{width:100%;table-layout:fixed;border-collapse:collapse;margin:0;font-size:13px}td,th{overflow-wrap:anywhere;padding:7px 4px;text-align:left;border-bottom:1px solid var(--tg-theme-section-separator-color)}th{font-size:12px;color:var(--tg-theme-hint-color)}svg{width:100%;height:150px}#nav{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:6px}#status{font-size:12px;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}button[aria-pressed=true]{font-weight:bold;border:2px solid var(--tg-theme-accent-text-color)}`;
 
 // No automatic requests. Every request/openLink happens synchronously inside a button click.
 const SCRIPT = `const TW=window.TelegramWidget,$=id=>document.getElementById(id);let busy=false,page=0,pages=[],width=0;
-function draw(){F.forEach((f,i)=>{let v=S.v[i],s=v===null?'Не выбрано':f.component==='Choice'?f.options[v].label:f.component==='Toggle'?(v?'Да':'Нет'):f.component==='Slider'?Number((f.min+v*f.step).toPrecision(15)):new Date(v).toISOString();$('v'+i).textContent=s;document.querySelectorAll('[data-choice="'+i+'"]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.value)===v)))});document.querySelectorAll('[data-query]').forEach(b=>b.disabled=busy||!!S.done);if(S.n)$('status').textContent=S.n;show()}
-function show(){pages.forEach((p,i)=>p.forEach(e=>e.hidden=i!==page));$('num').textContent=(page+1)+' / '+pages.length;$('prev').disabled=page===0;$('next').disabled=page===pages.length-1}
-function layout(){const units=Array.from(document.querySelectorAll('main>section'));units.forEach(e=>e.hidden=false);pages=[[]];let h=0;for(const e of units){const n=e.getBoundingClientRect().height;if(h+n>430&&pages[pages.length-1].length){pages.push([]);h=0}pages[pages.length-1].push(e);h+=n}page=Math.min(page,pages.length-1);show()}
+function draw(){F.forEach((f,i)=>{let v=S.v[i],s=v===null?'Не выбрано':f.component==='Choice'?f.options[v].label:f.component==='Toggle'?(v?'Да':'Нет'):f.component==='Slider'?Number((f.min+v*f.step).toPrecision(15)):new Date(v).toISOString();$('v'+i).textContent=s;document.querySelectorAll('[data-choice="'+i+'"]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.value)===v)))});document.querySelectorAll('[data-query]').forEach(b=>b.disabled=busy||!!S.done);if(S.n)$('status').textContent=S.n;$('status').style.display=$('status').textContent?'block':'none';show()}
+function show(){pages.forEach((p,i)=>p.forEach(e=>e.hidden=i!==page));$('nav').style.display=pages.length>1?'flex':'none';$('num').textContent=(page+1)+' / '+pages.length;$('prev').disabled=page===0;$('next').disabled=page===pages.length-1}
+function layout(){const units=Array.from(document.querySelectorAll('main>section'));units.forEach(e=>e.hidden=false);pages=[[]];let h=0,last='',heads={};for(const e of units){const key=e.dataset.table||'',head=key?e.querySelector('thead'):null;if(head){head.hidden=false;if(heads[key]===undefined)heads[key]=head.getBoundingClientRect().height+2;head.hidden=last===key&&pages[pages.length-1].length>0}let n=e.getBoundingClientRect().height;if(h+n>430&&pages[pages.length-1].length){pages.push([]);h=0;if(head&&head.hidden){head.hidden=false;n+=heads[key]}}pages[pages.length-1].push(e);h+=n;last=key}page=Math.min(page,pages.length-1);show()}
 function move(n){page+=n;show()}
 function ask(data){if(!TW||busy||S.done)return;busy=true;$('status').textContent='Отправляю…';let p;try{p=TW.request(data)}catch(e){busy=false;$('status').textContent='Не отправлено';draw();return}draw();p.then(a=>{const d=JSON.parse(a.result);if(d.state)S=d.state;$('status').textContent=d.error|| (S.done?'Запрос принят':'')},()=>{$('status').textContent='Нет подтверждения. Проверь чат.'}).finally(()=>{busy=false;draw();layout()})}
 function act(i){ask('a:'+S.r+':'+i)}
@@ -56,8 +56,9 @@ export function renderTelegramWidget(ui: UiPayload): RenderedTelegramWidget | un
     const fields = components.filter(input), state: WidgetState = { r: 0, v: fields.map(initialWidgetValue) };
     // A keyboardless date control needs a grounded starting time. Do not invent one.
     if (fields.some(f => f.component === 'DateTime' && !f.value && !f.min)) return;
-    const links: string[] = [], units: string[] = [];
-    const unit = (s: string) => units.push(`<section>${s}</section>`);
+    const links: string[] = [], units: string[] = [], tables = new Set<string>();
+    const unit = (s: string, table?: string) => units.push(`<section${table ? ` data-table="${table}"` : ''}>${s}</section>`);
+    const metric = (c: Extract<UiComponent, { component: 'Metric' }>) => `<div class="metric"><small>${esc(c.label)}</small><div class="value">${esc(c.value)}</div>${c.detail ? `<small>${esc(c.detail)}</small>` : ''}</div>`;
     const text = (s: string, title = false) => {
         const chars = Array.from(s);
         for (let i = 0; i < chars.length; i += 120) unit(`<${title ? 'h3' : 'p'}>${esc(chars.slice(i, i + 120).join(''))}</${title ? 'h3' : 'p'}>`);
@@ -77,21 +78,29 @@ export function renderTelegramWidget(ui: UiPayload): RenderedTelegramWidget | un
     function walk(id: string): void {
         const c = byId.get(id)!;
         switch (c.component) {
-            case 'Column': case 'Row': c.children.forEach(walk); break;
+            case 'Column': c.children.forEach(walk); break;
+            case 'Row': {
+                const children = c.children.map(child => byId.get(child)!);
+                if (children.length === 2 && children.every((child): child is Extract<UiComponent, { component: 'Metric' }> => child.component === 'Metric'
+                    && child.label.length <= 24 && child.value.length <= 10 && !child.detail)) unit(`<div class="metrics">${children.map(metric).join('')}</div>`);
+                else c.children.forEach(walk);
+                break;
+            }
             case 'Card': walk(c.child); break;
             case 'Text': text(c.text, c.variant === 'title'); break;
             case 'Divider': unit('<hr>'); break;
             case 'Metric':
-                if (c.value.length > 32 || (c.label + (c.detail ?? '')).length > 160) { text(c.label, true); text(c.value); if (c.detail) text(c.detail); break; }
+                if (c.value.length > 24 || (c.label + (c.detail ?? '')).length > 96) { text(c.label, true); text(c.value); if (c.detail) text(c.detail); break; }
                 if ((c.label + c.value + (c.detail ?? '')).length > 400) throw Error('metric_too_large');
-                unit(`<div class="metric"><small>${esc(c.label)}</small><div class="value">${esc(c.value)}</div>${c.detail ? `<small>${esc(c.detail)}</small>` : ''}</div>`); break;
+                unit(metric(c)); break;
             case 'Button': {
                 const label = byId.get(c.child); if (label?.component !== 'Text') throw Error('invalid_button_child');
                 unit(actionButton(c.action, label.text)); break;
             }
             case 'Table': {
                 if (c.columns.length <= 3 && [...c.columns, ...c.rows.flat()].every(v => v.length <= 32)) {
-                    for (let i = 0; i < c.rows.length; i += 2) unit(`<table><tr>${c.columns.map(s => `<th>${esc(s)}</th>`).join('')}</tr>${c.rows.slice(i, i + 2).map(row => `<tr>${row.map(s => `<td>${esc(s)}</td>`).join('')}</tr>`).join('')}</table>`);
+                    tables.add(c.id);
+                    for (let i = 0; i < c.rows.length; i += 2) unit(`<table><thead><tr>${c.columns.map(s => `<th>${esc(s)}</th>`).join('')}</tr></thead><tbody>${c.rows.slice(i, i + 2).map(row => `<tr>${row.map(s => `<td>${esc(s)}</td>`).join('')}</tr>`).join('')}</tbody></table>`, c.id);
                 } else c.rows.forEach((row, i) => { text(`Строка ${i + 1}`, true); row.forEach((s, j) => text(`${c.columns[j]}: ${s}`)); });
                 break;
             }
@@ -127,12 +136,12 @@ export function renderTelegramWidget(ui: UiPayload): RenderedTelegramWidget | un
         }
     }
     try {
-        if (ui.meta?.title) text(ui.meta.title, true);
+        if (ui.meta?.title && !components.some(c => c.component === 'Text' && c.variant === 'title' && c.text === ui.meta!.title)) text(ui.meta.title, true);
         walk('root');
         if (ui.meta?.asOf) text(`Данные на ${ui.meta.asOf}`);
         ui.meta?.sources?.forEach(s => unit(urlButton(s.url, s.label)));
-        if (!units.length || units.length > TELEGRAM_WIDGET_LIMITS.units) return;
-        const html = `<!doctype html><html><head><style>${STYLE}</style></head><body><main>${units.join('')}</main><nav id="nav"><button id="prev" onclick="move(-1)">←</button><small id="num"></small><button id="next" onclick="move(1)">→</button></nav><p id="status" role="status"></p><script>const F=${json(fields)},L=${json(links)};let S=${json(state)};${SCRIPT}</script></body></html>`;
+        if (!units.length || units.length > TELEGRAM_WIDGET_LIMITS.units || units.length + tables.size > 120) return;
+        const html = `<!doctype html><html><head><style>${STYLE}</style></head><body><main>${units.join('')}</main><nav id="nav"><button id="prev" aria-label="Предыдущая страница" onclick="move(-1)">←</button><small id="num"></small><button id="next" aria-label="Следующая страница" onclick="move(1)">→</button></nav><p id="status" role="status"></p><script>const F=${json(fields)},L=${json(links)};let S=${json(state)};${SCRIPT}</script></body></html>`;
         if (html.includes('\0') || Buffer.byteLength(html) > TELEGRAM_WIDGET_LIMITS.html || deflateSync(html, { level: 9 }).length > TELEGRAM_WIDGET_LIMITS.compressed) return;
         return { html, fields, state };
     } catch { return; }

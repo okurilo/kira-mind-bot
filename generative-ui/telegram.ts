@@ -2,7 +2,7 @@ import type { Bot, Api } from 'grammy';
 import type { InlineKeyboardMarkup, Message, User, Chat } from 'grammy/types';
 import type { BotContext } from '../types';
 import type { ProcessingResult } from '../orchestrator';
-import type { ApiMessage, ApiButton } from '../api/contracts';
+import { ApiError, type ApiMessage, type ApiButton } from '../api/contracts';
 import { config } from '../config';
 import { composeUi, type UiCompletion } from './compose';
 import { UI_CATALOG_V2, type UiInput } from './contracts';
@@ -17,7 +17,7 @@ export const TELEGRAM_ALLOWED_UPDATES = ['message', 'edited_message', 'callback_
 
 // Narrow raw API adapter: grammY's Proxy/transformers already support methods added after its typings.
 export interface WidgetApi {
-    sendWidget(payload: { chat_id: number; html: string; caption: string; allow_queries: boolean; protect_content: true; reply_parameters: { message_id: number; allow_sending_without_reply: true }; chat_data: string }, signal?: AbortSignal): Promise<Message>;
+    sendWidget(payload: { chat_id: number; html: string; caption?: string; allow_queries: boolean; protect_content: true; reply_markup?: InlineKeyboardMarkup; message_thread_id?: number; chat_data: string }, signal?: AbortSignal): Promise<Message>;
     answerWidgetQuery(payload: { widget_query_id: string; data: string }, signal?: AbortSignal): Promise<true>;
     editMessageWidgetData(payload: { chat_id: number; message_id: number; chat_data: string }, signal?: AbortSignal): Promise<true>;
 }
@@ -28,10 +28,10 @@ interface WidgetQuery {
 }
 type Action = { kind: 'reply'; text: string } | { kind: 'callback'; data: string } | { kind: 'submit'; submission: UiSubmission };
 interface Card {
-    turn: string; sourceId: number; sourceText: string; keyboard?: InlineKeyboardMarkup;
+    turn: string; sourceId: number; sourceText: string; keyboard?: InlineKeyboardMarkup; threadId?: number;
     actions: Action[]; allowed: number[]; fields: UiInput[]; state: WidgetState; expires: number;
 }
-export interface WidgetDispatch { action: { kind: 'reply'; text: string } | { kind: 'callback'; data: string }; sourceId: number; sourceText: string; keyboard?: InlineKeyboardMarkup; turn: string }
+export interface WidgetDispatch { action: { kind: 'reply'; text: string } | { kind: 'callback'; data: string }; sourceId: number; sourceText: string; keyboard?: InlineKeyboardMarkup; turn: string; threadId?: number }
 interface QueryResult { state?: WidgetState; error?: string; dispatch?: WidgetDispatch; changed?: true }
 
 /** Separate Telegram presentation receipts; canonical identity, session and turn marker remain authoritative. */
@@ -50,9 +50,10 @@ export class TelegramUiService {
         });
     }
 
-    async deliver(owner: number, api: WidgetApi, request: string, answer: string, sourceId: number,
-                  keyboard?: InlineKeyboardMarkup, expectedTurn?: string, active: () => Promise<boolean> = async () => true): Promise<Message | undefined> {
+    async deliver(owner: number, api: WidgetApi, request: string, answer: string, sourceId: number | undefined,
+                  keyboard?: InlineKeyboardMarkup, expectedTurn?: string, active: () => Promise<boolean> = async () => true, threadId?: number): Promise<Message | undefined> {
         if (!telegramWidgetsEnabled() || !request.trim() || !answer.trim()) return;
+        if (sourceId === undefined && answer.length > 1024) return;
         const turn = expectedTurn ?? await this.store.transact(owner, tx => tx.dialogueTurn?.() ?? Promise.resolve(undefined));
         if (!turn || !await active() || !await this.store.transact(owner, tx => this.current(tx, turn))) return;
         const actions: Action[] = [];
@@ -60,8 +61,9 @@ export class TelegramUiService {
         const buttons = keyboard?.inline_keyboard.map(row => row.flatMap<ApiButton>(b => 'callback_data' in b && b.callback_data
             ? [{ text: b.text, actionToken: bind({ kind: 'callback', data: b.callback_data }) }]
             : 'url' in b && b.url ? [{ text: b.text, url: b.url }] : []));
-        const message: ApiMessage = { id: sourceId, type: 'text', text: answer, format: 'plain', ...(buttons ? { buttons } : {}) };
+        const message: ApiMessage = { id: sourceId ?? 0, type: 'text', text: answer, format: 'plain', ...(buttons ? { buttons } : {}) };
         const ui = await composeUi(request, message, text => bind({ kind: 'reply', text }), this.complete, {
+            surface: 'telegram',
             request: { enabled: true, catalogId: UI_CATALOG_V2 },
             submitToken: (text, fields) => bind({ kind: 'submit', submission: { text, fields } }),
         });
@@ -70,18 +72,35 @@ export class TelegramUiService {
         if (!rendered) return;
         const allowed = ui.messages[0].createSurface.components.flatMap(c => c.component === 'Button' && 'event' in c.action ? [c.action.event.context.actionToken]
             : c.component === 'Checklist' ? c.items.flatMap(item => item.actionToken ? [item.actionToken] : []) : []).map(token => Number(token.slice(1)));
-        const card: Card = { turn, sourceId, sourceText: answer, keyboard, actions, allowed, fields: rendered.fields, state: rendered.state, expires: this.now() + TELEGRAM_WIDGET_TTL_MS };
+        const card: Card = { turn, sourceId: sourceId ?? 0, sourceText: answer, keyboard, threadId, actions, allowed, fields: rendered.fields, state: rendered.state, expires: this.now() + TELEGRAM_WIDGET_TTL_MS };
         // Serialize the single send with the canonical turn. A late composer cannot overtake a new message.
         // No send retry: a transport timeout can mean Telegram has already delivered the widget.
+        let delivered: Message | undefined;
         return this.store.transact(owner, async tx => {
             if (!await this.current(tx, turn) || !await active()) return;
-            const sent = await api.sendWidget({ chat_id: owner, html: rendered.html, caption: ui.meta?.title ?? 'Виджет к ответу Киры',
-                allow_queries: allowed.length > 0 || rendered.fields.length > 0, protect_content: true,
-                reply_parameters: { message_id: sourceId, allow_sending_without_reply: true }, chat_data: JSON.stringify(rendered.state) }, AbortSignal.timeout(8000));
-            if (!Number.isSafeInteger(sent.message_id) || sent.message_id <= 0) throw Error('widget_delivery_not_bound');
+            let sent: Message;
+            try {
+                sent = await api.sendWidget({ chat_id: owner, html: rendered.html,
+                    ...(sourceId === undefined ? { caption: answer, ...(keyboard ? { reply_markup: keyboard } : {}) } : {}),
+                    ...(threadId ? { message_thread_id: threadId } : {}),
+                    allow_queries: allowed.length > 0 || rendered.fields.length > 0, protect_content: true,
+                    chat_data: JSON.stringify(rendered.state) }, AbortSignal.timeout(8000));
+            } catch (error) {
+                // A Bot API refusal confirms that no widget was sent. A network failure does not.
+                const code = (error as { error_code?: number })?.error_code;
+                if (Number.isInteger(code) && code! >= 400 && code! < 500) return;
+                throw new ApiError(502, 'telegram_widget_delivery_unknown', 'Не удалось подтвердить доставку ответа.');
+            }
+            if (!Number.isSafeInteger(sent.message_id) || sent.message_id <= 0) throw new ApiError(502, 'telegram_widget_delivery_unknown', 'Не удалось подтвердить доставку ответа.');
+            delivered = sent;
+            if (sourceId === undefined) card.sourceId = sent.message_id;
             await tx.put('cards', String(sent.message_id), card);
             await tx.trim('cards', 128);
             return sent;
+        }).catch(error => {
+            // A committed Telegram delivery must not be duplicated because recording its optional UI failed.
+            if (delivered) { console.warn('[telegram-ui] Не удалось сохранить состояние доставленной карточки'); return delivered; }
+            throw error;
         });
     }
 
@@ -121,12 +140,36 @@ export class TelegramUiService {
             // Durable at-most-once receipt before acknowledgement or effects. Unknown outcomes never replay.
             state.done = true; state.r++;
             await tx.put('cards', String(query.message_id), card);
-            return { state, changed: true, dispatch: { action: dispatch, sourceId: card.sourceId, sourceText: card.sourceText, keyboard: card.keyboard, turn: card.turn } };
+            return { state, changed: true, dispatch: { action: dispatch, sourceId: card.sourceId, sourceText: card.sourceText, keyboard: card.keyboard, turn: card.turn, threadId: card.threadId } };
         });
     }
 }
 
 export const telegramUi = new TelegramUiService();
+
+function canGenerateWidget(ctx: BotContext, result: ProcessingResult): boolean {
+    return telegramWidgetsEnabled() && !ctx.sessionStorageKey?.startsWith('api:') && ctx.chat?.type === 'private'
+        && ctx.from?.id === config.allowedUserId && ctx.chat.id === config.allowedUserId && !result.awaitingDeferredResult
+        && result.operationStatus !== 'failed' && result.operationStatus !== 'unknown';
+}
+export function canSendPrimaryTelegramWidget(ctx: BotContext, result: ProcessingResult, voiceRequested: boolean): boolean {
+    return canGenerateWidget(ctx, result) && !voiceRequested && !!(ctx.telegramUiTurnId ?? ctx.dialogueTurnId)
+        && !!result.responseText.trim() && result.responseText.length <= 1024 && !result.keyboard && !result.artifacts?.length
+        && !result.structuredResponseBlocks?.length && !result.reminderCreated && !result.icsFilePath
+        && !result.documentFilePath && !result.imageGenerated && !result.generatedImagePath && !result.generatedImageUrl;
+}
+function widgetRequest(ctx: BotContext) { return ctx.message?.text ?? ctx.session.messageHistory.find(item => item.role === 'user')?.content; }
+function widgetThread(ctx: BotContext) { return ctx.msg && 'message_thread_id' in ctx.msg ? ctx.msg.message_thread_id : undefined; }
+
+export async function sendPrimaryTelegramWidget(ctx: BotContext, result: ProcessingResult): Promise<Message | undefined> {
+    const request = widgetRequest(ctx), turn = ctx.telegramUiTurnId ?? ctx.dialogueTurnId;
+    if (!request || !turn) return;
+    try { return await telegramUi.deliver(ctx.chat!.id, raw(ctx.api), request, result.responseText, undefined, result.keyboard, turn, undefined, widgetThread(ctx)); }
+    catch (error) {
+        if (error instanceof ApiError && error.code === 'telegram_widget_delivery_unknown') throw error;
+        console.warn('[telegram-ui] Карточка недоступна; используется обычный ответ'); return;
+    }
+}
 
 /** Install before session/auth middleware: older grammY Context getters do not recognize widget_query. */
 export function registerTelegramWidgetBridge(bot: Bot<BotContext>, service = telegramUi, owner = config.allowedUserId): void {
@@ -153,11 +196,13 @@ export function registerTelegramWidgetBridge(bot: Bot<BotContext>, service = tel
         const { action, sourceId, sourceText, keyboard } = result.dispatch;
         ctx.telegramUiTurnId = result.dispatch.turn;
         const date = Math.floor(Date.now() / 1000);
-        const source = { message_id: sourceId, date, from: ctx.me, chat: query.chat, text: sourceText, reply_to_message: undefined, ...(keyboard ? { reply_markup: keyboard } : {}) };
+        const source = { message_id: sourceId, date, from: ctx.me, chat: query.chat, text: sourceText, reply_to_message: undefined,
+            ...(result.dispatch.threadId ? { message_thread_id: result.dispatch.threadId } : {}), ...(keyboard ? { reply_markup: keyboard } : {}) };
         // Preserve the original source message for callback handlers and reply context.
         delete update.widget_query;
         if (action.kind === 'reply') {
-            ctx.update.message = { message_id: query.message_id!, date, from: query.from, chat: query.chat, text: action.text, reply_to_message: source };
+            ctx.update.message = { message_id: query.message_id!, date, from: query.from, chat: query.chat, text: action.text, reply_to_message: source,
+                ...(result.dispatch.threadId ? { message_thread_id: result.dispatch.threadId } : {}) };
         } else {
             ctx.update.callback_query = { id: query.id, from: query.from, chat_instance: query.chat_instance, message: source, data: action.data };
             ctx.api.config.use(async (prev, method, payload, signal) => {
@@ -179,14 +224,12 @@ export function registerTelegramWidgetBridge(bot: Bot<BotContext>, service = tel
 
 /** The canonical text/voice/file delivery has already succeeded; a visual is an optional attachment. */
 export async function deliverTelegramResultWidget(ctx: BotContext, result: ProcessingResult, messageId: number): Promise<void> {
-    if (!telegramWidgetsEnabled() || ctx.sessionStorageKey?.startsWith('api:') || ctx.chat?.type !== 'private'
-        || ctx.from?.id !== config.allowedUserId || ctx.chat.id !== config.allowedUserId || result.awaitingDeferredResult
-        || result.operationStatus === 'failed' || result.operationStatus === 'unknown') return;
-    const request = ctx.message?.text ?? ctx.session.messageHistory.find(item => item.role === 'user')?.content;
+    if (!canGenerateWidget(ctx, result)) return;
+    const request = widgetRequest(ctx);
     const turn = ctx.telegramUiTurnId ?? ctx.dialogueTurnId;
     if (!request || !turn) return;
     try {
-        const sent = await telegramUi.deliver(ctx.chat.id, raw(ctx.api), request, result.responseText, messageId, result.keyboard, turn);
+        const sent = await telegramUi.deliver(ctx.chat!.id, raw(ctx.api), request, result.responseText, messageId, result.keyboard, turn, undefined, widgetThread(ctx));
         if (sent) {
             // Reply-to-widget resolves to the same grounded answer, without a second history turn.
             (ctx.session.sentMessages ??= {})[sent.message_id] = result.responseText;

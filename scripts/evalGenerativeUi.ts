@@ -18,7 +18,7 @@ export async function evaluateGenerativeUi(completion: UiCompletion = completeUi
             const parsed = JSON.parse(raw);
             declined = !!parsed && Object.keys(parsed).length === 1 && parsed.components === null;
             return raw;
-        }, { request: { enabled: true, catalogId }, submitToken: () => options.transport === 'telegram' ? 'w0' : 'synthetic-form.signature' });
+        }, { request: { enabled: true, catalogId }, surface: options.transport, submitToken: () => options.transport === 'telegram' ? 'w0' : 'synthetic-form.signature' });
         const components = result?.messages[0].createSurface.components ?? [];
         const chartValues = components.flatMap(component => component.component === 'Chart' ? component.series.flatMap(series => series.values) : []);
         const grounded = chartValues.every(value => item.values.includes(value));
