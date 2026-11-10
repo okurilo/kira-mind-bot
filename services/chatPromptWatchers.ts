@@ -7,6 +7,7 @@ import { getSetting, setSetting } from "./botSettingsService";
 import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
 import { initTelegramClient } from "./telegram";
 import { getProactiveChatId } from "../utils/allowedUserChatStore";
+import { telegramChatMigrations } from './telegramChatMigration';
 
 const SETTING_KEY = "CHAT_PROMPT_WATCHERS";
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1000;
@@ -153,9 +154,18 @@ function normalizeWatcher(value: unknown): ChatPromptWatcher | null {
     };
 }
 
+async function resolveWatcherTargets(watchers: ChatPromptWatcher[]): Promise<ChatPromptWatcher[]> {
+    return Promise.all(watchers.map(async watcher => {
+        try {
+            const targetChatId = await telegramChatMigrations.resolve(watcher.targetChatId);
+            return targetChatId === watcher.targetChatId ? watcher : { ...watcher, targetChatId };
+        } catch { return watcher; /* The transport can still learn a migration from Telegram's refusal. */ }
+    }));
+}
+
 async function loadWatchers(): Promise<ChatPromptWatcher[]> {
     const raw = await getSetting(SETTING_KEY, "[]");
-    if (parsedCache?.raw === raw) return parsedCache.watchers;
+    if (parsedCache?.raw === raw) return resolveWatcherTargets(parsedCache.watchers);
 
     try {
         const parsed = JSON.parse(raw);
@@ -163,7 +173,7 @@ async function loadWatchers(): Promise<ChatPromptWatcher[]> {
             ? parsed.map(normalizeWatcher).filter((item): item is ChatPromptWatcher => Boolean(item))
             : [];
         parsedCache = { raw, watchers };
-        return watchers;
+        return resolveWatcherTargets(watchers);
     } catch (error) {
         console.error("[chatPromptWatchers] failed to parse watcher settings:", error);
         parsedCache = { raw, watchers: [] };
@@ -172,6 +182,7 @@ async function loadWatchers(): Promise<ChatPromptWatcher[]> {
 }
 
 async function saveWatchers(watchers: ChatPromptWatcher[]): Promise<void> {
+    watchers = await resolveWatcherTargets(watchers);
     const raw = JSON.stringify(watchers);
     parsedCache = { raw, watchers };
     await setSetting(SETTING_KEY, raw);
