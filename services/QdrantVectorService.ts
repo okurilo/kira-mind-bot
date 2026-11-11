@@ -1,12 +1,18 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { v4 as uuidv4 } from 'uuid';
-import { IDomainVectorService } from './interfaces/IDomainVectorService';
+import { IDomainVectorService, MemoryCandidateOptions, MemoryPoolReadOptions } from './interfaces/IDomainVectorService';
 import { MemoryEntry, SearchOptions, SearchResult, MemoryStats, DomainConfig, SearchStrategy, DomainStats, DomainTrend, MemoryRelation, MemoryRelationType } from '../types';
 import { PREDEFINED_DOMAINS, DOMAIN_SEARCH_THRESHOLDS } from '../constants/domains';
 import { config } from '../config';
 import { createMemoryEmbedding } from '../ai/embedding';
 import { resolveMemoryEmbeddingConfigAsync } from '../ai/memoryEmbeddingResolver';
 import { devLog } from '../utils';
+import type { MemoryMutationOptions } from './interfaces/IVectorService';
+import { changesDurableAssertion, inferMemoryRetention, isDurableMemory, canAutomaticallyDeleteMemory } from '../utils/memoryRetention';
+import { containsMultipleAssertions } from '../utils/atomicAssertion';
+import { memoryAssertionVersion, isIndependentMemoryEvidence } from '../utils/memoryProvenance';
+import { filterCurrentDerivedMemories, parseMemorySourceSnapshots } from '../utils/derivedMemoryFreshness';
+import { observeMemoryRead, readMemoryOr, recordMemoryReadFailure } from '../utils/memoryReadCoverage';
 import {
     scoreMemoryEntityMatch,
     scoreMemoryLexicalMatch,
@@ -21,16 +27,74 @@ export class QdrantVectorService implements IDomainVectorService {
     private defaultSearchThreshold: number;
     private validatedCollections = new Map<string, string>();
     private textIndexReadiness = new Map<string, Promise<boolean>>();
+    private timestampIndexReadiness = new Map<string, Promise<void>>();
+    private mutationLocks = new Map<string, Promise<void>>();
+
+    private async currentDerived<T extends Partial<MemoryEntry> & { id: string; domain: string }>(
+        memories: T[], userId: string, onStaleSources?: (parent: T, sources: SearchResult[]) => void,
+    ): Promise<T[]> {
+        const hydrated = new Map<string, SearchResult>();
+        const sourceKey = (source: { id: string; domain: string }) => JSON.stringify([source.domain, source.id]);
+        const current = await filterCurrentDerivedMemories(memories, async refs => {
+            const groups = new Map<string, string[]>();
+            for (const ref of refs) {
+                if (!Object.values(PREDEFINED_DOMAINS).includes(ref.domain as any)) continue;
+                const ids = groups.get(ref.domain) ?? [];
+                ids.push(ref.id); groups.set(ref.domain, ids);
+            }
+            const requests = [...groups.entries()];
+            const sources: SearchResult[] = [];
+            // Known source domains avoid an all-collection scan for every source ID.
+            for (let index = 0; index < requests.length; index += 4) {
+                const batches = await Promise.allSettled(requests.slice(index, index + 4).map(async ([domain, ids]) => {
+                    const points = await observeMemoryRead(() => this.client.retrieve(this.collectionFor(domain), { ids, with_payload: true, with_vector: false }));
+                    return points.filter(point => point.payload?.content && point.payload?.timestamp &&
+                        String(point.payload.botId ?? '') === this.botId && String(point.payload.userId ?? '') === userId &&
+                        (!point.payload.domain || point.payload.domain === domain) && !this.isExpiredPayload(point.payload))
+                        .map(point => ({ ...this.mapSearchPoint(point, 0), domain }));
+                }));
+                for (const batch of batches) {
+                    if (batch.status === 'fulfilled') sources.push(...batch.value);
+                    else recordMemoryReadFailure(batch.reason);
+                }
+            }
+            if (onStaleSources) for (const source of sources) hydrated.set(sourceKey(source), source);
+            return sources;
+        }, Date.now(), onStaleSources ? (parent, sources) => {
+            onStaleSources(parent, sources.map(source => hydrated.get(sourceKey(source))).filter((source): source is SearchResult => Boolean(source)));
+        } : undefined);
+        return current;
+    }
+
+    private async mutateMemory<T>(id: string, domain: string, run: () => Promise<T>): Promise<T> {
+        const key = `${domain}:${id}`;
+        const previous = this.mutationLocks.get(key) ?? Promise.resolve();
+        let release!: () => void;
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        this.mutationLocks.set(key, gate);
+        await previous;
+        try { return await run(); }
+        finally { release(); if (this.mutationLocks.get(key) === gate) this.mutationLocks.delete(key); }
+    }
+
+    private assertCurrentMutation(payload: Record<string, any>, options?: MemoryMutationOptions): void {
+        if (options?.isActive && !options.isActive()) throw new Error('Memory operation cancelled');
+        if (options?.expectedAssertion && memoryAssertionVersion(payload) !== options.expectedAssertion) throw new Error('Memory assertion changed during processing');
+    }
 
     private collectionFor(domain: string) {
         return `${this.memoryPrefix}${domain}`;
     }
 
     private activeMustNotFilter() {
-        return [{ key: 'expiresAt', range: { lt: new Date().toISOString() } }];
+        return [
+            { key: 'expiresAt', range: { lt: new Date().toISOString() } },
+            { key: 'status', match: { any: ['superseded', 'expired'] } },
+        ];
     }
 
     private isExpiredPayload(payload: any): boolean {
+        if (payload?.status === 'superseded' || payload?.status === 'expired') return true;
         if (!payload?.expiresAt) return false;
         const expiresAt = new Date(String(payload.expiresAt)).getTime();
         return Number.isFinite(expiresAt) && expiresAt < Date.now();
@@ -123,7 +187,10 @@ export class QdrantVectorService implements IDomainVectorService {
             ? existingPayload.content.trim()
             : undefined;
         const contentChanged = existingContent !== undefined && memory.content.trim() !== existingContent;
-        const expiresAt = memory.expiresAt !== undefined
+        const retentionPolicy = (existingPayload && isDurableMemory(existingPayload)) || inferMemoryRetention({ ...existingPayload, ...memory }) === 'durable'
+            ? 'durable' : undefined;
+        const terminal = ['superseded', 'expired'].includes(memory.status ?? existingPayload?.status);
+        const expiresAt = retentionPolicy === 'durable' && !terminal ? undefined : memory.expiresAt !== undefined
             ? this.serializeDate(memory.expiresAt)
             : contentChanged
                 ? undefined
@@ -134,11 +201,12 @@ export class QdrantVectorService implements IDomainVectorService {
             ...memory,
             timestamp: this.serializeDate(memory.timestamp) ?? this.serializeDate(existingPayload?.timestamp) ?? new Date().toISOString(),
             expiresAt,
+            retentionPolicy,
             confidence: memory.confidence ?? existingPayload?.confidence ?? 0.6,
             lastAccessedAt: lastAccessedAt.toISOString(),
-            retrievalCount: memory.retrievalCount ?? existingPayload?.retrievalCount,
-            lastRetrievedAt: this.serializeDate(memory.lastRetrievedAt) ?? this.serializeDate(existingPayload?.lastRetrievedAt),
-            retrievalCues: memory.retrievalCues ?? existingPayload?.retrievalCues,
+            retrievalCount: memory.retrievalCount === undefined ? existingPayload?.retrievalCount : Math.max(memory.retrievalCount, existingPayload?.retrievalCount ?? 0),
+            lastRetrievedAt: [this.serializeDate(memory.lastRetrievedAt), this.serializeDate(existingPayload?.lastRetrievedAt)].filter(Boolean).sort().at(-1),
+            retrievalCues: [...new Set([...(existingPayload?.retrievalCues ?? []), ...(memory.retrievalCues ?? [])])].slice(0, 8),
             previousVersions: this.serializePreviousVersions(memory, existingPayload, contentChanged, existingContent),
             relatedIds: this.serializeRelations(memory.relatedIds ?? existingPayload?.relatedIds),
             memoryKind: memory.memoryKind ?? existingPayload?.memoryKind,
@@ -151,6 +219,7 @@ export class QdrantVectorService implements IDomainVectorService {
             sourceContext: memory.sourceContext ?? existingPayload?.sourceContext,
             sourceMessageIds: memory.sourceMessageIds ?? existingPayload?.sourceMessageIds,
             sourceMemoryIds: memory.sourceMemoryIds ?? existingPayload?.sourceMemoryIds,
+            sourceMemorySnapshots: parseMemorySourceSnapshots(memory.sourceMemorySnapshots ?? existingPayload?.sourceMemorySnapshots),
             extractionMethod: memory.extractionMethod ?? existingPayload?.extractionMethod,
             subject: memory.subject ?? existingPayload?.subject,
             predicate: memory.predicate ?? existingPayload?.predicate,
@@ -167,6 +236,7 @@ export class QdrantVectorService implements IDomainVectorService {
         };
 
         if (payload.expiresAt === undefined) delete payload.expiresAt;
+        if (payload.retentionPolicy === undefined) delete payload.retentionPolicy;
         if (payload.retrievalCount === undefined) delete payload.retrievalCount;
         if (payload.lastRetrievedAt === undefined) delete payload.lastRetrievedAt;
         if (payload.retrievalCues === undefined) delete payload.retrievalCues;
@@ -182,6 +252,7 @@ export class QdrantVectorService implements IDomainVectorService {
         if (payload.sourceContext === undefined) delete payload.sourceContext;
         if (payload.sourceMessageIds === undefined) delete payload.sourceMessageIds;
         if (payload.sourceMemoryIds === undefined) delete payload.sourceMemoryIds;
+        if (payload.sourceMemorySnapshots === undefined) delete payload.sourceMemorySnapshots;
         if (payload.extractionMethod === undefined) delete payload.extractionMethod;
         if (payload.subject === undefined) delete payload.subject;
         if (payload.predicate === undefined) delete payload.predicate;
@@ -196,16 +267,12 @@ export class QdrantVectorService implements IDomainVectorService {
     }
 
     private async fetchPayload(memoryId: string, domain: string): Promise<Record<string, any> | undefined> {
-        try {
-            const points = await this.client.retrieve(this.collectionFor(domain), {
+        const points = await this.client.retrieve(this.collectionFor(domain), {
                 ids: [memoryId] as any[],
                 with_payload: true,
                 with_vector: false,
             });
-            return points[0]?.payload as Record<string, any> | undefined;
-        } catch {
-            return undefined;
-        }
+        return points[0]?.payload as Record<string, any> | undefined;
     }
 
     private mapSearchPoint(point: any, scoreOverride?: number): SearchResult {
@@ -244,6 +311,7 @@ export class QdrantVectorService implements IDomainVectorService {
                 }))
                 : undefined,
             isAnchor: Boolean(payload.isAnchor),
+            retentionPolicy: payload.retentionPolicy === 'durable' ? 'durable' : undefined,
             expiresAt: payload.expiresAt ? new Date(payload.expiresAt) : undefined,
             relatedIds: Array.isArray(payload.relatedIds)
                 ? (payload.relatedIds as any[])
@@ -270,6 +338,7 @@ export class QdrantVectorService implements IDomainVectorService {
             sourceMemoryIds: Array.isArray(payload.sourceMemoryIds)
                 ? payload.sourceMemoryIds.map(String)
                 : undefined,
+            sourceMemorySnapshots: parseMemorySourceSnapshots(payload.sourceMemorySnapshots),
             extractionMethod: payload.extractionMethod ? String(payload.extractionMethod) as any : undefined,
             subject: payload.subject ? String(payload.subject) as any : undefined,
             predicate: payload.predicate ? String(payload.predicate) : undefined,
@@ -312,12 +381,13 @@ export class QdrantVectorService implements IDomainVectorService {
             .map((r) => {
                 // Recency: давность по timestamp (когда факт был сохранён/обновлён)
                 const ageDays = (now - new Date(r.timestamp).getTime()) / day;
-                const recencyFactor = ageDays < 7 ? 1 : ageDays < 30 ? 0.9 : ageDays < 90 ? 0.8 : 0.7;
+                const protectedKnowledge = isDurableMemory(r);
+                const recencyFactor = protectedKnowledge || ageDays < 7 ? 1 : ageDays < 30 ? 0.9 : ageDays < 90 ? 0.8 : 0.7;
 
                 // Forgetting curve: штраф за давность последнего обращения
                 const accessedAt = r.lastAccessedAt ?? r.timestamp;
                 const daysSinceAccess = (now - new Date(accessedAt).getTime()) / day;
-                const forgettingDecay = Math.max(0.3, Math.pow(0.97, daysSinceAccess));
+                const forgettingDecay = protectedKnowledge ? 1 : Math.max(0.3, Math.pow(0.97, daysSinceAccess));
 
                 const importance = r.importance ?? 0.5;
                 const confidence = r.confidence ?? 0.6;
@@ -344,8 +414,8 @@ export class QdrantVectorService implements IDomainVectorService {
     constructor(client?: QdrantClient) {
         console.log('🔧 Инициализация QdrantVectorService...');
 
-        // Используем botUsername из конфигурации для уникальной идентификации
-        this.botId = config.botUsername.toLowerCase(); // 'kiramindbot'
+        // Account namespaces stay stable even when a Telegram username changes.
+        this.botId = (process.env.KIRA_MEMORY_NAMESPACE || config.botUsername).toLowerCase();
         this.memoryPrefix = `${this.botId}_memories_`;
         this.configCollection = `${this.botId}_domain_configs`;
         const envThreshold = Number(process.env.VECTOR_SEARCH_THRESHOLD);
@@ -502,6 +572,15 @@ export class QdrantVectorService implements IDomainVectorService {
 
         const pending = (async () => {
             try {
+                // Existing indexes are readable even when the caller has no
+                // schema-write permission (for example a diagnostic replay).
+                // Do not make a redundant create request a prerequisite for search.
+                if (typeof this.client.getCollection === 'function') {
+                    try {
+                        const info = await this.client.getCollection(collectionName);
+                        if (info.payload_schema?.content?.data_type === 'text') return true;
+                    } catch { /* Preserve the existing creation fallback if metadata is unavailable. */ }
+                }
                 await this.client.createPayloadIndex(collectionName, {
                     wait: true,
                     field_name: 'content',
@@ -528,6 +607,25 @@ export class QdrantVectorService implements IDomainVectorService {
         const ready = await pending;
         if (!ready) this.textIndexReadiness.delete(collectionName);
         return ready;
+    }
+
+    private async ensureMemoryTimestampIndex(collectionName: string): Promise<void> {
+        const existing = this.timestampIndexReadiness.get(collectionName);
+        if (existing) return existing;
+        const pending = (async () => {
+            if (typeof this.client.getCollection === 'function') {
+                try {
+                    const info = await this.client.getCollection(collectionName);
+                    if (info.payload_schema?.timestamp?.data_type === 'datetime') return;
+                } catch { /* A write-capable runtime can still try to create the index. */ }
+            }
+            await this.client.createPayloadIndex(collectionName, {
+                wait: true, field_name: 'timestamp', field_schema: 'datetime',
+            });
+        })();
+        this.timestampIndexReadiness.set(collectionName, pending);
+        try { await pending; }
+        catch (error) { this.timestampIndexReadiness.delete(collectionName); throw error; }
     }
 
     private async createConfigCollection() {
@@ -559,6 +657,8 @@ export class QdrantVectorService implements IDomainVectorService {
             try {
                 const status = await this.ensureCollectionCompatibility(collection);
                 const textIndexReady = await this.ensureMemoryTextIndex(collection);
+                try { await this.ensureMemoryTimestampIndex(collection); }
+                catch { console.warn(`⚠️ Индекс timestamp недоступен: ${collection}; чтение последних записей требует datetime-индекса`); }
                 if (status === 'created') {
                     console.log(`✅ Создан домен для ${config.characterName}: ${domainKey} (${collection})`);
                 } else {
@@ -576,7 +676,8 @@ export class QdrantVectorService implements IDomainVectorService {
     }
 
     private async embed(text: string): Promise<number[]> {
-        return createMemoryEmbedding(text);
+        try { return await createMemoryEmbedding(text); }
+        catch (error) { recordMemoryReadFailure(error); throw error; }
     }
 
     async saveMemory(memory: Omit<MemoryEntry, 'id'>): Promise<string> {
@@ -601,13 +702,78 @@ export class QdrantVectorService implements IDomainVectorService {
         return id;
     }
 
-    async updateMemory(memoryId: string, domain: string, memory: Omit<MemoryEntry, 'id'>): Promise<void> {
+    async updateMemory(memoryId: string, domain: string, memory: Omit<MemoryEntry, 'id'>, options?: MemoryMutationOptions): Promise<void> {
+        return this.mutateMemory(memoryId, domain, () => this.updateExistingMemory(memoryId, domain, memory, options));
+    }
+
+    private async updateExistingMemory(memoryId: string, domain: string, memory: Omit<MemoryEntry, 'id'>, options?: MemoryMutationOptions): Promise<void> {
         const collection = this.collectionFor(domain);
         await this.ensureCollectionCompatibility(collection);
-        const vector = await this.embed(memory.content);
         const now = new Date();
         const existingPayload = await this.fetchPayload(memoryId, domain);
+        if (!existingPayload) throw new Error('Memory record no longer exists');
+        this.assertCurrentMutation(existingPayload, options);
+        if (existingPayload && (existingPayload.botId && existingPayload.botId !== this.botId ||
+            existingPayload.userId && existingPayload.userId !== memory.userId)) throw new Error('Memory update scope mismatch');
+        if (existingPayload.subject && memory.subject && existingPayload.subject !== memory.subject) throw new Error('Memory subject cannot be reassigned');
+        if (memory.tags) {
+            const subject = memory.subject ?? existingPayload.subject;
+            if (subject && memory.tags.some(tag => tag.startsWith('subject:') && tag !== `subject:${subject}`)) throw new Error('Memory subject tag disagrees with its subject');
+            for (const tag of existingPayload.tags ?? []) if (/^(person_id:|contact_id:|contact_username:|relation_subject:|relation_object:|relation_type:)/u.test(tag) && !memory.tags.includes(tag)) {
+                throw new Error('Memory identity binding cannot be reassigned');
+            }
+        }
+        if ((existingPayload.tags ?? []).includes('person_relation') && memory.object !== undefined && memory.object !== existingPayload.object) {
+            const previousLabel = (existingPayload.tags ?? []).find((tag: string) => tag.startsWith('relation_object_name:'));
+            if (previousLabel && !(memory.tags ?? existingPayload.tags).includes(`relation_object_name:${memory.object}`)) throw new Error('Memory relation label disagrees with its object');
+        }
+        if (options?.confirmation) {
+            const evidence = options.confirmation;
+            const independent = isIndependentMemoryEvidence(existingPayload, evidence);
+            const confidence = this.clamp01(Number.isFinite(evidence.confidence) ? evidence.confidence : .6);
+            const boost = independent ? confidence >= .78 ? .10 : confidence >= .6 ? .07 : .03 : 0;
+            memory = { ...memory, confidence: independent ? this.clamp01(Math.max(existingPayload.confidence ?? .6, confidence) + boost) : existingPayload.confidence ?? .6,
+                tags: [...new Set([...(existingPayload.tags ?? []), ...memory.tags])],
+                confirmationCount: (existingPayload.confirmationCount ?? 1) + (independent ? 1 : 0),
+                sourceMessageIds: [...new Set([...(existingPayload.sourceMessageIds ?? []), ...(memory.sourceMessageIds ?? []), ...(evidence.sourceMessageIds ?? [])])],
+                sourceMemoryIds: [...new Set([...(existingPayload.sourceMemoryIds ?? []), ...(memory.sourceMemoryIds ?? []), ...(evidence.sourceMemoryIds ?? [])])],
+                isAnchor: existingPayload.isAnchor || memory.isAnchor,
+                ...(!independent ? { importance: existingPayload.importance, lastConfirmedAt: existingPayload.lastConfirmedAt } : {}),
+            };
+        }
+        const protectedChange = existingPayload && isDurableMemory(existingPayload) && changesDurableAssertion(existingPayload, memory);
+        const correction = options?.userCorrection;
+        if (protectedChange && containsMultipleAssertions(memory.content)) throw new Error('A durable correction must remain atomic');
+        if (protectedChange && !(correction && typeof existingPayload.userId === 'string' && correction.userId === existingPayload.userId && correction.userId === memory.userId &&
+            correction.sourceText.trim().length >= 3 && correction.sourceMessageIds?.some(id => typeof id === 'string' && id.trim()))) {
+            throw new Error('Durable memory requires an evidenced owner correction');
+        }
         const payload = this.buildPayload(memoryId, memory, now, existingPayload);
+        if (correction && (protectedChange || ['content', 'predicate', 'object', 'negated', 'status'].some(key => (memory as any)[key] !== undefined && (memory as any)[key] !== existingPayload[key]))) {
+            payload.lifecycleHistory = [...(Array.isArray(existingPayload.lifecycleHistory) ? existingPayload.lifecycleHistory : []), {
+                at: now.toISOString(), reason: 'user_correction', sourceText: correction.sourceText.slice(0, 1500),
+                sourceMessageIds: correction.sourceMessageIds.slice(0, 24),
+                previous: Object.fromEntries(['content', 'subject', 'predicate', 'object', 'negated', 'status', 'expiresAt', 'validFrom', 'validTo',
+                    'confidence', 'sourceContext', 'sourceMessageIds', 'sourceMemoryIds', 'sourceMemorySnapshots', 'sourceEpisodeId', 'extractionMethod', 'retentionPolicy']
+                    .filter(key => existingPayload[key] !== undefined).map(key => [key, existingPayload[key]])),
+            }];
+        }
+        if (correction && (String(existingPayload.content).trim() !== memory.content.trim() ||
+            ['predicate', 'object', 'negated'].some(key => (memory as any)[key] !== undefined && (memory as any)[key] !== existingPayload[key]))) {
+            payload.sourceContext = correction.sourceText;
+            payload.sourceMessageIds = correction.sourceMessageIds;
+            payload.extractionMethod = 'explicit';
+            delete payload.sourceEpisodeId;
+            delete payload.sourceMemoryIds;
+            delete payload.sourceMemorySnapshots;
+        }
+        if (existingPayload && String(existingPayload.content ?? '').trim() === memory.content.trim()) {
+            this.assertCurrentMutation(existingPayload, options);
+            await this.client.overwritePayload(collection, { wait: true, points: [memoryId], payload });
+            return;
+        }
+        const vector = await this.embed(memory.content);
+        this.assertCurrentMutation(existingPayload, options);
         await this.client.upsert(collection, {
             wait: true,
             points: [{ id: memoryId, vector, payload }],
@@ -617,10 +783,15 @@ export class QdrantVectorService implements IDomainVectorService {
 
     /** Обновляет retrieval-след: сброс кривой забывания, счётчик вспоминаний, последние cues и силу следа. */
     async updateMemoryAccess(memoryId: string, domain: string, confidence?: number, retrievalCue?: string): Promise<void> {
+        return this.mutateMemory(memoryId, domain, () => this.reinforceMemoryAccess(memoryId, domain, retrievalCue));
+    }
+
+    private async reinforceMemoryAccess(memoryId: string, domain: string, retrievalCue?: string): Promise<void> {
         const collection = this.collectionFor(domain);
         try {
             const now = new Date().toISOString();
             const existing = await this.fetchPayload(memoryId, domain);
+            if (!existing || this.isExpiredPayload(existing) || existing.botId && existing.botId !== this.botId) return;
             const previousCount = typeof existing?.retrievalCount === 'number' ? existing.retrievalCount : 0;
             const nextCount = previousCount + 1;
             const patch: Record<string, unknown> = {
@@ -654,7 +825,6 @@ export class QdrantVectorService implements IDomainVectorService {
             if (currentSpecificity !== undefined && cue) {
                 patch.specificity = this.clamp01(currentSpecificity + retrievalGain * 0.25);
             }
-            if (confidence !== undefined) patch.confidence = confidence;
             await this.client.setPayload(collection, {
                 points: [memoryId],
                 payload: patch,
@@ -677,7 +847,7 @@ export class QdrantVectorService implements IDomainVectorService {
         console.log(`- User ID: ${userId}`);
 
         const domainThreshold = DOMAIN_SEARCH_THRESHOLDS[domain] ?? this.defaultSearchThreshold;
-        const search = await this.client.search(collection, {
+        const search = await observeMemoryRead(() => this.client.search(collection, {
             vector,
             limit: options?.limit ?? 5,
             score_threshold: options?.minScore ?? domainThreshold,
@@ -695,12 +865,12 @@ export class QdrantVectorService implements IDomainVectorService {
                     ...this.activeMustNotFilter(),
                 ],
             },
-        });
+        }));
 
         console.log(`📋 Найдено ${search.length} результатов для ${config.characterName}`);
 
         const mapped = search.map((p: any) => this.mapSearchPoint(p));
-        return this.applyImportanceRecencyRanking(mapped);
+        return this.applyImportanceRecencyRanking(await this.currentDerived(mapped, userId));
     }
 
     async getDomainContext(userId: string, domain: string, query: string, limit = 5): Promise<string> {
@@ -723,16 +893,18 @@ export class QdrantVectorService implements IDomainVectorService {
         return results.map(r => r.content).join('\n');
     }
 
-    async searchAllDomains(query: string, userId: string, limit = 5): Promise<SearchResult[]> {
+    async searchAllDomains(query: string, userId: string, limit = 5, options: MemoryCandidateOptions = {}): Promise<SearchResult[]> {
         const vector = await this.embed(query);
-        const perDomainLimit = Math.min(10, Math.max(3, limit));
+        const perDomainLimit = options.acceptCandidate
+            ? Math.min(60, Math.max(15, limit * 3))
+            : Math.min(10, Math.max(3, limit));
 
         // Параллельный поиск по всем доменам — эмбеддинг уже готов
         const domainSearches = Object.values(PREDEFINED_DOMAINS).map(async (domain) => {
             const collection = this.collectionFor(domain);
             const domainThreshold = DOMAIN_SEARCH_THRESHOLDS[domain] ?? this.defaultSearchThreshold;
             const recallThreshold = Math.min(domainThreshold, this.defaultSearchThreshold);
-            const results = await this.client.search(collection, {
+            const results = await observeMemoryRead(() => this.client.search(collection, {
                 vector,
                 limit: perDomainLimit,
                 score_threshold: recallThreshold,
@@ -743,7 +915,7 @@ export class QdrantVectorService implements IDomainVectorService {
                     ],
                     must_not: this.activeMustNotFilter(),
                 },
-            });
+            }));
             return results.map((point) => {
                 const mapped = this.mapSearchPoint(point);
                 return { ...mapped, domain: mapped.domain || domain };
@@ -754,10 +926,13 @@ export class QdrantVectorService implements IDomainVectorService {
         const allResults: SearchResult[] = [];
         for (const r of settled) {
             if (r.status === 'fulfilled') allResults.push(...r.value);
-            else devLog('searchAllDomains domain error:', r.reason);
+            else { recordMemoryReadFailure(r.reason); devLog('searchAllDomains domain error:', r.reason); }
         }
 
-        return this.applyImportanceRecencyRanking(allResults).slice(0, limit);
+        const eligible = await this.currentDerived(options.acceptCandidate ? allResults.filter(options.acceptCandidate) : allResults, userId, options.onStaleDerivedSources);
+        return (options.relevanceOnly
+            ? eligible.sort((a, b) => b.score - a.score)
+            : this.applyImportanceRecencyRanking(eligible)).slice(0, limit);
     }
 
     /**
@@ -765,37 +940,51 @@ export class QdrantVectorService implements IDomainVectorService {
      * Финальный score рассчитывается общим fusion-слоем; здесь score нужен лишь
      * для ограничения числа кандидатов до объединения с dense-выдачей.
      */
-    async searchLexicalAllDomains(query: string, userId: string, limit = 20): Promise<SearchResult[]> {
+    async searchLexicalAllDomains(query: string, userId: string, limit = 20, options: MemoryCandidateOptions = {}): Promise<SearchResult[]> {
         const queryTokens = tokenizeMemoryRetrievalText(query).slice(0, 12);
         if (queryTokens.length === 0) return [];
 
-        const perDomainLimit = Math.min(25, Math.max(5, limit));
+        const perDomainLimit = Math.min(60, Math.max(10, limit * 2));
         const domainSearches = Object.values(PREDEFINED_DOMAINS).map(async (domain) => {
             const collection = this.collectionFor(domain);
             await this.ensureCollectionCompatibility(collection);
-            if (!await this.ensureMemoryTextIndex(collection)) return [] as SearchResult[];
+            if (!await this.ensureMemoryTextIndex(collection)) {
+                recordMemoryReadFailure(new Error('Memory text index unavailable'));
+                return [] as SearchResult[];
+            }
 
-            const scroll = await this.client.scroll(collection, {
-                filter: {
-                    must: [
-                        { key: 'botId', match: { value: this.botId } },
-                        { key: 'userId', match: { value: userId } },
-                    ],
+            const scopeFilter = {
+                must: [
+                    { key: 'botId', match: { value: this.botId } },
+                    { key: 'userId', match: { value: userId } },
+                ],
+                must_not: this.activeMustNotFilter(),
+            };
+            const conditions = queryTokens.map(token => ({ key: 'content', match: { text: token } }));
+            // OR scroll is ordered by point ID, not relevance. A separate AND pool
+            // prevents early common-word hits from hiding precise multi-word facts.
+            const filters = [
+                ...(conditions.length > 1 ? [{ ...scopeFilter, must: [...scopeFilter.must, ...conditions] }] : []),
+                { ...scopeFilter,
                     min_should: {
-                        conditions: queryTokens.map(token => ({
-                            key: 'content',
-                            match: { text: token },
-                        })),
+                        conditions,
                         min_count: 1,
                     },
-                    must_not: this.activeMustNotFilter(),
                 },
+            ];
+            const branches = await Promise.allSettled(filters.map(filter => observeMemoryRead(() => this.client.scroll(collection, {
+                filter,
                 limit: perDomainLimit,
                 with_payload: true,
                 with_vector: false,
-            });
+            }))));
+            const points = new Map<string, Awaited<ReturnType<QdrantClient['scroll']>>['points'][number]>();
+            for (const branch of branches) {
+                if (branch.status === 'fulfilled') for (const point of branch.value.points ?? []) points.set(String(point.id), point);
+                else { recordMemoryReadFailure(branch.reason); devLog('Lexical candidate branch unavailable:', branch.reason); }
+            }
 
-            return (scroll.points ?? [])
+            return [...points.values()]
                 .filter(point => Boolean(point.payload?.content && point.payload?.timestamp))
                 .map(point => {
                     const content = String(point.payload!.content);
@@ -807,17 +996,17 @@ export class QdrantVectorService implements IDomainVectorService {
                     const candidateScore = Math.max(lexical, entity * 0.9);
                     return this.mapSearchPoint(point, candidateScore);
                 })
-                .filter(result => result.score >= 0.18);
+                .filter(result => result.score >= 0.18 && (!options.acceptCandidate || options.acceptCandidate(result)));
         });
 
         const settled = await Promise.allSettled(domainSearches);
         const results: SearchResult[] = [];
         for (const result of settled) {
             if (result.status === 'fulfilled') results.push(...result.value);
-            else devLog('searchLexicalAllDomains domain error:', result.reason);
+            else { recordMemoryReadFailure(result.reason); devLog('searchLexicalAllDomains domain error:', result.reason); }
         }
 
-        return results
+        return (await this.currentDerived(results, userId, options.onStaleDerivedSources))
             .sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
                 return b.timestamp.getTime() - a.timestamp.getTime();
@@ -829,7 +1018,7 @@ export class QdrantVectorService implements IDomainVectorService {
         const anchors: SearchResult[] = [];
         for (const domainKey of Object.values(PREDEFINED_DOMAINS)) {
             const collection = this.collectionFor(domainKey);
-            const scroll = await this.client.scroll(collection, {
+            const scroll = await readMemoryOr(() => observeMemoryRead(() => this.client.scroll(collection, {
                 filter: {
                     must: [
                         { key: 'botId', match: { value: this.botId } },
@@ -841,7 +1030,7 @@ export class QdrantVectorService implements IDomainVectorService {
                 limit: 50,
                 with_payload: true,
                 with_vector: false,
-            });
+            })), { points: [] });
             for (const point of scroll.points || []) {
                 const payload = point.payload as any;
                 if (payload?.content && payload?.timestamp) {
@@ -849,7 +1038,7 @@ export class QdrantVectorService implements IDomainVectorService {
                 }
             }
         }
-        return anchors
+        return (await this.currentDerived(anchors, userId))
             .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
             .slice(0, limit);
     }
@@ -928,15 +1117,17 @@ export class QdrantVectorService implements IDomainVectorService {
     }
 
     /** Возвращает список relatedIds из payload без эмбеддинга */
-    async getRelatedFacts(memoryId: string, domain: string): Promise<MemoryRelation[]> {
+    async getRelatedFacts(memoryId: string, domain: string, userId?: string): Promise<MemoryRelation[]> {
         const collection = this.collectionFor(domain);
         try {
-            const points = await this.client.retrieve(collection, {
+            const points = await observeMemoryRead(() => this.client.retrieve(collection, {
                 ids: [memoryId] as any[],
                 with_payload: true,
                 with_vector: false,
-            });
+            }));
             if (!points[0]) return [];
+            if (String(points[0].payload?.botId || this.botId) !== this.botId) return [];
+            if (userId !== undefined && String(points[0].payload?.userId ?? '') !== userId) return [];
             if (this.isExpiredPayload(points[0].payload)) return [];
             return Array.isArray(points[0].payload?.relatedIds)
                 ? (points[0].payload!.relatedIds as any[])
@@ -950,24 +1141,29 @@ export class QdrantVectorService implements IDomainVectorService {
                     }))
                     .filter((relation: MemoryRelation) => relation.id && relation.domain)
                 : [];
-        } catch {
+        } catch (error) {
+            recordMemoryReadFailure(error);
             return [];
         }
     }
 
     /** Загружает факт по ID без векторного поиска (для graph expansion) */
-    async fetchMemoryById(memoryId: string, domain: string): Promise<SearchResult | null> {
+    async fetchMemoryById(memoryId: string, domain: string, userId?: string): Promise<SearchResult | null> {
         const collection = this.collectionFor(domain);
         try {
-            const points = await this.client.retrieve(collection, {
+            const points = await observeMemoryRead(() => this.client.retrieve(collection, {
                 ids: [memoryId] as any[],
                 with_payload: true,
                 with_vector: false,
-            });
+            }));
             if (!points[0]) return null;
+            if (String(points[0].payload?.botId || this.botId) !== this.botId) return null;
+            if (userId !== undefined && String(points[0].payload?.userId ?? '') !== userId) return null;
             if (this.isExpiredPayload(points[0].payload)) return null;
-            return this.mapSearchPoint({ ...points[0], score: 0 });
-        } catch {
+            const mapped = this.mapSearchPoint({ ...points[0], score: 0 });
+            return (await this.currentDerived([mapped], userId ?? String(points[0].payload?.userId ?? '')))[0] ?? null;
+        } catch (error) {
+            recordMemoryReadFailure(error);
             return null;
         }
     }
@@ -979,11 +1175,11 @@ export class QdrantVectorService implements IDomainVectorService {
         const results: SearchResult[] = [];
         for (const domainKey of Object.values(PREDEFINED_DOMAINS)) {
             try {
-                const points = await this.client.retrieve(this.collectionFor(domainKey), {
+                const points = await observeMemoryRead(() => this.client.retrieve(this.collectionFor(domainKey), {
                     ids: ids as any[],
                     with_payload: true,
                     with_vector: false,
-                });
+                }));
 
                 for (const point of points || []) {
                     const payload = point.payload as Partial<MemoryEntry> | undefined;
@@ -992,13 +1188,14 @@ export class QdrantVectorService implements IDomainVectorService {
                     if (String(payload.userId || '') !== userId) continue;
                     results.push(this.mapSearchPoint({ ...point, score: 1 }));
                 }
-            } catch {
+            } catch (error) {
+                recordMemoryReadFailure(error);
                 // Коллекция может не существовать — пропускаем
             }
         }
 
         const order = new Map(ids.map((id, index) => [id, index]));
-        return results
+        return (await this.currentDerived(results, userId))
             .sort((a, b) => (order.get(a.id) ?? 9999) - (order.get(b.id) ?? 9999))
             .slice(0, limit);
     }
@@ -1011,7 +1208,7 @@ export class QdrantVectorService implements IDomainVectorService {
         for (const domainKey of Object.values(PREDEFINED_DOMAINS)) {
             const collection = this.collectionFor(domainKey);
             try {
-                const scroll = await this.client.scroll(collection, {
+                const scroll = await observeMemoryRead(() => this.client.scroll(collection, {
                     filter: {
                         must: [
                             { key: 'botId', match: { value: this.botId } },
@@ -1023,18 +1220,19 @@ export class QdrantVectorService implements IDomainVectorService {
                     limit,
                     with_payload: true,
                     with_vector: false,
-                });
+                }));
 
                 for (const point of scroll.points || []) {
                     if (this.isExpiredPayload(point.payload)) continue;
                     results.push(this.mapSearchPoint(point, 1));
                 }
-            } catch {
+            } catch (error) {
+                recordMemoryReadFailure(error);
                 // Коллекция может не существовать — пропускаем
             }
         }
 
-        return results
+        return (await this.currentDerived(results, userId))
             .sort((a, b) => {
                 const aEpisode = a.tags?.includes('memory-episode') ? 1 : 0;
                 const bEpisode = b.tags?.includes('memory-episode') ? 1 : 0;
@@ -1047,7 +1245,7 @@ export class QdrantVectorService implements IDomainVectorService {
     async getMemoriesForCompression(userId: string, domain: string, olderThanDays: number): Promise<MemoryEntry[]> {
         const threshold = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
         const collection = this.collectionFor(domain);
-        const scroll = await this.client.scroll(collection, {
+        const scroll = await observeMemoryRead(() => this.client.scroll(collection, {
             filter: {
                 must: [
                     { key: 'botId', match: { value: this.botId } },
@@ -1062,9 +1260,9 @@ export class QdrantVectorService implements IDomainVectorService {
             limit: 500,
             with_payload: true,
             with_vector: false,
-        });
+        }));
 
-        return (scroll.points ?? [])
+        const memories = (scroll.points ?? [])
             .map((point) => {
                 const p = point.payload as Partial<MemoryEntry> & { lastAccessedAt?: string };
                 if (!p?.content || !p?.timestamp) return null;
@@ -1084,6 +1282,7 @@ export class QdrantVectorService implements IDomainVectorService {
                     lastRetrievedAt: p.lastRetrievedAt ? new Date(p.lastRetrievedAt as Date | string) : undefined,
                     retrievalCues: Array.isArray(p.retrievalCues) ? p.retrievalCues.map(String) : undefined,
                     isAnchor: Boolean(p.isAnchor),
+                    retentionPolicy: p.retentionPolicy === 'durable' ? 'durable' : undefined,
                     expiresAt: p.expiresAt ? new Date(p.expiresAt as Date | string) : undefined,
                     relatedIds: Array.isArray(p.relatedIds)
                         ? (p.relatedIds as any[])
@@ -1105,6 +1304,7 @@ export class QdrantVectorService implements IDomainVectorService {
                     sourceContext: p.sourceContext ? String(p.sourceContext) : undefined,
                     sourceMessageIds: Array.isArray(p.sourceMessageIds) ? p.sourceMessageIds.map(String) : undefined,
                     sourceMemoryIds: Array.isArray(p.sourceMemoryIds) ? p.sourceMemoryIds.map(String) : undefined,
+                    sourceMemorySnapshots: parseMemorySourceSnapshots(p.sourceMemorySnapshots),
                     extractionMethod: p.extractionMethod,
                     subject: p.subject,
                     predicate: p.predicate,
@@ -1118,15 +1318,37 @@ export class QdrantVectorService implements IDomainVectorService {
                 } as MemoryEntry;
             })
             .filter((m): m is MemoryEntry => m !== null);
+        return this.currentDerived(memories, userId);
     }
 
-    async deleteMemory(memoryId: string, domain: string): Promise<void> {
+    async deleteMemory(memoryId: string, domain: string, options?: MemoryMutationOptions): Promise<void> {
+        await this.mutateMemory(memoryId, domain, () => this.deleteExistingMemory(memoryId, domain, options));
+    }
+
+    private async deleteExistingMemory(memoryId: string, domain: string, options?: MemoryMutationOptions): Promise<boolean> {
         const collection = this.collectionFor(domain);
+        const existing = await this.fetchPayload(memoryId, domain);
+        if (!existing) return false;
+        this.assertCurrentMutation(existing, options);
+        if (existing?.botId && existing.botId !== this.botId) throw new Error('Memory delete scope mismatch');
+        if (options?.userDeletion && options.userDeletion.userId !== existing?.userId) throw new Error('Memory delete owner mismatch');
+        if (options?.automaticDeletion && (options.automaticDeletion.userId !== existing.userId ||
+            new Date(existing.timestamp).getTime() >= options.automaticDeletion.olderThan.getTime())) throw new Error('Memory cleanup candidate changed');
+        if (existing && !canAutomaticallyDeleteMemory(existing) && options?.userDeletion?.userId !== existing.userId) {
+            throw new Error('Primary memory requires an explicit owner deletion');
+        }
         await this.client.delete(collection, { points: [memoryId] });
         devLog(`🗑️ Факт удалён (противоречие) ID: ${memoryId}`);
+        return true;
     }
 
-    async updateImportance(memoryId: string, importance: number): Promise<void> {
+    async updateImportance(memoryId: string, importance: number, domain?: string): Promise<void> {
+        if (domain) {
+            await this.client.setPayload(this.collectionFor(domain), {
+                points: [memoryId], payload: { importance },
+            });
+            return;
+        }
         for (const domainKey of Object.values(PREDEFINED_DOMAINS)) {
             const collection = this.collectionFor(domainKey);
             const points = await this.client.retrieve(collection, { ids: [memoryId] as any[] });
@@ -1161,20 +1383,25 @@ export class QdrantVectorService implements IDomainVectorService {
                 with_vector: false,
             });
 
-            const idsToDelete = (candidates.points ?? [])
+            const candidatesToDelete = (candidates.points ?? [])
                 .filter((point) => {
                     const payload = point.payload as any;
+                    if (!canAutomaticallyDeleteMemory(payload)) return false;
                     if (this.isExpiredPayload(payload)) return true;
                     if (this.isContactPayload(payload)) return false;
                     const importance = typeof payload?.importance === 'number' ? payload.importance : 0.5;
                     const confidence = typeof payload?.confidence === 'number' ? payload.confidence : 0.6;
                     return importance < 0.65 || confidence < 0.4;
-                })
-                .map((point) => point.id);
+                });
 
-            if (idsToDelete.length === 0) continue;
-            removed += idsToDelete.length;
-            await this.client.delete(collection, { points: idsToDelete });
+            if (candidatesToDelete.length === 0) continue;
+            for (const point of candidatesToDelete) {
+                try {
+                    if (await this.mutateMemory(String(point.id), domainKey, () => this.deleteExistingMemory(String(point.id), domainKey, {
+                        expectedAssertion: memoryAssertionVersion(point.payload as any), automaticDeletion: { userId, olderThan: new Date(threshold) },
+                    }))) removed++;
+                } catch { /* A revised or unavailable record is preserved for the next pass. */ }
+            }
         }
 
         return removed;
@@ -1209,27 +1436,29 @@ export class QdrantVectorService implements IDomainVectorService {
         return { total, domains };
     }
 
-    private async collectMemories(userId: string, exhaustive: boolean): Promise<MemoryEntry[]> {
+    private async collectMemories(userId: string, exhaustive: boolean, includeArchived = false, recentLimit?: number): Promise<MemoryEntry[]> {
         const memories: MemoryEntry[] = [];
 
         for (const domainKey of Object.values(PREDEFINED_DOMAINS)) {
             const collection = this.collectionFor(domainKey);
+            if (recentLimit !== undefined) await this.ensureMemoryTimestampIndex(collection);
             let offset: string | number | undefined;
             const visitedOffsets = new Set<string>();
             do {
-                const scroll = await this.client.scroll(collection, {
+                const scroll = await observeMemoryRead(() => this.client.scroll(collection, {
                     filter: {
                         must: [
                             { key: 'botId', match: { value: this.botId } },
                             { key: 'userId', match: { value: userId } },
                         ],
-                        must_not: this.activeMustNotFilter(),
+                        ...(!includeArchived ? { must_not: this.activeMustNotFilter() } : {}),
                     },
-                    limit: 1000,
+                    limit: recentLimit ?? 1000,
+                    ...(recentLimit !== undefined ? { order_by: { key: 'timestamp', direction: 'desc' as const } } : {}),
                     offset,
                     with_payload: true,
                     with_vector: false,
-                });
+                }));
                 const nextOffset = scroll.next_page_offset;
                 offset = typeof nextOffset === 'string' || typeof nextOffset === 'number'
                     ? nextOffset
@@ -1245,7 +1474,7 @@ export class QdrantVectorService implements IDomainVectorService {
                 for (const point of scroll.points || []) {
                 const payload = point.payload as Partial<MemoryEntry> & { lastAccessedAt?: string } | undefined;
                 if (!payload?.content || !payload?.timestamp) continue;
-                if (this.isExpiredPayload(payload)) continue;
+                if (!includeArchived && this.isExpiredPayload(payload)) continue;
 
                 memories.push({
                     id: String(point.id),
@@ -1271,6 +1500,7 @@ export class QdrantVectorService implements IDomainVectorService {
                         }))
                         : undefined,
                     isAnchor: Boolean(payload.isAnchor),
+                    retentionPolicy: payload.retentionPolicy === 'durable' ? 'durable' : undefined,
                     expiresAt: payload.expiresAt ? new Date(payload.expiresAt as Date | string) : undefined,
                     relatedIds: Array.isArray(payload.relatedIds)
                         ? (payload.relatedIds as any[])
@@ -1297,6 +1527,7 @@ export class QdrantVectorService implements IDomainVectorService {
                     sourceMemoryIds: Array.isArray(payload.sourceMemoryIds)
                         ? payload.sourceMemoryIds.map(String)
                         : undefined,
+                    sourceMemorySnapshots: parseMemorySourceSnapshots(payload.sourceMemorySnapshots),
                     extractionMethod: payload.extractionMethod,
                     subject: payload.subject,
                     predicate: payload.predicate,
@@ -1317,11 +1548,13 @@ export class QdrantVectorService implements IDomainVectorService {
     }
 
     async getRecentMemories(userId: string, limit = 5): Promise<MemoryEntry[]> {
-        return (await this.collectMemories(userId, false)).slice(0, limit);
+        const boundedLimit = Number.isFinite(limit) ? Math.max(0, Math.min(1000, Math.floor(limit))) : 5;
+        if (!boundedLimit) return [];
+        return (await this.currentDerived(await this.collectMemories(userId, false, false, boundedLimit), userId)).slice(0, boundedLimit);
     }
 
-    async getAllMemories(userId: string): Promise<MemoryEntry[]> {
-        return this.collectMemories(userId, true);
+    async getAllMemories(userId: string, options?: { includeArchived?: boolean }): Promise<MemoryEntry[]> {
+        return this.collectMemories(userId, true, options?.includeArchived === true);
     }
 
 
@@ -1394,13 +1627,71 @@ export class QdrantVectorService implements IDomainVectorService {
      * Возвращает все записи пользователя во всех доменах, содержащие указанный тег.
      * Используется для поиска психологических портретов по тегу `portrait:<Name>`.
      */
-    async getMemoriesByTag(userId: string, tag: string): Promise<SearchResult[]> {
+    async getMemoriesByTags(userId: string, tags: string[], limit = 300, options?: MemoryPoolReadOptions): Promise<SearchResult[]> {
+        const keys = [...new Set(tags)].slice(0, 16);
+        if (!keys.length) return [];
+        return this.readRecallPools(userId, Object.values(PREDEFINED_DOMAINS), { key: 'tags', match: { any: keys } }, limit, options?.acceptCandidate ? 1000 : 200, options);
+    }
+
+    async getOwnerMemories(userId: string, domains: string[] = [], limit = 300, options?: MemoryPoolReadOptions): Promise<SearchResult[]> {
+        const selected = domains.length ? [...new Set(domains)].filter(domain => Object.values(PREDEFINED_DOMAINS).includes(domain as any)).slice(0, 3) : Object.values(PREDEFINED_DOMAINS);
+        return this.readRecallPools(userId, selected, { should: [
+            { key: 'subject', match: { value: 'user' } }, { key: 'tags', match: { value: 'subject:user' } },
+        ] }, limit, options?.acceptCandidate ? domains.length ? 2000 : 500 : 200, options);
+    }
+
+    async getPeopleMemories(userId: string, domains: string[] = [], limit = 200, options?: MemoryPoolReadOptions): Promise<SearchResult[]> {
+        const selected = domains.length ? [...new Set(domains)].filter(domain => Object.values(PREDEFINED_DOMAINS).includes(domain as any)).slice(0, 3) : Object.values(PREDEFINED_DOMAINS);
+        return this.readRecallPools(userId, selected, { should: [
+            { key: 'subject', match: { value: 'contact' } }, { key: 'tags', match: { value: 'subject:contact' } },
+            { key: 'tags', match: { value: 'person_relation' } },
+        ] }, limit, domains.length ? 3000 : 500, options);
+    }
+
+    private async readRecallPools(userId: string, domains: string[], condition: { key: string; match: { any: string[] } } | { should: Array<{ key: string; match: { value: string } }> }, limit: number, scanLimit: number, options?: MemoryPoolReadOptions): Promise<SearchResult[]> {
+        const max = Math.min(400, Math.max(1, limit));
+        const pools = await Promise.all(domains.map(async domain => {
+            const pool: SearchResult[] = [];
+            let scanned = 0;
+            let offset: string | number | undefined;
+            const offsets = new Set<string>();
+            try {
+                while (pool.length < Math.min(200, max) && scanned < scanLimit) {
+                    const page = await observeMemoryRead(() => this.client.scroll(this.collectionFor(domain), {
+                        filter: { must: [
+                            { key: 'botId', match: { value: this.botId } }, { key: 'userId', match: { value: userId } },
+                            condition,
+                        ], must_not: this.activeMustNotFilter() },
+                        limit: Math.min(50, options?.acceptCandidate ? 50 : Math.min(200, max) - pool.length, scanLimit - scanned), offset, with_payload: true, with_vector: false,
+                    }));
+                    scanned += page.points.length;
+                    const candidates = page.points.map(point => ({ ...this.mapSearchPoint(point, 1), domain }))
+                        .filter(candidate => !options?.acceptCandidate || options.acceptCandidate(candidate));
+                    for (const candidate of await this.currentDerived(candidates, userId)) {
+                        if (pool.length < Math.min(200, max)) pool.push(candidate);
+                    }
+                    const next = page.next_page_offset;
+                    if ((typeof next !== 'string' && typeof next !== 'number') || !page.points.length || offsets.has(String(next))) break;
+                    offsets.add(String(next)); offset = next;
+                }
+            } catch (error) { recordMemoryReadFailure(error); /* Keep already read evidence. */ }
+            return pool;
+        }));
+        // Round-robin avoids a large first domain consuming the whole pool.
+        const selected = new Map<string, SearchResult>();
+        for (let index = 0; selected.size < max && pools.some(pool => index < pool.length); index++) {
+            for (const pool of pools) { const item = pool[index]; if (item) selected.set(item.id, item); if (selected.size >= max) break; }
+        }
+        return [...selected.values()];
+    }
+
+    async getMemoriesByTag(userId: string, tag: string, options?: { includeStaleDerived?: boolean }): Promise<SearchResult[]> {
         const results: SearchResult[] = [];
 
         for (const domainKey of Object.values(PREDEFINED_DOMAINS)) {
             const collection = this.collectionFor(domainKey);
             try {
-                const scroll = await this.client.scroll(collection, {
+                const scroll = await observeMemoryRead(() => this.client.scroll(collection, {
                     filter: {
                         must: [
                             { key: 'botId', match: { value: this.botId } },
@@ -1412,15 +1703,16 @@ export class QdrantVectorService implements IDomainVectorService {
                     limit: 50,
                     with_payload: true,
                     with_vector: false,
-                });
+                }));
                 for (const point of scroll.points || []) {
                     results.push(this.mapSearchPoint(point, 1));
                 }
-            } catch {
+            } catch (error) {
+                recordMemoryReadFailure(error);
                 // Коллекция может не существовать — пропускаем
             }
         }
 
-        return results;
+        return options?.includeStaleDerived ? results : this.currentDerived(results, userId);
     }
 }

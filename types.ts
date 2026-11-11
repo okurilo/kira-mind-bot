@@ -1,5 +1,6 @@
 import { Context, SessionFlavor } from "grammy";
 import { Reminder } from "./reminder";
+import type { MemorySourceSnapshot } from './services/interfaces/IVectorService';
 
 // Возможные состояния диалога с неавторизованным пользователем
 export enum UnauthorizedChatState {
@@ -42,6 +43,11 @@ export interface ChatPromptWatchWizardState {
 }
 
 export interface SessionData {
+    /** Durable, channel-scoped execution journal; never contains credentials or image bytes. */
+    agentRuntime?: import('./orchestration/runtime/types').RuntimeSessionState;
+    agentRuntimePending?: import('./orchestration/runtime/types').RuntimeSessionState[];
+    /** Last mobile interaction; invalidates buttons from earlier API turns. */
+    apiActionVersion?: string;
     reminders: Reminder[];
     messageEditing?: boolean;
     messageHistory: MessageHistory[]; // Хранение истории сообщений
@@ -90,6 +96,7 @@ export interface SessionData {
         personId?: string;
         expiresAt: number;
     };
+    memoryRecallFocus?: import('./types/memoryRecallTypes').MemoryRecallFocus;
     domains: Record<string, DomainMemory>;
     /**
      * Компактная модель текущей ситуации в разговоре.
@@ -160,6 +167,8 @@ export interface SessionData {
     };
     /** Ожидает уточнения, к какому контакту относится извлечённый факт */
     pendingContactMemory?: {
+        /** Stable identity of this clarification, independent of retry timestamps. */
+        confirmationId?: string;
         contactName: string;
         content: string;
         domain: string;
@@ -258,6 +267,8 @@ export interface SessionData {
         createdAt: number;
         expiresAt: number;
     };
+    /** Bounded owner/channel workspace, separate from personal memory and live operation receipts. */
+    browserWorkspace?: import('./services/browserWorkspace').BrowserWorkspace;
     /** Ожидает выбора одного из быстрых вариантов уточнения через inline-кнопки */
     pendingQuickChoices?: Record<string, {
         originalMessage: string;
@@ -335,6 +346,9 @@ export interface SessionData {
             description?: string;
             imageGenerated?: boolean;
             generatedImageUrl?: string;
+            generatedImagePath?: string;
+            generatedImageDescription?: string;
+            generatedImageRequest?: string;
             icsFilePath?: string;
             messageDraft?: { contactId: number; text: string; scheduledTime?: Date };
             contactSelected?: boolean;
@@ -354,13 +368,44 @@ export interface ForwardedMessageGroup {
     processed: boolean;
 }
 
-export type BotContext = Context & SessionFlavor<SessionData>;
+export type BotContext = Context & SessionFlavor<SessionData> & {
+    /** Transport-only live browser opt-in; never persisted or accepted as an account identity. */
+    liveBrowserRequest?: { operationId: string };
+    /** Validated by the existing semantic intake, never taken from an API request body. */
+    browserWorkspaceContinuation?: string;
+    /** Raw owner-authored turn, set by intake; never supplied by tool arguments or page content. */
+    browserOwnerText?: string;
+    browserOwnerTextBound?: boolean;
+    /** Releases only this Telegram update when the existing browser agent starts; its session flush still completes. */
+    releaseBrowserUpdate?: () => void;
+    productAnalytics?: import('./services/productAnalytics').ProductAnalyticsTask;
+    /** Internal orchestration collects intermediate progress into one final response. */
+    suppressAgentProgress?: boolean;
+    /** Server-assigned channel key; never accepted from an external request. */
+    sessionStorageKey?: string;
+    /** Isolated background runs persist photos without replacing the live conversation session. */
+    persistOutgoingImageContext?: (context: SentMessageContext) => Promise<void>;
+    /** Dedicated durable ledger for a background task; does not change its delivery channel. */
+    agentRuntimeStorageKey?: string;
+    agentRuntimeRequestKey?: string;
+    /** Durable foreground turn marker and optional deferred answer, assigned by the transport. */
+    dialogueTurnId?: string;
+    dialogueJobId?: string;
+    /** API clients must opt into deferred responses; Telegram supports them natively. */
+    allowDeferredDialogue?: boolean;
+    /** A turn said in the app's AR room: the room and Kira's 3D body as this turn's context (never stored), and
+     *  whether the turn's photo is the phone's camera frame, whose reading stays visual context, not facts. */
+    arRoom?: { context: string; frame: boolean };
+};
 
 // Интерфейс для хранения истории сообщений
 export interface MessageHistory {
+    sourceMessageId?: string;
     role: string;
     content: string;
     timestamp: Date;
+    /** Visual context for conversation, excluded from user-fact extraction. */
+    kind?: 'image';
 }
 
 export interface ProactiveInsightContext {
@@ -378,9 +423,9 @@ export interface ProactiveInsightContext {
 export interface SentMessageContext {
     messageId: number;
     text: string;
-    kind: 'plain' | 'structured' | 'proactive' | 'memory_card' | 'identity_gap' | 'system';
+    kind: 'plain' | 'structured' | 'proactive' | 'memory_card' | 'identity_gap' | 'system' | 'image';
     /** Способ доставки; не смешивается с семантическим kind. */
-    delivery?: 'text' | 'voice';
+    delivery?: 'text' | 'voice' | 'photo';
     contactId?: number;
     contactName?: string;
     personId?: string;
@@ -577,6 +622,8 @@ export interface MemoryEntry {
     userId: string;
     /** Якорный факт (явное «Запомни») — всегда подмешивается в контекст */
     isAnchor?: boolean;
+    /** Evidence-backed knowledge protected from automatic expiry and deletion. */
+    retentionPolicy?: 'durable' | 'standard';
     expiresAt?: Date;
     /** Эмоциональная маркировка — влияет на ранжирование и flashbulb → anchor */
     emotionalTag?: EmotionalTag;
@@ -629,6 +676,7 @@ export interface MemoryEntry {
     sourceMessageIds?: string[];
     /** ID исходных воспоминаний, из которых синтезирована эта запись. */
     sourceMemoryIds?: string[];
+    sourceMemorySnapshots?: MemorySourceSnapshot[];
     /** Как факт попал в память: явная команда, quick extraction, delayed extraction и т.п. */
     extractionMethod?: MemoryExtractionMethod;
     /** О ком факт: пользователь, контакт, бот или системный объект. */
@@ -678,6 +726,7 @@ export interface SearchResult {
         confidence: number;
     }>;
     isAnchor?: boolean;
+    retentionPolicy?: 'durable' | 'standard';
     expiresAt?: Date;
     relatedIds?: MemoryRelation[];
     memoryKind?: MemoryKind;
@@ -689,6 +738,7 @@ export interface SearchResult {
     sourceContext?: string;
     sourceMessageIds?: string[];
     sourceMemoryIds?: string[];
+    sourceMemorySnapshots?: MemorySourceSnapshot[];
     extractionMethod?: MemoryExtractionMethod;
     subject?: MemorySubject;
     predicate?: string;

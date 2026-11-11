@@ -1,0 +1,3009 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Kira owner API",
+    "version": "1.0.0",
+    "description": "Owner-only API sharing the bot's handlers and knowledge. API dialogue is separate; background notifications use Telegram."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/status": {
+      "get": {
+        "operationId": "getStatus",
+        "responses": {
+          "200": {
+            "description": "Runtime API status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "apiVersion": {
+                      "type": "string"
+                    },
+                    "characterName": {
+                      "type": "string"
+                    },
+                    "channel": {
+                      "type": "string",
+                      "enum": [
+                        "api"
+                      ]
+                    },
+                    "sharedKnowledge": {
+                      "type": "boolean"
+                    },
+                    "notificationsChannel": {
+                      "type": "string",
+                      "enum": [
+                        "telegram"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "responses": {
+          "200": {
+            "description": "Supported formats and shared bot capability catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "input": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "example": [
+                        "text",
+                        "actions",
+                        "photo"
+                      ]
+                    },
+                    "output": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "capabilities": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "title",
+                          "category",
+                          "summary",
+                          "examples"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "category": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "examples": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "commands": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "limitations": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "ownerOnly": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "photo": {
+                      "$ref": "#/components/schemas/PhotoInput"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/history": {
+      "get": {
+        "operationId": "getHistory",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent API dialogue, oldest first; this is a bounded window, not a full archive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "messages"
+                  ],
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "role",
+                          "text",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "role": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/reminders": {
+      "get": {
+        "operationId": "getReminders",
+        "responses": {
+          "200": {
+            "description": "Active personal reminders from the shared registry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reminders"
+                  ],
+                  "properties": {
+                    "reminders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "text",
+                          "dueAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "dueAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "recurrence": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/tasks": {
+      "get": {
+        "operationId": "getTasks",
+        "responses": {
+          "200": {
+            "description": "Up to 100 shared recurring tasks belonging to the owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tasks",
+                    "hasMore"
+                  ],
+                  "properties": {
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "title",
+                          "prompt",
+                          "status",
+                          "schedule",
+                          "nextRunAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "prompt": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "schedule": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "nextRunAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "lastResult": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/messages": {
+      "post": {
+        "operationId": "sendMessage",
+        "description": "Runs the complete shared text/command flow. Retry the exact body with the same key after a connection loss. Does not cancel work when the client disconnects.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "Prefer",
+            "in": "header",
+            "required": false,
+            "description": "Opt into a deferred answer. Without this header the complete answer is returned synchronously. Keep the same preference when replaying an Idempotency-Key.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "respond-async"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Reply"
+          },
+          "503": {
+            "description": "model_mode_unavailable: the app's selected mode cannot run; refused before any receipt, so the request did not execute",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/actions": {
+      "post": {
+        "operationId": "invokeAction",
+        "description": "Invoke a signed button from the latest API turn, within 15 minutes. The same token cannot execute twice, even with a different idempotency key.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "actionToken"
+                ],
+                "properties": {
+                  "actionToken": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Reply"
+          },
+          "503": {
+            "description": "model_mode_unavailable: the app's selected mode cannot run; refused before any receipt, so the request did not execute",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/files/{id}": {
+      "get": {
+        "operationId": "downloadFile",
+        "description": "Download a generated file, available for 24 hours. Authorization is required.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File bytes; Content-Disposition supplies the filename",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "operationId": "getUserSettings",
+        "summary": "Get saved preferences, effective background state and personal Telegram availability",
+        "responses": {
+          "200": {
+            "description": "Current settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateUserSettings",
+        "summary": "Atomically change budget mode and selected background functions; no Idempotency-Key required",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "budgetMode": {
+                    "type": "string",
+                    "enum": [
+                      "normal",
+                      "maximum"
+                    ]
+                  },
+                  "background": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "telegramReading": {
+                        "type": "boolean"
+                      },
+                      "reflection": {
+                        "type": "boolean"
+                      },
+                      "personalChatMemory": {
+                        "type": "boolean"
+                      },
+                      "daytimeReflection": {
+                        "type": "boolean"
+                      },
+                      "inboxGuardian": {
+                        "type": "boolean"
+                      },
+                      "dmReport": {
+                        "type": "boolean"
+                      },
+                      "chatGroupTracking": {
+                        "type": "boolean"
+                      },
+                      "chatPromptWatchers": {
+                        "type": "boolean"
+                      },
+                      "deferredFacts": {
+                        "type": "boolean"
+                      },
+                      "memoryConsolidation": {
+                        "type": "boolean"
+                      },
+                      "memoryInsight": {
+                        "type": "boolean"
+                      },
+                      "kiraLife": {
+                        "type": "boolean"
+                      },
+                      "kiraInnerDevelopment": {
+                        "type": "boolean"
+                      },
+                      "kiraSelfEvolution": {
+                        "type": "boolean"
+                      },
+                      "kiraLifeWebSearch": {
+                        "type": "boolean"
+                      },
+                      "recurringTasks": {
+                        "type": "boolean"
+                      },
+                      "morningDigest": {
+                        "type": "boolean"
+                      },
+                      "morningDigestAi": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                },
+                "minProperties": 1,
+                "description": "At least one changed setting is required. Missing fields keep their previous values. Enabling a feature does not grant Telegram access."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSettings"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/model-settings": {
+      "get": {
+        "operationId": "getModelSettings",
+        "summary": "The app's own text mode: catalog from the server preset registry with availability, this channel's selection and the global server preset",
+        "responses": {
+          "200": {
+            "description": "Current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "putModelSettings",
+        "summary": "Select a preset for this API channel only (null = as on the server). Compare-and-set on revision; applies from the next turn.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "preset",
+                  "expectedRevision"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "expectedRevision": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_body / unknown_preset / preset_unavailable (with the reason)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "revision_conflict: the selection changed elsewhere; read it again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scene": {
+      "get": {
+        "operationId": "getScene",
+        "summary": "AR scene capabilities: the photo model that reads a frame in the app's mode, frame limits, allowed actions",
+        "responses": {
+          "200": {
+            "description": "Capabilities: version, frame limits, actions, autoSeat (true: sit without targetId lets the phone choose the seat; results may name it), pointing (true: point actions and scene.things are accepted), mode, vision route; intentPlanning {version, intents, planTtlSeconds}: stage \"prepare\" decides by meaning whether a turn needs a frame; intentPlanning.controlOnly:true advertises nonexecuting control-only preparation."
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scene/turns": {
+      "post": {
+        "operationId": "postSceneTurn",
+        "summary": "One AR turn of the app dialogue: the words go through the same handlers as /messages, an optional current JPEG frame (not stored) through the same recognition as /photos, with the scene as context. The reply is messages[] as for /messages; Kira may also propose actions on ids of the scene, which the phone checks, performs and reports.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{8,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "text",
+                  "scene"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "scene": {
+                    "$ref": "#/components/schemas/Scene"
+                  },
+                  "frame": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "mime",
+                      "data",
+                      "capturedAt",
+                      "width",
+                      "height"
+                    ],
+                    "properties": {
+                      "mime": {
+                        "type": "string",
+                        "enum": [
+                          "image/jpeg"
+                        ]
+                      },
+                      "data": {
+                        "type": "string",
+                        "format": "byte",
+                        "description": "≤ 2 MiB decoded"
+                      },
+                      "capturedAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "within 5 s of scene.observedAt"
+                      },
+                      "width": {
+                        "type": "integer"
+                      },
+                      "height": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "followUp": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "label",
+                      "reason"
+                    ],
+                    "description": "This turn answers Kira's question about a thing she did not show yet (which one / a better view). Servers with pointing. With a frame and no other action chosen, the same thing is searched on the new frame with the words as the distinction.",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "maxLength": 60
+                      },
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "ambiguous",
+                          "unsure",
+                          "not_found",
+                          "shown"
+                        ]
+                      }
+                    }
+                  },
+                  "plan": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "A prepared turn (stage \"prepare\") whose decision this execution uses; the execution's receipt is keyed by owner + plan and fingerprints the whole request. 409 plan_stale (expired, unknown after a restart, other words/room/follow-up/model mode/frame recipient), plan_superseded (newer words prepared in the same room), plan_cancelled; none of them ran anything"
+                  },
+                  "avoid": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "description": "With a frame only: the previously shown thing's position on this frame (0–1). Context for the current request, not an unconditional exclusion: repeat keeps that thing, replacement excludes it, a new referent ignores the old exclusion.",
+                    "properties": {
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    }
+                  },
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "prepare",
+                      "cancel"
+                    ],
+                    "description": "prepare: {stage, text, scene, followUp?} — no frame, plan or avoid, no Idempotency-Key, no receipt; returns {plan: {id, expiresAt, intent: chat|look|find|clarify|cancel, frame, referent?, vision}}. cancel: {stage, plan} — that plan can no longer be executed; or {stage, room: {roomId, coordinateSpaceId}} — every plan prepared or still preparing in that room is off. An older preparation finishing after a newer one (or after a room cancel) is refused with 409 plan_superseded. prepare accepts optional controlOnly:true when intentPlanning.controlOnly is advertised: a control decision with frame:false and executable:false, no generation/plan changes. Normal preparation returns executable:true. A frame for a nonvisual/cancel plan is refused with 400 unexpected_frame before any handler."
+                  },
+                  "room": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "roomId",
+                      "coordinateSpaceId"
+                    ],
+                    "description": "stage cancel only",
+                    "properties": {
+                      "roomId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "coordinateSpaceId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  },
+                  "controlOnly": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "stage prepare only. Semantic control probe for an interjection: classifies with the same context but does not supersede or register an executable plan. Its plan has frame:false and executable:false; only a later explicit cancel request cancels the original. Its id cannot execute a turn."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "messages, actions [{id, kind: sit|stand|approach|lookAtUser|point, targetId?, label?, at?, roomId, roomVersion}] (sit without targetId: the phone chooses the seat from its own LiDAR scan; point: at {x, y, box?} is the thing on the turn's frame, 0–1 from the picture's top left, found by the photo model of the app's mode and put into the room by the phone's own depth; without at, targetId is a remembered thing or a room object; several such things, a poor view or no such thing give no point), rejectedActions [{kind, reason, code?, label?}] (point codes: not_found, ambiguous, unsure, no_frame, no_label, unknown_target, one_at_a_time), seen? [{label, at}] (other small things on the frame, for the phone to remember), vision {used, provider, model, location}. With a frame, the body's choice and the search run before the answer, so the words say what the arm does or ask which one / for a better view."
+          },
+          "400": {
+            "description": "invalid_scene / idempotency_key_required / unexpected_frame",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "stale_scene / stale_frame / tracking_lost / conversation_busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "frame_too_large (body ≤ 3 MiB)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "unsupported_frame",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "vision_failed / scene_failed / scene_reply_invalid: nothing is answered as if seen",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "vision_unavailable (refused before any receipt) / model_mode_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scene/action-results": {
+      "post": {
+        "operationId": "postSceneActionResult",
+        "summary": "What actually happened to an action Kira proposed; repeating the same report is harmless",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "actionId",
+                  "status"
+                ],
+                "properties": {
+                  "actionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "rejected",
+                      "interrupted"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "targetId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "For a sit without targetId: the object the phone chose (servers with autoSeat); for a point: the remembered thing shown (servers with pointing)"
+                  },
+                  "detail": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "The steps the phone actually did (servers with autoSeat or pointing)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded"
+          },
+          "401": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "unknown_action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "action_already_reported with another status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dialogue-jobs": {
+      "get": {
+        "summary": "Последние 20 фоновых разборов этого API-диалога",
+        "description": "Состояние и ответы для backgroundJob из /messages. Отображайте новое notice один раз, result — один раз по id; completed без result означает, что дополнение не требуется. Следующий пользовательский ход отменяет предыдущий разбор. Telegram-задачи здесь не возвращаются.",
+        "responses": {
+          "200": {
+            "description": "Список задач",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DialogueJob"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dialogue-jobs/{id}": {
+      "delete": {
+        "summary": "Остановить фоновый разбор в этом API-диалоге",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Идемпотентная отмена; false если задача уже завершена или не принадлежит этому каналу.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cancelled": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/model-preferences": {
+      "get": {
+        "summary": "Предпочтения моделей и доступные варианты распределения",
+        "responses": {
+          "200": {
+            "description": "Общие настройки аккаунта, действующий план, подключения и доступность сочетаний"
+          },
+          "401": {
+            "description": "Требуется токен"
+          }
+        },
+        "description": "Account-shared admin strategy plus qualityLevels, textTasks, safe unavailableCode/unavailableReason, appOverride and effectivePlan task recipients/fallbacks. GET never rewrites manual/custom. recipientDisclosure.complete=false: task routes are not a complete data-processing consent descriptor."
+      },
+      "put": {
+        "summary": "Сохранить автоматическую стратегию по качеству и API либо Custom",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "quality"
+                    ],
+                    "properties": {
+                      "quality": {
+                        "type": "string",
+                        "enum": [
+                          "standard",
+                          "high",
+                          "maximum"
+                        ]
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "openai",
+                          "gemini",
+                          "zai",
+                          "openrouter"
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "mode",
+                      "quality",
+                      "provider",
+                      "routes"
+                    ],
+                    "properties": {
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "custom"
+                        ]
+                      },
+                      "quality": {
+                        "type": "string",
+                        "enum": [
+                          "standard",
+                          "high",
+                          "maximum"
+                        ]
+                      },
+                      "routes": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "defaultText",
+                          "lightweightText",
+                          "fastDialogue",
+                          "complexReasoning",
+                          "runtimePlanning",
+                          "intentClassification",
+                          "intentDedup",
+                          "conversation",
+                          "memoryExtraction",
+                          "memoryConsolidation",
+                          "messageAnalysis",
+                          "browserPlanning"
+                        ],
+                        "properties": {
+                          "defaultText": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "lightweightText": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "fastDialogue": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "complexReasoning": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "runtimePlanning": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "intentClassification": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "intentDedup": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "conversation": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "memoryExtraction": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "memoryConsolidation": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "messageAnalysis": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          },
+                          "browserPlanning": {
+                            "$ref": "#/components/schemas/CustomModelRoute"
+                          }
+                        }
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "openai",
+                          "gemini",
+                          "zai",
+                          "openrouter",
+                          "lmstudio"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Предпочтения и план атомарно сохранены"
+          },
+          "400": {
+            "description": "Некорректные настройки или отсутствует подходящая модель"
+          },
+          "401": {
+            "description": "Требуется токен"
+          }
+        },
+        "description": "Automatic body exactly {quality:\"high\",provider:\"auto\"}, without mode:\"automatic\". Custom uses the shared admin contract. Saves account policy/preset and clears the legacy app override in one transaction, preserving unrelated settings. Success returns the complete normalized GET plus success:true."
+      }
+    },
+    "/photos": {
+      "post": {
+        "operationId": "sendPhoto",
+        "summary": "Отправить одно фото владельца с необязательной подписью",
+        "description": "Синхронно выполняет общий с Telegram конвейер фото в сессии api:<ownerId> и режиме приложения. Prefer: respond-async не применяется. Байты фото не сохраняются в истории, журналах или квитанциях; квитанция содержит только отпечаток тела и ответ. При обрыве повторить то же тело с тем же Idempotency-Key: завершённый ответ воспроизводится без повторного анализа. Ошибка анализа после начала хода возвращается текстом в messages[].",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoTurn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Reply"
+          },
+          "400": {
+            "description": "invalid_photo / idempotency_key_required / invalid_json: запрос отклонён",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized: нужен токен владельца или аккаунта",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "method_not_allowed: только POST",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            },
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "POST"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "conversation_busy: предыдущий ход выполняется; idempotency_conflict: ключ уже использован с другим телом; operation_uncertain: исход прежней попытки не подтверждён, повторять только прежний запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "example": 2
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "photo_too_large: JPEG больше 2000000 байт; body_too_large: JSON больше 3 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "unsupported_photo: требуется JPEG; unsupported_media_type: требуется application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: повторить позже",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "example": 60
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "vision_unavailable: модель не поддерживает фото или недоступна; отказ до создания квитанции",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoError"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/profile/communication": {
+      "get": {
+        "summary": "Read canonical owner communication preferences",
+        "responses": {
+          "200": {
+            "description": "Full canonical profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "communication_profile_unavailable: failed read/write is not an empty profile"
+          },
+          "429": {
+            "description": "rate_limited: shared authenticated REST budget exceeded before profile/memory/storage work",
+            "headers": {
+              "Retry-After": {
+                "description": "Retry delay in seconds",
+                "schema": {
+                  "type": "integer",
+                  "example": 60
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Patch only changed fields with compare-and-set; null is a durable clear",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 2,
+                "required": [
+                  "expectedRevision"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "nullable": true
+                  },
+                  "address": {
+                    "type": "string",
+                    "enum": [
+                      "informal",
+                      "formal",
+                      null
+                    ],
+                    "nullable": true
+                  },
+                  "replyLength": {
+                    "type": "string",
+                    "enum": [
+                      "short",
+                      "detailed",
+                      null
+                    ],
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Full canonical profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunicationProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "communication_profile_unavailable: failed read/write is not an empty profile"
+          },
+          "400": {
+            "description": "invalid_communication_profile"
+          },
+          "409": {
+            "description": "revision_conflict with current profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error",
+                    "requestId",
+                    "profile"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "revision_conflict"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "profile": {
+                      "$ref": "#/components/schemas/CommunicationProfile"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: shared authenticated REST budget exceeded before profile/memory/storage work",
+            "headers": {
+              "Retry-After": {
+                "description": "Retry delay in seconds",
+                "schema": {
+                  "type": "integer",
+                  "example": 60
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Personal owner token; provision at setup, never embed in a distributed app."
+      }
+    },
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,128}$"
+        }
+      }
+    },
+    "responses": {
+      "Reply": {
+        "description": "Completed response or replayed durable receipt",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Reply"
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "400 invalid request; 401 unauthorized; 404 missing; 409 busy/conflict/uncertain; 410 expired action; 413 too large; 415 content type; 422 unsupported delivery; 429 rate limited; 500 internal error. Never automatically resubmit an uncertain operation using a new key.",
+        "headers": {
+          "X-Request-Id": {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "Retry-After": {
+            "description": "Present for rate limiting and a busy conversation",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error",
+                "requestId"
+              ],
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Reply": {
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            }
+          },
+          "backgroundJob": {
+            "type": "object",
+            "required": [
+              "id",
+              "status",
+              "required"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "description": "Продолжение ответа. Получайте состояние через GET /dialogue-jobs; повторный POST /messages вернёт первоначальную квитанцию."
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Negative channel message ID. Upsert by ID when replaying receipts."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "notice",
+              "photo",
+              "document",
+              "voice",
+              "delete"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "May be absent for markup-only edits; preserve the original text."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "plain",
+              "html"
+            ]
+          },
+          "replacesMessageId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "buttons": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Button"
+              }
+            }
+          },
+          "fileUrl": {
+            "type": "string",
+            "description": "Relative authorized API file path or external HTTP(S) media URL. Do not forward the owner token to external URLs."
+          },
+          "filename": {
+            "type": "string"
+          }
+        }
+      },
+      "Button": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "actionToken": {
+            "type": "string",
+            "description": "Opaque signed action token"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "UserSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "budgetMode": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "maximum"
+            ]
+          },
+          "budgetModes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "maximum"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "title"
+              ]
+            }
+          },
+          "telegram": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "personalSessionConfigured": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "personalSessionConfigured"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "enum": [
+                    "telegramReading",
+                    "reflection",
+                    "personalChatMemory",
+                    "daytimeReflection",
+                    "inboxGuardian",
+                    "dmReport",
+                    "chatGroupTracking",
+                    "chatPromptWatchers",
+                    "deferredFacts",
+                    "memoryConsolidation",
+                    "memoryInsight",
+                    "kiraLife",
+                    "kiraInnerDevelopment",
+                    "kiraSelfEvolution",
+                    "kiraLifeWebSearch",
+                    "recurringTasks",
+                    "morningDigest",
+                    "morningDigestAi"
+                  ]
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "group": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "effective": {
+                  "type": "boolean"
+                },
+                "blockedBy": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    "telegramReading",
+                    "reflection",
+                    "personalChatMemory",
+                    "daytimeReflection",
+                    "inboxGuardian",
+                    "dmReport",
+                    "chatGroupTracking",
+                    "chatPromptWatchers",
+                    "deferredFacts",
+                    "memoryConsolidation",
+                    "memoryInsight",
+                    "kiraLife",
+                    "kiraInnerDevelopment",
+                    "kiraSelfEvolution",
+                    "kiraLifeWebSearch",
+                    "recurringTasks",
+                    "morningDigest",
+                    "morningDigestAi",
+                    "budget",
+                    "telegram",
+                    null
+                  ]
+                }
+              },
+              "required": [
+                "key",
+                "title",
+                "description",
+                "group",
+                "enabled",
+                "effective",
+                "blockedBy"
+              ]
+            }
+          }
+        },
+        "required": [
+          "budgetMode",
+          "budgetModes",
+          "telegram",
+          "features"
+        ]
+      },
+      "ModelSettings": {
+        "type": "object",
+        "required": [
+          "scope",
+          "scopeNote",
+          "selection",
+          "server",
+          "effectivePreset",
+          "memoryEmbeddingProfile",
+          "presets"
+        ],
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "app"
+            ],
+            "description": "The selection applies only to this API channel; Telegram and background work keep the server preset"
+          },
+          "scopeNote": {
+            "type": "string"
+          },
+          "selection": {
+            "type": "object",
+            "required": [
+              "preset",
+              "revision"
+            ],
+            "properties": {
+              "preset": {
+                "type": "string",
+                "description": "null follows the server preset",
+                "nullable": true
+              },
+              "revision": {
+                "type": "string"
+              }
+            }
+          },
+          "server": {
+            "type": "object",
+            "required": [
+              "preset",
+              "title",
+              "allChannels",
+              "changedIn"
+            ],
+            "properties": {
+              "preset": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "allChannels": {
+                "type": "boolean"
+              },
+              "changedIn": {
+                "type": "string",
+                "enum": [
+                  "admin"
+                ]
+              }
+            }
+          },
+          "effectivePreset": {
+            "type": "string"
+          },
+          "memoryEmbeddingProfile": {
+            "type": "string",
+            "description": "Unchanged by any selection"
+          },
+          "presets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "title",
+                "description",
+                "providers",
+                "runsLocally",
+                "cloudFallback",
+                "available"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "characteristics": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "providers": {
+                  "type": "string"
+                },
+                "runsLocally": {
+                  "type": "boolean",
+                  "description": "Conversation runs on the server's LM Studio, not on the client"
+                },
+                "cloudFallback": {
+                  "type": "boolean",
+                  "description": "false for provider-pure presets: no silent cross-provider fallback"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "unavailableReason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Scene": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "roomId",
+          "roomVersion",
+          "coordinateSpaceId",
+          "tracking",
+          "observedAt",
+          "avatar",
+          "objects",
+          "seats"
+        ],
+        "description": "The phone's confirmed room now: metres, Y up, ARKit world of coordinateSpaceId. Walls stay on the phone.",
+        "properties": {
+          "roomId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "roomVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "coordinateSpaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tracking": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "limited",
+              "unavailable"
+            ]
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "within 120 s of the server clock"
+          },
+          "camera": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position",
+              "forward"
+            ],
+            "properties": {
+              "position": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "forward": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          },
+          "avatar": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position",
+              "yaw",
+              "pose"
+            ],
+            "properties": {
+              "position": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "yaw": {
+                "type": "number"
+              },
+              "pose": {
+                "type": "string",
+                "enum": [
+                  "standing",
+                  "seated"
+                ]
+              },
+              "seatId": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "objects": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name",
+                "category",
+                "center",
+                "size",
+                "yaw",
+                "source",
+                "present"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "category": {
+                  "type": "string"
+                },
+                "center": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "size": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
+                },
+                "yaw": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "scan",
+                    "user"
+                  ]
+                },
+                "present": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "seats": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "objectId",
+                "height",
+                "yaw",
+                "confirmed"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "objectId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "yaw": {
+                  "type": "number"
+                },
+                "confirmed": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "things": {
+            "type": "array",
+            "maxItems": 24,
+            "description": "Things Kira saw lying in this room before (servers with pointing): names, when, and the furniture they lay on or near; no coordinates",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "label",
+                "seenAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 60
+                },
+                "seenAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "on": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "near": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              }
+            }
+          }
+        }
+      },
+      "DialogueJob": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "phase",
+          "required"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "staged",
+              "queued",
+              "running",
+              "ready",
+              "delivering",
+              "completed",
+              "cancelled",
+              "superseded",
+              "failed",
+              "unknown"
+            ]
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "review",
+              "deep"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "notice": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CustomModelRoute": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "maxTokens",
+          "reasoningEffort"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          },
+          "maxTokens": {
+            "type": "integer",
+            "minimum": 32,
+            "maximum": 16384
+          },
+          "reasoningEffort": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        }
+      },
+      "PhotoTurn": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "photo"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000,
+            "description": "Необязательная подпись: после trim от 1 до 8000 символов."
+          },
+          "photo": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mime",
+              "data",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "mime": {
+                "type": "string",
+                "enum": [
+                  "image/jpeg"
+                ]
+              },
+              "data": {
+                "type": "string",
+                "format": "byte",
+                "pattern": "^[A-Za-z0-9+/]+=*$",
+                "description": "Base64 JPEG: после декодирования не больше 2000000 байт, начало FF D8 FF. JSON-запрос ограничен 3 MiB."
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 16,
+                "maximum": 4096
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 16,
+                "maximum": 4096
+              }
+            }
+          }
+        }
+      },
+      "PhotoVisionRoute": {
+        "type": "object",
+        "required": [
+          "available"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "providerLabel": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "cloud",
+              "server-local"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Причина недоступности по-русски."
+          }
+        }
+      },
+      "PhotoInput": {
+        "type": "object",
+        "required": [
+          "mime",
+          "maxBytes",
+          "vision",
+          "notes"
+        ],
+        "properties": {
+          "mime": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "image/jpeg"
+              ]
+            }
+          },
+          "maxBytes": {
+            "type": "integer",
+            "enum": [
+              2000000
+            ]
+          },
+          "vision": {
+            "$ref": "#/components/schemas/PhotoVisionRoute"
+          },
+          "notes": {
+            "type": "string",
+            "example": "Фото анализируется один раз и не сохраняется; в историю попадает только текст."
+          }
+        }
+      },
+      "PhotoError": {
+        "type": "object",
+        "required": [
+          "error",
+          "requestId"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "requestId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CommunicationProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "name",
+          "address",
+          "replyLength"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string"
+          },
+          "name": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "state",
+              "source",
+              "updatedAt"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "nullable": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "known",
+                  "unknown"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "setting",
+                  "memory",
+                  null
+                ],
+                "nullable": true
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          },
+          "address": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "state",
+              "source",
+              "updatedAt"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "enum": [
+                  "informal",
+                  "formal",
+                  null
+                ],
+                "nullable": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "known",
+                  "unknown"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "setting",
+                  "memory",
+                  null
+                ],
+                "nullable": true
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          },
+          "replyLength": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "state",
+              "source",
+              "updatedAt"
+            ],
+            "properties": {
+              "value": {
+                "type": "string",
+                "enum": [
+                  "short",
+                  "detailed",
+                  null
+                ],
+                "nullable": true
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "known",
+                  "unknown"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "setting",
+                  "memory",
+                  null
+                ],
+                "nullable": true
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

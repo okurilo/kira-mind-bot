@@ -82,6 +82,10 @@ function getPresetAvailabilityWithRequirements(preset, vars, requiredProviders =
   const invalidTasks = [];
 
   for (const [taskKey, modelRef] of Object.entries(preset.models || {})) {
+    if (preset.textOnlyAvailability && getTaskCapabilityKey(taskKey) !== 'supportsChatCompletions') continue;
+    if (modelRef.modelEnvKey && !hasConfiguredValue(vars, modelRef.modelEnvKey)) {
+      invalidTasks.push(`${taskKey}: не задан ${modelRef.modelEnvKey}`);
+    }
     const executionProvider = resolveTaskExecutionProvider(taskKey, modelRef);
     if (executionProvider.error) {
       invalidTasks.push(executionProvider.error);
@@ -94,7 +98,7 @@ function getPresetAvailabilityWithRequirements(preset, vars, requiredProviders =
       continue;
     }
 
-    if (!hasConfiguredValue(vars, descriptor.envKey)) {
+    if (!descriptor.optionalApiKey && !hasConfiguredValue(vars, descriptor.envKey)) {
       missingProviders.add(executionProvider.provider);
     }
   }
@@ -105,7 +109,7 @@ function getPresetAvailabilityWithRequirements(preset, vars, requiredProviders =
       invalidTasks.push(`memory: неизвестный provider ${provider}`);
       continue;
     }
-    if (!hasConfiguredValue(vars, descriptor.envKey)) {
+    if (!descriptor.optionalApiKey && !hasConfiguredValue(vars, descriptor.envKey)) {
       missingProviders.add(provider);
     }
   }
@@ -139,7 +143,7 @@ function getMemoryProfileRequiredProviders(memoryProfile) {
 
 function getPresetAvailabilityForMemoryProfile(preset, vars, memoryProfileName) {
   const memoryProfile = getMemoryEmbeddingProfile(memoryProfileName);
-  const requiredProviders = getMemoryProfileRequiredProviders(memoryProfile);
+  const requiredProviders = preset.textOnlyAvailability ? [] : getMemoryProfileRequiredProviders(memoryProfile);
   return getPresetAvailabilityWithRequirements(preset, vars, requiredProviders);
 }
 

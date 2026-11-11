@@ -1,8 +1,12 @@
+import { accountPolicyError } from './accountPolicy';
 import { randomUUID } from 'crypto';
+import { isAiContentSafetyError } from './contentSafety';
 
 export type AiExecutionStage = 'primary' | 'retry' | 'fallback';
 
 export type AiErrorCategory =
+    | 'content_policy'
+    | 'account_policy'
     | 'rate_limit'
     | 'authentication'
     | 'permission'
@@ -167,6 +171,9 @@ export function classifyAiError(error: unknown): AiErrorDiagnostics {
         getHeaderValue(record?.headers, 'x-request-id'),
         getHeaderValue(response?.headers, 'x-request-id'),
     );
+    const accountError=accountPolicyError(error);
+    if(accountError)return {errorStatus:accountError.status,errorCode:accountError.code,errorType:'account_policy',errorCategory:'account_policy',retryable:false};
+    if (isAiContentSafetyError(error)) return { errorStatus, errorCode, errorType, providerRequestId, errorCategory: 'content_policy', retryable: false };
     const message = pickString(
         record?.message,
         nestedError?.message,

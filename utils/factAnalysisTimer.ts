@@ -1,6 +1,8 @@
 import { BotContext } from '../types';
 import { extractAndSaveFactsFromConversation } from './enhancedFactExtraction';
 import { persistSessionNow } from '../services/SessionStorage';
+import { isBackgroundFeatureEnabled } from '../services/backgroundFeatureService';
+import { summarizeDialogue } from '../services/dialogueSummarizer';
 
 interface PendingAnalysis {
     /** Контекст нужен для доступа к ctx.session при отложенном анализе (session обновляется по ссылке при MemorySessionStorage) */
@@ -14,7 +16,7 @@ interface PendingAnalysis {
 
 class FactAnalysisManager {
     private static instance: FactAnalysisManager;
-    private pendingAnalyses = new Map<number, PendingAnalysis>();
+    private pendingAnalyses = new Map<number | string, PendingAnalysis>();
     private readonly ANALYSIS_DELAY = 2 * 60 * 1000; // 2 минуты тишины
     private readonly MAX_WAIT = 5 * 60 * 1000; // максимум 5 минут с первого сообщения
     private readonly MESSAGE_THRESHOLD = 5; // или каждые 5 пользовательских сообщений
@@ -27,7 +29,7 @@ class FactAnalysisManager {
     }
 
     public scheduleAnalysis(ctx: BotContext): void {
-        const userId = ctx.from?.id;
+        const userId = ctx.sessionStorageKey ?? ctx.from?.id;
         if (!userId) return;
 
         const existing = this.pendingAnalyses.get(userId);
@@ -59,7 +61,7 @@ class FactAnalysisManager {
         this.pendingAnalyses.set(userId, pending);
     }
 
-    private createDebounceTimer(userId: number): NodeJS.Timeout {
+    private createDebounceTimer(userId: number | string): NodeJS.Timeout {
         return setTimeout(() => {
             void this.executeAnalysis(userId, 'debounce');
         }, this.ANALYSIS_DELAY);
@@ -70,7 +72,7 @@ class FactAnalysisManager {
         return index >= ctx.session.messageHistory.length ? 0 : index;
     }
 
-    private async executeAnalysis(userId: number, reason: 'debounce' | 'max-wait' | 'message-threshold'): Promise<void> {
+    private async executeAnalysis(userId: number | string, reason: 'debounce' | 'max-wait' | 'message-threshold'): Promise<void> {
         const analysis = this.pendingAnalyses.get(userId);
         if (!analysis) return;
 
@@ -80,11 +82,18 @@ class FactAnalysisManager {
         }
 
         try {
+            if (!await isBackgroundFeatureEnabled('deferredFacts')) return;
             console.log(`🧠 Запуск анализа фактов для ${userId}. Причина: ${reason}. Сообщений накоплено: ${analysis.messageCount}`);
             await extractAndSaveFactsFromConversation(
                 analysis.ctx,
                 analysis.conversationStart
             );
+            if (analysis.ctx.session.messageHistory.length >= 10) {
+                const snapshot = analysis.ctx.session.messageHistory.slice();
+                const summary = await summarizeDialogue(snapshot, analysis.ctx.session.dialogueSummary);
+                // Change only the summary: a new foreground turn may have arrived during inference.
+                if (summary) analysis.ctx.session.dialogueSummary = summary;
+            }
             await persistSessionNow(analysis.ctx);
         } catch (error) {
             console.error('Error in delayed fact analysis:', error);
@@ -93,7 +102,7 @@ class FactAnalysisManager {
         }
     }
 
-    public cancelAnalysis(userId: number): void {
+    public cancelAnalysis(userId: number | string): void {
         const analysis = this.pendingAnalyses.get(userId);
         if (analysis) {
             clearTimeout(analysis.debounceTimerId);
@@ -104,7 +113,7 @@ class FactAnalysisManager {
         }
     }
 
-    public getPendingAnalysis(userId?: number): PendingAnalysis | undefined {
+    public getPendingAnalysis(userId?: number | string): PendingAnalysis | undefined {
         if (!userId) return undefined;
         return this.pendingAnalyses.get(userId);
     }

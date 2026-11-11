@@ -13,7 +13,8 @@ export function getTransitionalTaskFallbackModel(taskKey: AiTaskKey): AiModelRef
     return getTaskFallbackModel(taskKey);
 }
 
-export function allowsCrossProviderFallback(presetName: string): boolean {
+export function allowsCrossProviderFallback(presetName: string, modelRef?: AiModelRef): boolean {
+    if (modelRef?.allowFallback === false) return false;
     const parsedPresetName = parseAiPresetName(presetName);
     if (!parsedPresetName) return true;
     return !isTrueFullAiPreset(parsedPresetName);
@@ -35,6 +36,7 @@ export function getSameProviderDegradedModel(
     retryable: boolean,
     triedModels: ReadonlySet<string> = new Set(),
 ): AiModelRef | null {
+    if (currentModel.allowFallback === false) return null;
     const parsedPresetName = parseAiPresetName(presetName);
     if (!retryable || !parsedPresetName || !isTrueFullAiPreset(parsedPresetName)) return null;
 

@@ -46,6 +46,8 @@ export interface AiModelCapabilities extends AiCapabilityMap {
 
 export interface AiProviderCapabilities {
     supportsOpenAiCompatibleTransport: boolean;
+    /** Native Responses items/tools; compatibility adapters may flatten input and support only web search. */
+    supportsNativeResponses?: boolean;
     defaultModelCapabilities: AiModelCapabilities;
     modelCapabilityOverrides?: Readonly<Record<string, Partial<AiModelCapabilities>>>;
     allowedChatParams?: ReadonlySet<string>;
@@ -56,6 +58,12 @@ export interface AiProviderAdapter {
     descriptor: AiProviderDescriptor;
     client: OpenAI;
     capabilities: AiProviderCapabilities;
+    /** Optional categorical routing API; never used as a text/tool-argument generator. */
+    createDecision?(params: Record<string, unknown>): Promise<{
+        model: string;
+        answers: Array<{ type: string; name?: string | null; choice?: string | boolean; probability?: number; confidence?: number; probabilities?: Array<{ value: string | boolean; probability: number }> }>;
+        usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+    }>;
     getModelCapabilities(model: string): AiModelCapabilities;
     normalizeChatParams(
         model: string,
@@ -64,10 +72,12 @@ export interface AiProviderAdapter {
     createChatCompletion(
         model: string,
         params: ChatCompletionParamsWithoutModel,
+        generation?: AiModelRef['generation'],
     ): Promise<ChatCompletion>;
     createResponse(
         model: string,
         params: ResponseCreateParams,
+        generation?: AiModelRef['generation'],
     ): Promise<ResponseResult>;
     createEmbedding?(
         model: string,

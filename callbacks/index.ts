@@ -1,7 +1,6 @@
 import { Bot, InlineKeyboard } from "grammy";
+import { handleLiveBrowserCallback } from '../services/liveBrowserTelegram';
 import { InputFile } from "grammy/types";
-import * as fs from "fs";
-import * as path from "path";
 import { BotContext } from "../types";
 import { Reminder, ReminderStatus, cancelReminder, markReminderAsCompleted, postponeReminderUntil } from "../reminder";
 import { reminderAgent } from "../agents/reminderAgent";
@@ -53,6 +52,9 @@ import {
 import { handleRecurringTaskCallback } from "../services/recurringTaskService";
 import { getBotGenderedText } from "../persona";
 import { saveRemindersFromResult as saveSharedRemindersFromResult } from '../handlers/shared';
+import { sendResultToUser } from '../handlers/shared';
+import { continueConfirmedRuntime, cancelRuntimeContinuation, replaceRuntimeConfirmation, mergeRuntimeResults } from '../orchestration/runtime/kernel';
+import { contactMemoryConfirmationKey, browserConfirmationKey, telegramPeriodConfirmationKey, hasPendingRuntimeConfirmation, findPendingRuntimeConfirmation, CONTACT_MEMORY_PARENT_TOOLS } from '../orchestration/runtime/confirmation';
 import {
     buildReminderAssistanceRequest,
     getReminderAssistanceKnowledgeSourceText,
@@ -199,61 +201,18 @@ async function saveRemindersFromResult(ctx: BotContext, bot: Bot<BotContext>, re
 }
 
 async function sendProcessingResult(ctx: BotContext, result: ProcessingResult) {
+    if (result.artifacts?.length) {
+        await addToHistory(ctx, 'bot', result.responseText);
+        await sendResultToUser(ctx, result);
+        return;
+    }
     if (result.negotiationSummarySent) {
         await addToHistory(ctx, "bot", "[Переговоры запущены — см. сообщение выше]");
         return;
     }
 
     await addToHistory(ctx, "bot", result.responseText);
-    if (result.structuredResponseBlocks?.length) {
-        await sendStructured(ctx.api as any, ctx.chat!.id, result.structuredResponseBlocks, {
-            replyMarkup: result.keyboard,
-        });
-        return;
-    }
-    const replyOptions = result.keyboard ? { reply_markup: result.keyboard } : {};
-    await sendMessage(ctx, result.responseText, replyOptions);
-
-    if (result.reminderCreated && result.icsFilePath) {
-        try {
-            await ctx.api.sendChatAction(ctx.chat!.id, "upload_document");
-            const fileStream = fs.createReadStream(result.icsFilePath);
-            const filename = path.basename(result.icsFilePath);
-            await ctx.replyWithDocument(new InputFile(fileStream, filename), {
-                caption: "Открой этот файл, чтобы добавить событие в свой календарь.",
-            });
-            fs.unlinkSync(result.icsFilePath);
-        } catch (fileError) {
-            console.error("Ошибка при отправке ICS файла:", fileError);
-            await ctx.reply("К сожалению, не удалось отправить файл календаря. Но я всё равно напомню тебе о событии в назначенное время.");
-        }
-    }
-
-    if (result.documentFilePath) {
-        try {
-            await ctx.api.sendChatAction(ctx.chat!.id, "upload_document");
-            const fileStream = fs.createReadStream(result.documentFilePath);
-            const filename = result.documentFilename || path.basename(result.documentFilePath);
-            await ctx.replyWithDocument(new InputFile(fileStream, filename), result.documentCaption ? {
-                caption: result.documentCaption,
-            } : undefined);
-            fs.unlinkSync(result.documentFilePath);
-        } catch (fileError) {
-            console.error("Ошибка при отправке документа:", fileError);
-            await ctx.reply("Не удалось отправить документ. Попробуй запросить экспорт ещё раз.");
-        }
-    }
-
-    if (result.imageGenerated && result.generatedImageUrl) {
-        try {
-            await ctx.api.sendChatAction(ctx.chat!.id, "upload_photo");
-            await ctx.replyWithPhoto(result.generatedImageUrl);
-            await addToHistory(ctx, "bot", `[Сгенерированное изображение: ${result.generatedImageUrl}]`);
-        } catch (imageError) {
-            console.error("Ошибка при отправке сгенерированного изображения:", imageError);
-            await ctx.reply("К сожалению, не удалось отправить сгенерированное изображение. Возможно, проблема с URL или сервисом генерации изображений.");
-        }
-    }
+    await sendResultToUser(ctx, result);
 
     if (ctx.session.lastFactSaveError) {
         await ctx.reply(`⚠️ ${ctx.session.lastFactSaveError}`);
@@ -280,12 +239,20 @@ export function registerCallback(bot: Bot<BotContext>): void {
     bot.on("callback_query:data", async (ctx, next) => {
         try {
             const callbackData = ctx.callbackQuery.data;
+            if (await handleLiveBrowserCallback(ctx, callbackData)) return;
 
             if (await handleRecurringTaskCallback(ctx, callbackData)) {
                 return;
             }
 
-            if (await handleContactMemoryCallback(ctx, callbackData)) {
+            const contactMemoryKey = contactMemoryConfirmationKey(ctx);
+            let contactMemorySaved: string | undefined;
+            let contactMemoryCancelled = false;
+            if (await handleContactMemoryCallback(ctx, callbackData, summary => { contactMemorySaved = summary; }, () => { contactMemoryCancelled = true; })) {
+                if (contactMemorySaved && contactMemoryKey) {
+                    const remaining = await continueConfirmedRuntime(ctx, CONTACT_MEMORY_PARENT_TOOLS, contactMemorySaved, {}, contactMemoryKey);
+                    if (remaining) await sendResultToUser(ctx, remaining);
+                } else if (contactMemoryKey && contactMemoryCancelled) await cancelRuntimeContinuation(ctx, CONTACT_MEMORY_PARENT_TOOLS, contactMemoryKey);
                 return;
             }
             if (await handleContactMemoryLookupCallback(ctx, callbackData)) {
@@ -313,10 +280,15 @@ export function registerCallback(bot: Bot<BotContext>): void {
 
                 await sendChoiceReceipt(ctx, selection.choice.label);
                 if (selection.choice.action === "cancel_browser_task") {
+                    const sessionId = ctx.session.pendingBrowserTask?.sessionId ?? ctx.session.activeBrowserTask?.sessionId;
+                    const parent = sessionId ? findPendingRuntimeConfirmation(ctx, browserConfirmationKey(sessionId)) : undefined;
+                    const browserCtx: BotContext = parent?.ledgerKey ? Object.create(ctx) : ctx;
+                    if (parent?.ledgerKey) browserCtx.agentRuntimeStorageKey = parent.ledgerKey;
                     await addToHistory(ctx, "user", selection.choice.message);
                     const cancelled = await import("../agents/browserAgent")
-                        .then((m) => m.cancelBrowserRunForContext(ctx))
+                        .then((m) => m.cancelBrowserRunForContext(browserCtx))
                         .catch(() => false);
+                    if (sessionId) await cancelRuntimeContinuation(ctx, ['agents.start', 'agents.resume'], browserConfirmationKey(sessionId));
                     const responseText = cancelled
                         ? "Ок, запись через браузер остановила."
                         : "Ок, не буду запускать запись.";
@@ -389,12 +361,17 @@ export function registerCallback(bot: Bot<BotContext>): void {
 
             if (callbackData.startsWith("browser_cancel:")) {
                 const sessionId = callbackData.replace("browser_cancel:", "").trim();
+                if (!sessionId || ctx.session.pendingBrowserTask?.sessionId !== sessionId) {
+                    await ctx.answerCallbackQuery({ text: 'Эта браузерная задача уже недоступна.' });
+                    return;
+                }
                 if (sessionId) {
                     await import("../agents/browserAgent")
                         .then((m) => m.cancelPausedBrowserSession(sessionId))
                         .catch(() => {});
                 }
                 ctx.session.pendingBrowserTask = undefined;
+                await cancelRuntimeContinuation(ctx, ['agents.start', 'agents.resume'], browserConfirmationKey(sessionId));
                 await ctx.answerCallbackQuery({ text: "Браузерная задача отменена" });
                 if (ctx.callbackQuery.message?.message_id && ctx.callbackQuery.message?.chat?.id) {
                     await runNonCriticalTelegramEdit("browser cancellation keyboard update", () =>
@@ -875,7 +852,15 @@ export function registerCallback(bot: Bot<BotContext>): void {
                     ).catch((error) => console.error("[telegram-edit] chat analysis progress update failed:", error));
                 }
 
+                const confirmationKey = telegramPeriodConfirmationKey('chat-analysis', requestId);
+                if (hasPendingRuntimeConfirmation(ctx, confirmationKey)) ctx.suppressAgentProgress = true;
                 const result = await handleChatAnalysisPeriodCallback(ctx, period, requestId);
+                if (result.operationStatus === 'ok') {
+                    const remaining = await continueConfirmedRuntime(ctx, ['telegram.readMessages'], result.responseText, {}, confirmationKey);
+                    if (remaining) { await sendResultToUser(ctx, mergeRuntimeResults([result, remaining])); return; }
+                } else if (result.operationStatus === 'needs_input' && contactMemoryConfirmationKey(ctx)) {
+                    await replaceRuntimeConfirmation(ctx, ['telegram.readMessages'], confirmationKey, contactMemoryConfirmationKey(ctx)!, result.responseText);
+                } else if (result.operationStatus === 'failed' || result.operationStatus === 'unknown') await cancelRuntimeContinuation(ctx, ['telegram.readMessages'], confirmationKey, result.responseText, result.operationStatus);
                 const replyOptions = result.keyboard ? { reply_markup: result.keyboard } : { reply_markup: new InlineKeyboard() };
                 if (result.voiceReplyRequested) {
                     if (callbackChatId && callbackMessageId) {
@@ -948,12 +933,24 @@ export function registerCallback(bot: Bot<BotContext>): void {
                     await editMessageTextIfChanged(ctx.api,
                         callbackChatId,
                         callbackMessageId,
-                        "Период выбран. Начинаю анализ и буду писать этапы отдельными сообщениями…",
+                        "Период выбран. Начинаю анализ переписки…",
                         { reply_markup: new InlineKeyboard() }
                     ).catch((error) => console.error("[telegram-edit] study chat progress update failed:", error));
                 }
 
-                const { responseText } = await handleStudyChatPeriodCallback(ctx, period, requestId);
+                const confirmationKey = requestId ? telegramPeriodConfirmationKey('study-chat', requestId) : undefined;
+                if (confirmationKey && hasPendingRuntimeConfirmation(ctx, confirmationKey)) ctx.suppressAgentProgress = true;
+                const studyResult = await handleStudyChatPeriodCallback(ctx, period, requestId);
+                const { responseText } = studyResult;
+                if (studyResult.operationStatus === 'ok') {
+                    const remaining = confirmationKey ? await continueConfirmedRuntime(ctx, ['telegram.readMessages'], responseText, {}, confirmationKey) : undefined;
+                    if (remaining) {
+                        remaining.responseText = `${responseText}\n\n${remaining.responseText}`;
+                        await sendResultToUser(ctx, remaining);
+                        return;
+                    }
+                } else if (studyResult.operationStatus === 'needs_input' && confirmationKey && contactMemoryConfirmationKey(ctx)) await replaceRuntimeConfirmation(ctx, ['telegram.readMessages'], confirmationKey, contactMemoryConfirmationKey(ctx)!, responseText);
+                else if ((studyResult.operationStatus === 'failed' || studyResult.operationStatus === 'unknown') && confirmationKey) await cancelRuntimeContinuation(ctx, ['telegram.readMessages'], confirmationKey, responseText, studyResult.operationStatus);
                 if (callbackChatId && callbackMessageId && responseText.length <= MAX_MESSAGE_LENGTH) {
                     await editMessageTextIfChanged(ctx.api,
                         callbackChatId,
@@ -1256,12 +1253,17 @@ export function registerCallback(bot: Bot<BotContext>): void {
             } else if (callbackData === "send_message") {
                 // Если нажата кнопка "Отправить", отправляем сообщение
                 if (ctx.chat) {
-                    const sendResult = await sendMessageFromDraftDetailed(ctx.chat.id);
+                    const sendResult = await sendMessageFromDraftDetailed(ctx.chat.id, ctx.sessionStorageKey);
 
                     if (sendResult.success) {
                         const sentLabel = sendResult.deliveryMode === "voice" ? "Голосовое отправлено!" : "Сообщение отправлено!";
                         await ctx.answerCallbackQuery({ text: sentLabel });
-                        await ctx.reply(sendResult.deliveryMode === "voice" ? "✅ Голосовое сообщение успешно отправлено!" : "✅ Сообщение успешно отправлено!");
+                        const sentText = sendResult.deliveryMode === "voice" ? "✅ Голосовое сообщение успешно отправлено!" : "✅ Сообщение успешно отправлено!";
+                        const continuation = await continueConfirmedRuntime(ctx, ['messages.prepareDraft', 'messages.updateDraft'], sentText);
+                        if (continuation) {
+                            continuation.responseText = `${sentText}\n\n${continuation.responseText}`;
+                            await sendResultToUser(ctx, continuation, false);
+                        } else await ctx.reply(sentText);
                     } else {
                         await ctx.answerCallbackQuery({ text: "Ошибка отправки" });
                         await ctx.reply(`❌ Не удалось отправить сообщение.${sendResult.errorMessage ? `\n\n${sendResult.errorMessage}` : "\n\nПожалуйста, попробуйте ещё раз."}`);
@@ -1294,7 +1296,7 @@ export function registerCallback(bot: Bot<BotContext>): void {
             } else if (callbackData === "toggle_notify") {
                 // Обработка переключения уведомлений о получении ответа
                 if (ctx.chat) {
-                    const draft = getMessageDraft(ctx.chat.id);
+                    const draft = getMessageDraft(ctx.chat.id, ctx.sessionStorageKey);
 
                     if (!draft) {
                         await ctx.answerCallbackQuery({ text: "Ошибка: черновик не найден" });
@@ -1314,7 +1316,8 @@ export function registerCallback(bot: Bot<BotContext>): void {
                         newNotifyValue,
                         draft.isGroup ?? false,
                         draft.groupTitle,
-                        draft.deliveryMode
+                        draft.deliveryMode,
+                        ctx.sessionStorageKey,
                     );
 
                     // Получаем информацию о контакте (для группы не применимо)
@@ -1402,8 +1405,10 @@ export function registerCallback(bot: Bot<BotContext>): void {
             } else if (callbackData === "cancel_message") {
                 // Если нажата кнопка "Отмена", удаляем черновик
                 if (ctx.chat) {
-                    deleteMessageDraft(ctx.chat.id);
+                    deleteMessageDraft(ctx.chat.id, ctx.sessionStorageKey);
                 }
+
+                await cancelRuntimeContinuation(ctx, ['messages.prepareDraft', 'messages.updateDraft']);
 
                 await ctx.answerCallbackQuery({ text: "Отправка отменена" });
                 await ctx.reply("❌ Отправка сообщения отменена.");
@@ -1411,7 +1416,7 @@ export function registerCallback(bot: Bot<BotContext>): void {
                 // Обработка выбора времени отправки
                 if (ctx.chat) {
                     // Получаем текущий черновик
-                    const draft = getMessageDraft(ctx.chat.id);
+                    const draft = getMessageDraft(ctx.chat.id, ctx.sessionStorageKey);
 
                     if (!draft) {
                         await ctx.answerCallbackQuery({ text: "Ошибка: черновик не найден" });
@@ -1461,7 +1466,8 @@ export function registerCallback(bot: Bot<BotContext>): void {
                         draft.notifyOnReply,
                         draft.isGroup ?? false,
                         draft.groupTitle,
-                        draft.deliveryMode
+                        draft.deliveryMode,
+                        ctx.sessionStorageKey,
                     );
 
                     // Получаем информацию о контакте

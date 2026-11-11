@@ -1,8 +1,10 @@
+import { accountPolicyError } from './accountPolicy';
 import type { AiModelRef, AiPresetName, AiTaskKey } from './modelPresets';
 import { classifyAiError } from './errorDiagnostics';
 import { getSameProviderDegradedModel } from './runtimeSupport';
 import { logDegradedFailure, logDegradedStart, logDegradedSuccess } from './degradedLogging';
 import { getAiProviderAdapter } from './providers/registry';
+import { isAiContentSafetyError } from './contentSafety';
 
 /**
  * Callback выполнения одной degraded-модели. Caller (chat/response)
@@ -48,6 +50,8 @@ export async function runSameProviderDegradationChain<T>(
     let lastError = originalError;
 
     while (true) {
+        if (accountPolicyError(lastError)) throw accountPolicyError(lastError);
+        if (isAiContentSafetyError(lastError)) throw lastError;
         const nextDegraded = getSameProviderDegradedModel(
             presetName,
             lastFailedModel,

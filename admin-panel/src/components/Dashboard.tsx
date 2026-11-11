@@ -1,58 +1,76 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Box,
-  Paper,
-  ListItemButton,
-  ListItemIcon,
-  Typography,
-  Button,
-  Divider,
-  Snackbar,
-  Alert,
-  CircularProgress,
-  Tooltip,
-  Chip,
-  IconButton,
-  useMediaQuery,
-  useTheme,
-  alpha,
+  Alert, Box, Button, Chip,
+  CircularProgress, Dialog, DialogActions, DialogContent, DialogContentText,
+  DialogTitle, Divider, Drawer, IconButton, ListItemButton, ListItemIcon,
+  Menu, MenuItem, Snackbar, Stack, Tab, Tabs, Tooltip, Typography,
 } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
-import SaveAllIcon from '@mui/icons-material/LibraryAddCheck';
+import SaveIcon from '@mui/icons-material/Save';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import PersonIcon from '@mui/icons-material/Person';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import TuneIcon from '@mui/icons-material/Tune';
-import ForumIcon from '@mui/icons-material/Forum';
-import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
-import MemoryIcon from '@mui/icons-material/Memory';
-import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined';
+import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
+import PsychologyOutlinedIcon from '@mui/icons-material/PsychologyOutlined';
+import MonitorHeartOutlinedIcon from '@mui/icons-material/MonitorHeartOutlined';
+import InsightsOutlinedIcon from '@mui/icons-material/InsightsOutlined';
 import MenuIcon from '@mui/icons-material/Menu';
-import KeyIcon from '@mui/icons-material/Key';
-import GraphicEqIcon from '@mui/icons-material/GraphicEq';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import StorageIcon from '@mui/icons-material/Storage';
-import PsychologyIcon from '@mui/icons-material/Psychology';
-import SmartphoneIcon from '@mui/icons-material/Smartphone';
-import SettingsIcon from '@mui/icons-material/Settings';
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import SparklesIcon from '@mui/icons-material/AutoAwesome';
-import NotesIcon from '@mui/icons-material/Notes';
-import FlareIcon from '@mui/icons-material/Flare';
+import CloseIcon from '@mui/icons-material/Close';
+import { BrandMark } from './BrandMark';
 import { StatusBar } from './StatusBar';
-import { CONFIG_SCHEMA } from '../schema';
+import { CONFIG_SCHEMA, KEY_SECTIONS } from '../schema';
 import { ConfigSection, type ConfigSectionHandle } from './ConfigSection';
 import { ModelSettingsSection } from './ModelSettingsSection';
+import { BudgetSettingsSection } from './BudgetSettingsSection';
 import { PersonalitySection } from './PersonalitySection';
 import { ChatsSection } from './ChatsSection';
 import { HealthSection } from './HealthSection';
 import { MemorySection } from './MemorySection';
 import { MonitoringSection } from './MonitoringSection';
+import { ProductAnalyticsSection } from './ProductAnalyticsSection';
 import { RecurringTasksSection } from './RecurringTasksSection';
+import { McpSettingsSection, type McpSettingsHandle } from './McpSettingsSection';
 import { saveConfig, fetchConfig, logout, restartService } from '../api';
 import type { ConfigResponse, Toast } from '../types';
 
-const DESKTOP_SIDEBAR_WIDTH = 318;
+const SIDEBAR_WIDTH = 304;
+const SIDEBAR_COMPACT_WIDTH = 88;
+const SIDEBAR_STORAGE_KEY = 'kira.admin.sidebar.collapsed.v1';
+const NAVIGATION = [
+  { id: 'settings', label: 'Настройки', icon: <TuneIcon />, caption: 'Модель, самостоятельность и подключения Киры.' },
+  { id: 'personality', label: 'Личность', icon: <PersonOutlineIcon />, caption: 'Характер, история и внешность Киры.' },
+  { id: 'chats', label: 'Чаты', icon: <ForumOutlinedIcon />, caption: 'Группы, публичный режим и доступ к памяти.' },
+  { id: 'memory', label: 'Память', icon: <PsychologyOutlinedIcon />, caption: 'Сохранённые факты, связи и поиск.' },
+  { id: 'tasks', label: 'Задачи', icon: <EventRepeatIcon />, caption: 'Регулярные запросы и расписание запусков.' },
+  { id: 'health', label: 'Здоровье', icon: <FavoriteBorderIcon />, caption: 'Дневник наблюдений и экспорт записей.' },
+  { id: 'monitoring', label: 'Мониторинг', icon: <MonitorHeartOutlinedIcon />, caption: 'Состояние сервисов, использование AI и ошибки.' },
+  { id: 'analytics', label: 'Аналитика', icon: <InsightsOutlinedIcon />, caption: 'Польза, удержание, качество результатов и цели продукта.' },
+] as const;
+type Page = typeof NAVIGATION[number]['id'];
+
+const SETTINGS_TABS = [
+  { id: 'model', label: 'Модели', caption: 'Настройте, как Кира думает, отвечает и создаёт.' },
+  { id: 'background', label: 'Самостоятельность', caption: 'Фоновые функции и контроль расхода AI.' },
+  { id: 'connections', label: 'Подключения', caption: 'Ваши ключи и доступ к внешним сервисам.' },
+  { id: 'system', label: 'Система', caption: 'Окружение и технические параметры установки.' },
+] as const;
+type SettingsTab = typeof SETTINGS_TABS[number]['id'];
+const SECTION_DESCRIPTIONS: Record<string, string> = {
+  api: 'Ключи провайдеров и адреса API',
+  elevenlabs: 'Голос и озвучивание сообщений',
+  bots: 'Токен Telegram-бота',
+  telegram: 'Подключение личного аккаунта',
+  db: 'Подключение к PostgreSQL',
+  vector: 'Хранилище и параметры поиска',
+  general: 'Владелец, часовой пояс и лимиты',
+  kira: 'Время активности и интервалы',
+};
 
 interface Props {
   config: ConfigResponse;
@@ -60,891 +78,229 @@ interface Props {
   onConfigUpdate: (cfg: ConfigResponse) => void;
 }
 
-interface SidebarTabItem {
-  id: number;
-  label: string;
-  caption: string;
-  icon: JSX.Element;
-}
-
-interface SidebarSectionItem {
-  targetId: string;
-  shortLabel: string;
-  icon: JSX.Element;
-  caption: string;
-}
-
-interface SidebarSectionGroup {
-  title: string;
-  items: SidebarSectionItem[];
-}
-
-interface SidebarIntroCard {
-  icon: JSX.Element;
-  label: string;
-  caption: string;
-  targetId?: string;
-}
-
-const SIDEBAR_TABS: SidebarTabItem[] = [
-  { id: 0, label: 'Настройки', caption: 'Конфиг и сервисы', icon: <TuneIcon fontSize="small" /> },
-  { id: 1, label: 'Личность', caption: 'Характер и тон', icon: <PersonIcon fontSize="small" /> },
-  { id: 2, label: 'Чаты', caption: 'Группы и доступ', icon: <ForumIcon fontSize="small" /> },
-  { id: 3, label: 'Здоровье', caption: 'Дневник и выгрузки', icon: <LocalHospitalIcon fontSize="small" /> },
-  { id: 4, label: 'Память', caption: 'Факты и индексы', icon: <MemoryIcon fontSize="small" /> },
-  { id: 5, label: 'Мониторинг', caption: 'Зависимости и API', icon: <MonitorHeartIcon fontSize="small" /> },
-  { id: 6, label: 'Задачи', caption: 'Регулярные запуски', icon: <EventRepeatIcon fontSize="small" /> },
-];
-
-const TAB_META: Record<number, { title: string; caption: string }> = {
-  0: {
-    title: 'Настройки бота',
-    caption: 'Изменения применяются после перезапуска контейнера',
-  },
-  1: {
-    title: 'Управление личностью',
-    caption: 'Изменения применяются после перезапуска контейнера',
-  },
-  2: {
-    title: 'Чаты бота',
-    caption: 'Группы, публичный режим и доступ к памяти',
-  },
-  3: {
-    title: 'Дневник здоровья',
-    caption: 'Сохранённые наблюдения и выгрузки',
-  },
-  4: {
-    title: 'Управление памятью',
-    caption: 'Сводка, факты, индексы и ручная правка',
-  },
-  5: {
-    title: 'Мониторинг зависимостей',
-    caption: 'Проверки контейнера, хранилищ, Telegram и провайдеров ИИ',
-  },
-  6: {
-    title: 'Регулярные задачи',
-    caption: 'Повторный запуск запросов по расписанию и доставка результатов в Telegram',
-  },
-};
-
-const SETTINGS_GROUPS: SidebarSectionGroup[] = [
-  {
-    title: 'Интеграции',
-    items: [
-      { targetId: 'api', shortLabel: 'API', icon: <KeyIcon fontSize="small" />, caption: 'API Ключи' },
-      { targetId: 'model-presets', shortLabel: 'AI Presets', icon: <FlareIcon fontSize="small" />, caption: 'Пресеты моделей' },
-      { targetId: 'elevenlabs', shortLabel: 'Voice', icon: <GraphicEqIcon fontSize="small" />, caption: 'ElevenLabs Voice' },
-      { targetId: 'bots', shortLabel: 'Telegram', icon: <SmartToyIcon fontSize="small" />, caption: 'Telegram Боты' },
-      { targetId: 'telegram', shortLabel: 'Клиент', icon: <SmartphoneIcon fontSize="small" />, caption: 'Telegram Клиент' },
-    ],
-  },
-  {
-    title: 'Инфраструктура',
-    items: [
-      { targetId: 'db', shortLabel: 'База', icon: <StorageIcon fontSize="small" />, caption: 'База данных' },
-      { targetId: 'vector', shortLabel: 'Память', icon: <PsychologyIcon fontSize="small" />, caption: 'Векторная память' },
-    ],
-  },
-  {
-    title: 'Поведение',
-    items: [
-      { targetId: 'general', shortLabel: 'Общие', icon: <SettingsIcon fontSize="small" />, caption: 'Общие настройки' },
-      { targetId: 'kira', shortLabel: 'Расписание', icon: <EventRepeatIcon fontSize="small" />, caption: 'Kira — Расписание' },
-    ],
-  },
-];
-
-const MONITORING_GROUPS: SidebarSectionGroup[] = [
-  {
-    title: 'Мониторинг',
-    items: [
-      { targetId: 'monitor-overview', shortLabel: 'Обзор', icon: <MonitorHeartIcon fontSize="small" />, caption: 'Статус и показатели' },
-      { targetId: 'monitor-deps', shortLabel: 'Зависимости', icon: <StorageIcon fontSize="small" />, caption: 'Исполнение, хранилище, Telegram и ИИ' },
-      { targetId: 'monitor-ai-usage', shortLabel: 'Использование ИИ', icon: <PsychologyIcon fontSize="small" />, caption: 'Фильтры, график и разбор' },
-      { targetId: 'monitor-chains', shortLabel: 'Маршрутизация', icon: <ChevronRightIcon fontSize="small" />, caption: 'Основной, повторный и резервный путь' },
-      { targetId: 'monitor-failures', shortLabel: 'Ошибки', icon: <LocalHospitalIcon fontSize="small" />, caption: 'Последние ошибки' },
-    ],
-  },
-];
-
-const SIDEBAR_INTRO_CARDS: Record<number, SidebarIntroCard[]> = {
-  0: [],
-  1: [
-    {
-      icon: <SparklesIcon fontSize="small" />,
-      label: 'Kira',
-      caption: 'Личность, настроение и манера общения',
-      targetId: 'personality-kira-—-личность-и-характер',
-    },
-  ],
-  2: [
-    {
-      icon: <ForumIcon fontSize="small" />,
-      label: 'Чаты',
-      caption: 'Публичный режим, память и ограничения',
-    },
-  ],
-  3: [
-    {
-      icon: <LocalHospitalIcon fontSize="small" />,
-      label: 'Дневник',
-      caption: 'Наблюдения, фильтры и экспорт записей',
-    },
-  ],
-  4: [
-    {
-      icon: <NotesIcon fontSize="small" />,
-      label: 'Память',
-      caption: 'Факты, синтетика и ревизия индексов',
-    },
-  ],
-  5: [
-    {
-      icon: <MonitorHeartIcon fontSize="small" />,
-      label: 'Мониторинг',
-      caption: 'Состояние внешних API и runtime-зависимостей',
-    },
-  ],
-  6: [
-    {
-      icon: <EventRepeatIcon fontSize="small" />,
-      label: 'Задачи',
-      caption: 'Расписание, пауза, ручной запуск и редактирование',
-    },
-  ],
-};
-
 export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [activeSection, setActiveSection] = useState(CONFIG_SCHEMA[0].id);
-  const [activeTab, setActiveTab] = useState(0);
-  const [toast, setToast] = useState<Toast | null>(null);
-  const [savingAll, setSavingAll] = useState(false);
-  const [restarting, setRestarting] = useState<string | null>(null);
+  const [page, setPage] = useState<Page>('settings');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('model');
+  const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTab>>(() => new Set(['model']));
+  const [configDialog, setConfigDialog] = useState<string | null>(null);
+  const [visitedDialogs, setVisitedDialogs] = useState<Set<string>>(() => new Set());
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  const activeTabMeta = {
-    title: TAB_META[activeTab]?.title ?? 'Раздел',
-    caption: TAB_META[activeTab]?.caption ?? '',
-    badge: SIDEBAR_TABS.find((item) => item.id === activeTab)?.label ?? 'Раздел',
-  };
-
-  // Refs to collect values from each section for "Save All"
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'; }
+    catch { return false; }
+  });
+  const [serviceMenu, setServiceMenu] = useState<HTMLElement | null>(null);
+  const [restartOpen, setRestartOpen] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [savingAll, setSavingAll] = useState(false);
+  const [dirtySections, setDirtySections] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState<Toast | null>(null);
   const sectionRefs = useRef<Record<string, ConfigSectionHandle | null>>({});
+  const mcpRef = useRef<McpSettingsHandle>(null);
+  const pendingCount = Object.values(dirtySections).filter(Boolean).length;
+  const currentPage = NAVIGATION.find(item => item.id === page)!;
+  const currentSettings = SETTINGS_TABS.find(item => item.id === settingsTab)!;
+  const showToast = useCallback((message: string, severity: Toast['severity']) => setToast({ message, severity }), []);
+  const sidebarWidth = sidebarCollapsed ? SIDEBAR_COMPACT_WIDTH : SIDEBAR_WIDTH;
+  const markDirty = useCallback((id: string, dirty: boolean) => {
+    setDirtySections(previous => previous[id] === dirty ? previous : { ...previous, [id]: dirty });
+  }, []);
 
-  const showToast = (message: string, severity: 'success' | 'error' | 'info') => {
-    setToast({ message, severity });
-  };
+  useEffect(() => {
+    try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed)); }
+    catch { /* Navigation still works when browser storage is unavailable. */ }
+  }, [sidebarCollapsed]);
 
-  const scrollToSection = (id: string) => {
-    setActiveSection(id);
-    if (isMobile) {
-      setMobileOpen(false);
-    }
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  useEffect(() => {
+    if (!pendingCount) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warnBeforeLeaving);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeaving);
+  }, [pendingCount]);
 
-  const handleSaveAll = async () => {
+  function selectPage(next: Page) {
+    setPage(next);
+    setMobileOpen(false);
+    window.scrollTo({ top: 0 });
+  }
+
+  function selectSettings(next: SettingsTab) {
+    setSettingsTab(next);
+    setVisitedTabs(previous => new Set([...previous, next]));
+    window.scrollTo({ top: 0 });
+  }
+
+  function openConfig(id: string) {
+    setVisitedDialogs(previous => new Set([...previous, id]));
+    setConfigDialog(id);
+  }
+
+  async function handleSaveAll() {
     setSavingAll(true);
     try {
-      // Collect all pending updates from each section via their exposed ref
-      const allUpdates: Record<string, string | null> = {};
-      for (const section of CONFIG_SCHEMA) {
-        const sectionUpdates = sectionRefs.current[section.id]?.getUpdates() ?? {};
-        Object.assign(allUpdates, sectionUpdates);
-      }
-      Object.assign(allUpdates, sectionRefs.current['model-presets']?.getUpdates() ?? {});
-      const result = await saveConfig(allUpdates);
-      if (result.success) {
-        showToast(result.message || '✅ Все настройки сохранены', 'success');
-        const newCfg = await fetchConfig();
-        onConfigUpdate(newCfg);
-      } else {
-        showToast(result.error || 'Ошибка сохранения', 'error');
-      }
-    } catch {
-      showToast('Ошибка соединения', 'error');
-    } finally {
-      setSavingAll(false);
-    }
-  };
+      const updates = Object.assign({}, ...Object.values(sectionRefs.current).map(section => section?.getUpdates() ?? {}));
+      const result = await saveConfig(updates);
+      if (!result.success) throw new Error(result.error || 'Ошибка сохранения');
+      const saved = await fetchConfig();
+      Object.values(sectionRefs.current).forEach(section => section?.acceptSaved(saved, updates));
+      onConfigUpdate(saved);
+      await mcpRef.current?.save();
+      showToast(dirtySections.mcp ? 'Изменения сохранены' : result.message || 'Изменения сохранены', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Ошибка соединения', 'error');
+    } finally { setSavingAll(false); }
+  }
 
-  const handleRestart = async (service: string) => {
-    setRestarting(service);
+  async function handleRestart() {
+    setRestartOpen(false);
+    setRestarting(true);
     try {
-      const result = await restartService(service);
-      if (result.success) {
-        showToast(result.message || `🔄 ${service} перезапускается...`, 'info');
-      } else {
-        showToast(result.error || 'Ошибка перезапуска', 'error');
-      }
-    } catch {
-      showToast('Ошибка соединения', 'error');
-    } finally {
-      setRestarting(null);
-    }
-  };
+      const result = await restartService('kira-mind-bot');
+      showToast(result.message || result.error || (result.success ? 'Бот перезапускается' : 'Ошибка перезапуска'), result.success ? 'info' : 'error');
+    } catch { showToast('Ошибка соединения', 'error'); }
+    finally { setRestarting(false); }
+  }
 
-  const handleLogout = async () => {
-    await logout();
-    onLogout();
-  };
-
-  const selectTab = (value: number) => {
-    setActiveTab(value);
-    setActiveSection(value === 5 ? 'monitor-overview' : value === 0 ? CONFIG_SCHEMA[0].id : '');
-    if (isMobile) {
-      setMobileOpen(false);
-    }
-  };
-
-  const handleIntroCardClick = (targetId?: string) => {
-    if (isMobile) {
-      setMobileOpen(false);
-    }
-    if (targetId) {
-      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
-  const renderNavCard = ({
-    icon,
-    label,
-    caption,
-    itemKey,
-    selected,
-    onClick,
-    clickable = true,
-  }: {
-    icon: JSX.Element;
-    label: string;
-    caption: string;
-    itemKey?: string;
-    selected: boolean;
-    onClick?: () => void;
-    clickable?: boolean;
-  }) => (
-    <ListItemButton
-      key={itemKey}
-      selected={selected}
-      onClick={onClick}
-      disabled={!clickable}
-      sx={{
-        alignItems: 'center',
-        gap: 0.875,
-        px: 1,
-        py: 0.25,
-        mb: 0.375,
-        minHeight: 28,
-        borderRadius: 1.5,
-        border: '1px solid',
-        borderColor: selected ? alpha(theme.palette.primary.light, 0.45) : 'transparent',
-        bgcolor: selected ? alpha(theme.palette.primary.main, 0.18) : 'transparent',
-        color: selected ? 'text.primary' : 'text.secondary',
-        transition: 'background-color 0.18s ease, border-color 0.18s ease',
-        cursor: clickable ? 'pointer' : 'default',
-        '&:hover': {
-          bgcolor: clickable
-            ? selected
-              ? alpha(theme.palette.primary.main, 0.24)
-              : alpha(theme.palette.common.white, 0.04)
-            : 'transparent',
-          borderColor: clickable
-            ? selected
-              ? 'primary.light'
-              : alpha(theme.palette.common.white, 0.08)
-            : 'transparent',
-        },
-        '& .MuiListItemIcon-root': {
-          minWidth: 0,
-          color: selected ? 'primary.light' : 'text.secondary',
-        },
-        '&.Mui-disabled': {
-          opacity: 1,
-          color: 'text.secondary',
-        },
-      }}
-    >
-      <ListItemIcon sx={{ fontSize: 16 }}>{icon}</ListItemIcon>
-      <Box sx={{ minWidth: 0, flexGrow: 1, display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
-        <Typography variant="body2" fontWeight={700} sx={{ lineHeight: 1.1, fontSize: '12px' }}>
-          {label}
-        </Typography>
-        <Typography
-          variant="caption"
-          color={selected ? 'text.primary' : 'text.secondary'}
-          sx={{
-            opacity: selected ? 0.82 : 0.68,
-            fontSize: '10px',
-            lineHeight: 1.1,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {caption}
-        </Typography>
-      </Box>
-      {clickable ? (
-        <ChevronRightIcon sx={{ fontSize: 16, color: selected ? 'primary.light' : 'text.disabled' }} />
-      ) : null}
-    </ListItemButton>
-  );
-
-  const sidebar = (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        minHeight: 0,
-        overflow: 'hidden',
-        bgcolor: 'sidebar.surface',
-      }}
-    >
-      <Box
-        sx={{
-          flexShrink: 0,
-          px: 2.5,
-          py: 2.5,
-          borderBottom: '1px solid',
-          borderColor: 'sidebar.border',
-          background:
-            'radial-gradient(circle at top left, rgba(82,186,255,0.22), transparent 44%), linear-gradient(180deg, rgba(12,19,37,0.96) 0%, rgba(15,18,30,0.88) 100%)',
-        }}
-      >
-        <Typography variant="h6" color="primary.light" fontWeight={800}>
-          Kira Mind
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, mb: 1.25 }}>
-          Панель управления ботом
-        </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-          <Chip
-            size="small"
-            icon={<SparklesIcon sx={{ fontSize: '15px !important' }} />}
-            label={activeTabMeta.badge}
-            sx={{
-              height: 24,
-              borderRadius: '12px',
-              bgcolor: alpha(theme.palette.primary.main, 0.14),
-              color: 'primary.light',
-              border: '1px solid',
-              borderColor: alpha(theme.palette.primary.light, 0.22),
-              fontWeight: 700,
-            }}
-          />
-          <Chip
-            size="small"
-            label="Production"
-            sx={{
-              height: 24,
-              borderRadius: '12px',
-              bgcolor: alpha(theme.palette.common.white, 0.04),
-              color: 'text.secondary',
-              border: '1px solid',
-              borderColor: alpha(theme.palette.common.white, 0.08),
-              fontWeight: 600,
-            }}
-          />
-        </Box>
-      </Box>
-
-      <Box sx={{ flexShrink: 0, px: 1.5, py: 1.25, borderBottom: '1px solid', borderColor: 'sidebar.border' }}>
-        <Typography
-          variant="caption"
-          sx={{
-            display: 'block',
-            mb: 0.85,
-            color: 'sidebar.label',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: 1.1,
-          }}
-        >
-          Разделы
-        </Typography>
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 0.625,
-          }}
-        >
-          {SIDEBAR_TABS.map((item) => {
-            const selected = activeTab === item.id;
-            return (
-              <ListItemButton
-                key={item.id}
-                selected={selected}
-                onClick={() => selectTab(item.id)}
-                sx={{
-                  alignItems: 'center',
-                  gap: 0.75,
-                  px: 1,
-                  py: 0.625,
-                  minHeight: 44,
-                  borderRadius: '14px',
-                  border: '1px solid',
-                  borderColor: selected ? 'primary.main' : alpha(theme.palette.common.white, 0.08),
-                  bgcolor: selected ? alpha(theme.palette.primary.main, 0.16) : alpha(theme.palette.common.white, 0.02),
-                  boxShadow: 'none',
-                  '&:hover': {
-                    bgcolor: selected ? alpha(theme.palette.primary.main, 0.22) : 'sidebar.hover',
-                    borderColor: selected ? 'primary.light' : 'primary.main',
-                  },
-                  '& .MuiListItemIcon-root': {
-                    minWidth: 0,
-                    color: selected ? 'primary.light' : 'text.secondary',
-                  },
-                }}
-              >
-                <ListItemIcon>{item.icon}</ListItemIcon>
-                <Box sx={{ minWidth: 0, flexGrow: 1 }}>
-                  <Typography
-                    variant="body2"
-                    fontWeight={700}
-                    color={selected ? 'text.primary' : 'text.secondary'}
-                    sx={{ lineHeight: 1.1, fontSize: '13px' }}
-                  >
-                    {item.label}
-                  </Typography>
-                  <Typography
-                    variant="caption"
-                    color={selected ? 'text.primary' : 'text.secondary'}
-                    sx={{
-                      display: 'block',
-                      mt: 0.125,
-                      opacity: 0.68,
-                      fontSize: '10px',
-                      lineHeight: 1.1,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {item.caption}
-                  </Typography>
-                </Box>
+  const renderNavigation = (compact: boolean, mobile = false) => (
+    <Stack sx={{ height: '100%', bgcolor: 'sidebar.surface' }}>
+      <Stack direction="row" alignItems="center" justifyContent={compact ? 'center' : 'flex-start'} spacing={compact ? 0 : 1.5}
+        sx={{ px: compact ? 1.5 : 2.5, minHeight: 128, flexShrink: 0, position: 'relative' }}>
+        <BrandMark size={compact ? 56 : 88} />
+        {!compact && <Box><Typography sx={{ color: '#F1F5EE', fontSize: 27, fontWeight: 500, letterSpacing: '-.035em', whiteSpace: 'nowrap' }}>Kira <Box component="span" sx={{ fontWeight: 400, color: '#ADC0AF' }}>Mind</Box></Typography>
+          <Typography sx={{ color: '#A5B4AA', fontSize: 10, letterSpacing: '.04em', mt: .5 }}>ПАНЕЛЬ УПРАВЛЕНИЯ</Typography></Box>}
+        {mobile && <IconButton aria-label="Закрыть меню" onClick={() => setMobileOpen(false)} size="small" sx={{ position: 'absolute', top: 10, right: 10, color: '#AFBDB2' }}><CloseIcon fontSize="small" /></IconButton>}
+      </Stack>
+      <Box component="nav" id={mobile ? 'mobile-navigation' : 'desktop-navigation'} aria-label="Основная навигация" sx={{ px: compact ? 2 : 2.5, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        {NAVIGATION.map(item => (
+          <Box key={item.id}>
+            {['settings', 'personality', 'monitoring'].includes(item.id) && <Box sx={{ height: 24, display: 'flex', alignItems: 'center', justifyContent: compact ? 'center' : 'flex-start', px: compact ? 0 : 1.75, mt: item.id === 'settings' ? 0 : 1 }}>
+              {compact ? <Box aria-hidden="true" sx={{ width: 22, borderTop: '1px solid', borderColor: 'sidebar.border' }} /> : <Typography variant="overline" sx={{ color: '#A5B4AA' }}>{item.id === 'settings' ? 'Управление' : item.id === 'monitoring' ? 'Система' : 'Пространство'}</Typography>}
+            </Box>}
+            <Tooltip title={compact ? item.label + (item.id === 'settings' && pendingCount > 0 ? ' · Есть несохранённые изменения' : '') : ''} placement="right" arrow>
+              <ListItemButton selected={page === item.id} onClick={() => selectPage(item.id)} aria-label={item.label} aria-current={page === item.id ? 'page' : undefined}
+                sx={{ minHeight: 52, px: compact ? 0 : 1.75, mb: .5, gap: 1.75, position: 'relative', justifyContent: compact ? 'center' : 'flex-start', color: '#BBC8BE', '&:hover': { bgcolor: 'sidebar.hover', color: '#F1F5EE' }, '&.Mui-selected': { bgcolor: '#D8E9CD', color: '#284331', '&:hover': { bgcolor: '#DFEED5' } } }}>
+                <ListItemIcon sx={{ minWidth: 0, color: 'inherit', '& svg': { fontSize: 24 } }}>{item.icon}</ListItemIcon>
+                {!compact && <Typography fontSize={15} fontWeight={page === item.id ? 600 : 400}>{item.label}</Typography>}
+                {item.id === 'settings' && pendingCount > 0 && <Box component="span" aria-label="Есть несохранённые изменения" sx={{ position: 'absolute', right: compact ? 8 : 16, top: compact ? 10 : 23, width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }} />}
               </ListItemButton>
-            );
-          })}
-        </Box>
-      </Box>
-
-      <Box
-        sx={{
-          flex: '1 1 auto',
-          minHeight: 0,
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          overscrollBehavior: 'contain',
-          px: 1.5,
-          py: 1.1,
-        }}
-      >
-        {activeTab === 0 || activeTab === 5 ? (
-          <Box>
-            {(activeTab === 5 ? MONITORING_GROUPS : SETTINGS_GROUPS).map((group) => (
-              <Box key={group.title} sx={{ mb: 0.9 }}>
-                <Typography
-                  variant="caption"
-                  sx={{
-                    display: 'block',
-                    px: 0.25,
-                    mb: 0.45,
-                    color: 'sidebar.label',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.95,
-                    fontSize: '10px',
-                  }}
-                >
-                  {group.title}
-                </Typography>
-                {group.items.map((item) =>
-                  renderNavCard({
-                    itemKey: item.targetId,
-                    icon: item.icon,
-                    label: item.shortLabel,
-                    caption: item.caption,
-                    selected: activeSection === item.targetId,
-                    onClick: () => scrollToSection(item.targetId),
-                  }),
-                )}
-              </Box>
-            ))}
+            </Tooltip>
           </Box>
-        ) : (
-          <Box>
-            <Typography
-              variant="caption"
-              sx={{
-                display: 'block',
-                px: 0.25,
-                mb: 0.45,
-                color: 'sidebar.label',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: 0.95,
-                fontSize: '10px',
-              }}
-            >
-              Обзор
-            </Typography>
-            {(SIDEBAR_INTRO_CARDS[activeTab] ?? []).map((item) =>
-              renderNavCard({
-                itemKey: item.targetId ?? item.label,
-                icon: item.icon,
-                label: item.label,
-                caption: item.caption,
-                selected: false,
-                onClick: item.targetId ? () => handleIntroCardClick(item.targetId) : undefined,
-                clickable: Boolean(item.targetId),
-              }),
-            )}
-          </Box>
-        )}
-      </Box>
-
-      <Divider sx={{ flexShrink: 0, borderColor: 'sidebar.border' }} />
-
-      <Box sx={{ flexShrink: 0, px: 2, py: 1.25 }}>
-        <Typography
-          variant="caption"
-          sx={{
-            display: 'block',
-            mb: 1,
-            color: 'sidebar.label',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: 1.05,
-          }}
-        >
-          Перезапуск
-        </Typography>
-        {[{ id: 'kira-mind-bot', label: 'Kira Core' }].map(({ id, label }) => (
-          <Button
-            key={id}
-            fullWidth
-            variant="outlined"
-            size="small"
-            startIcon={
-              restarting === id ? (
-                <CircularProgress size={12} color="inherit" />
-              ) : (
-                <RestartAltIcon fontSize="small" />
-              )
-            }
-            disabled={restarting !== null}
-            onClick={() => handleRestart(id)}
-            sx={{
-              mb: 0.5,
-              justifyContent: 'flex-start',
-              borderColor: 'sidebar.border',
-              color: 'text.secondary',
-              fontSize: '12px',
-              '&:hover': {
-                borderColor: 'primary.main',
-                color: 'primary.light',
-                bgcolor: 'sidebar.hover',
-              },
-            }}
-          >
-            {label}
-          </Button>
         ))}
       </Box>
-
-      <Divider sx={{ flexShrink: 0, borderColor: 'sidebar.border' }} />
-
-      <Box sx={{ flexShrink: 0, px: 2, py: 1.5, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-        {activeTab === 0 && (
-          <Tooltip title="Сохранить все изменённые поля сразу">
-            <Button
-              variant="contained"
-              fullWidth
-              startIcon={
-                savingAll ? (
-                  <CircularProgress size={14} color="inherit" />
-                ) : (
-                  <SaveAllIcon fontSize="small" />
-                )
-              }
-              disabled={savingAll}
-              onClick={handleSaveAll}
-              sx={{
-                fontWeight: 700,
-                fontSize: '13px',
-                py: 1.1,
-                borderRadius: '14px',
-                boxShadow: '0 16px 30px rgba(35, 118, 255, 0.24)',
-                background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
-              }}
-            >
-              Сохранить всё
-            </Button>
+      <Stack sx={{ mx: compact ? 2 : 2.5, py: 1, borderTop: '1px solid', borderColor: 'sidebar.border', flexShrink: 0 }}>
+        <Stack direction="row" justifyContent={compact ? 'center' : 'space-between'} alignItems="center">
+          {!compact && <Typography variant="caption" sx={{ color: '#A5B4AA' }}>Управление сервисом</Typography>}
+          <Tooltip title="Действия сервиса" placement="right">
+            <IconButton sx={{ color: '#BBC8BE', minHeight: 44, minWidth: 44 }} aria-label="Действия сервиса" aria-haspopup="menu" aria-controls={serviceMenu ? 'service-menu' : undefined} aria-expanded={Boolean(serviceMenu)} onClick={event => setServiceMenu(event.currentTarget)}>
+              {restarting ? <CircularProgress size={20} /> : <MoreHorizIcon />}
+            </IconButton>
           </Tooltip>
-        )}
-        <Button
-          variant="text"
-          fullWidth
-          startIcon={<LogoutIcon fontSize="small" />}
-          onClick={handleLogout}
-          sx={{ color: 'text.disabled', fontSize: '12px', '&:hover': { color: 'text.secondary' } }}
-        >
-          Выйти
-        </Button>
-      </Box>
-    </Box>
+        </Stack>
+        {!mobile && <Tooltip title={compact ? 'Развернуть меню' : ''} placement="right" arrow>
+          <Button onClick={() => setSidebarCollapsed(value => !value)} aria-label={compact ? 'Развернуть меню' : 'Свернуть меню'} aria-expanded={!compact} aria-controls="desktop-navigation"
+            sx={{ mt: .5, minWidth: 0, minHeight: 44, px: compact ? 0 : 1.5, gap: 1.5, justifyContent: compact ? 'center' : 'flex-start', color: '#BBC8BE', fontWeight: 400, '&:hover': { bgcolor: 'sidebar.hover', color: '#F1F5EE' } }}>
+            {compact ? <ChevronRightIcon /> : <ChevronLeftIcon />}{!compact && 'Свернуть меню'}
+          </Button>
+        </Tooltip>}
+      </Stack>
+    </Stack>
   );
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        bgcolor: 'background.default',
-        background:
-          'radial-gradient(circle at top left, rgba(37,99,235,0.14), transparent 24%), radial-gradient(circle at top right, rgba(124,58,237,0.12), transparent 26%), #0b1120',
-      }}
-    >
-      {isMobile && (
-        <>
-          <Box
-            onClick={() => setMobileOpen(false)}
-            sx={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: theme.zIndex.drawer,
-              opacity: mobileOpen ? 1 : 0,
-              pointerEvents: mobileOpen ? 'auto' : 'none',
-              transition: 'opacity 180ms ease',
-              backdropFilter: 'blur(6px)',
-              backgroundColor: 'rgba(3, 7, 18, 0.62)',
-            }}
-          />
-          <Box
-            sx={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              bottom: 0,
-              width: '100vw',
-              maxWidth: 360,
-              zIndex: theme.zIndex.drawer + 1,
-              transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
-              transition: 'transform 220ms ease',
-              borderRight: '1px solid',
-              borderColor: 'sidebar.border',
-              borderTopRightRadius: '24px',
-              borderBottomRightRadius: '24px',
-              backgroundImage:
-                'radial-gradient(circle at top left, rgba(82,186,255,0.14), transparent 30%), linear-gradient(180deg, rgba(15,23,42,1) 0%, rgba(10,16,28,1) 100%)',
-              boxShadow: '0 20px 60px rgba(2, 6, 23, 0.45)',
-              overflow: 'hidden',
-            }}
-          >
-            {sidebar}
-          </Box>
-        </>
-      )}
+    <Box sx={{ minHeight: '100vh', display: 'flex', bgcolor: 'background.default' }}>
+      <Box component="aside" sx={{ display: { xs: 'none', md: 'block' }, width: sidebarWidth, flexShrink: 0, transition: 'width 180ms ease' }}>
+        <Box sx={{ position: 'fixed', inset: '0 auto 0 0', width: sidebarWidth, transition: 'width 180ms ease', borderRight: '1px solid', borderColor: 'divider' }}>{renderNavigation(sidebarCollapsed)}</Box>
+      </Box>
+      <Drawer open={mobileOpen} onClose={() => setMobileOpen(false)} sx={{ display: { md: 'none' }, '& .MuiDrawer-paper': { width: SIDEBAR_WIDTH, maxWidth: '88vw' } }}>{renderNavigation(false, true)}</Drawer>
+      <Box component="main" id="main-content" sx={{ flex: 1, minWidth: 0, px: { xs: 2, sm: 4, lg: 5 }, py: 3, maxWidth: 1440, mx: 'auto' }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3, gap: 2 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <IconButton aria-label="Открыть меню" onClick={() => setMobileOpen(true)} sx={{ display: { md: 'none' } }}><MenuIcon /></IconButton>
+            <Typography variant="caption" color="text.secondary">Kira Mind <Box component="span" sx={{ mx: 1.5, color: '#BCC6B9' }}>/</Box> {currentPage.label}</Typography>
+          </Stack>
+          <StatusBar />
+        </Stack>
+        <Stack component="header" direction="row" alignItems="flex-start" justifyContent="space-between" spacing={2} sx={{ mb: 2.5 }}>
+          <Box><Typography variant="h4" component="h1">{page === 'settings' ? currentSettings.label : currentPage.label}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: .75 }}>{page === 'settings' ? currentSettings.caption : currentPage.caption}</Typography></Box>
+        </Stack>
 
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: { md: 2.5, lg: 3 },
-          px: { xs: 1, sm: 1.5, md: 2 },
-          py: { xs: 1, sm: 1.5, md: 2 },
-        }}
-      >
-        {!isMobile && (
-          <Box
-            component="aside"
-            sx={{
-              width: DESKTOP_SIDEBAR_WIDTH,
-              flexShrink: 0,
-              position: 'sticky',
-              top: 16,
-              height: 'calc(100vh - 32px)',
-              borderRadius: '24px',
-              border: '1px solid',
-              borderColor: 'sidebar.border',
-              overflow: 'hidden',
-              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.34)',
-              backdropFilter: 'blur(12px)',
-            }}
-          >
-            {sidebar}
-          </Box>
-        )}
+        {/* Keep visited settings mounted so navigation preserves pending edits. */}
+        <Box hidden={page !== 'settings'}>
+          <Tabs value={settingsTab} onChange={(_, next: SettingsTab) => selectSettings(next)} variant="scrollable" scrollButtons={false} aria-label="Разделы настроек" sx={{ mb: 2.5, bgcolor: '#EAEDE5', p: .5, borderRadius: 1.75, width: 'fit-content', maxWidth: '100%' }}>
+            {SETTINGS_TABS.map(item => <Tab key={item.id} id={`settings-tab-${item.id}`} value={item.id} sx={{ px: { xs: 1.25, sm: 2.25 }, fontSize: { xs: 12, sm: 13 } }} label={item.id === 'background' ? <><Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Самостоятельность</Box><Box component="span" sx={{ display: { xs: 'inline', sm: 'none' } }}>Фон</Box></> : item.label} aria-controls={`settings-panel-${item.id}`} />)}
+          </Tabs>
+          {pendingCount > 0 && (
+            <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" spacing={1} sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: 'action.hover' }}>
+              <Typography variant="body2">Есть несохранённые изменения.</Typography>
+              <Button variant="contained" size="small" disabled={savingAll} onClick={() => void handleSaveAll()} startIcon={savingAll ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />} sx={{ flexShrink: 0 }}>Сохранить изменения</Button>
+            </Stack>
+          )}
+          {SETTINGS_TABS.map(item => (
+            <Box key={item.id} role="tabpanel" id={`settings-panel-${item.id}`} aria-labelledby={`settings-tab-${item.id}`} hidden={settingsTab !== item.id}>
+              {visitedTabs.has(item.id) && <>
+                {item.id === 'model' && <>
+                  <ModelSettingsSection ref={element => { sectionRefs.current['local-models'] = element; }} config={config} onUpdate={onConfigUpdate} onToast={showToast} onDirtyChange={markDirty} />
 
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          minWidth: 0,
-          p: { xs: 1.5, sm: 2, md: 2.5 },
-          maxWidth: activeTab === 3 || activeTab === 4 || activeTab === 5 || activeTab === 6 ? 1240 : 980,
-          width: '100%',
-          mx: isMobile ? 'auto' : 0,
-        }}
-      >
-        {isMobile && (
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              mb: 2,
-              px: 0.5,
-              py: 0.75,
-              borderBottom: '1px solid',
-              borderColor: 'divider',
-            }}
-          >
-            <IconButton onClick={() => setMobileOpen(true)} aria-label="Открыть меню">
-              <MenuIcon />
-            </IconButton>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="subtitle1" fontWeight={700}>
-                Kira Mind
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Панель управления
-              </Typography>
+                </>}
+                {item.id === 'background' && <BudgetSettingsSection onToast={showToast} />}
+                {item.id === 'connections' && <Stack spacing={2}>
+                  <Typography variant="body2" color="text.secondary">Ключи хранятся на сервере. Для ключей AI и Telegram требуется пересоздание контейнеров; настройки MCP применяются сразу.</Typography>
+                  <McpSettingsSection ref={mcpRef} disabled={savingAll} onToast={showToast} onDirtyChange={markDirty} />
+                  {KEY_SECTIONS.map(section => <ConfigSection key={section.id} inline
+                    ref={element => { sectionRefs.current[section.id] = element; }} section={section} config={config} onUpdate={onConfigUpdate} onToast={showToast} onDirtyChange={markDirty} />)}
+                </Stack>}
+                {(item.id === 'system') && <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 2 }}>
+                  {CONFIG_SCHEMA.map(section => (
+                    <ListItemButton key={section.id} onClick={() => openConfig(section.id)} aria-haspopup="dialog" sx={{ p: 2.5, border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', gap: 2, alignItems: 'center', minHeight: 100 }}>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Typography variant="body2" fontWeight={600}>{section.title}</Typography>
+                          {dirtySections[section.id] && <Chip size="small" color="warning" variant="outlined" label="Изменено" />}
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary">{SECTION_DESCRIPTIONS[section.id]}</Typography>
+                      </Box>
+                      <EditOutlinedIcon sx={{ fontSize: 19, color: 'text.secondary' }} />
+                    </ListItemButton>
+                  ))}
+                </Box>}
+              </>}
             </Box>
-          </Box>
-        )}
-
-        <Paper
-          elevation={0}
-          sx={{
-            display: 'flex',
-            flexDirection: { xs: 'column', sm: 'row' },
-            alignItems: { xs: 'stretch', sm: 'center' },
-            justifyContent: 'space-between',
-            gap: 1.75,
-            mb: 3,
-            p: { xs: 1.5, sm: 2, md: 2.25 },
-            borderRadius: '24px',
-            border: '1px solid',
-            borderColor: alpha(theme.palette.common.white, 0.08),
-            background:
-              'linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(17,24,39,0.84) 100%)',
-            boxShadow: '0 18px 42px rgba(2, 6, 23, 0.28)',
-          }}
-        >
-          <Box>
-            <Chip
-              label={activeTabMeta.badge}
-              size="small"
-              sx={{
-                mb: 1,
-                borderRadius: '12px',
-                bgcolor: alpha(theme.palette.primary.main, 0.14),
-                border: '1px solid',
-                borderColor: alpha(theme.palette.primary.light, 0.28),
-                color: 'primary.light',
-                fontWeight: 700,
-              }}
-            />
-            <Typography variant="h6" fontWeight={800}>
-              {activeTabMeta.title}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 720, mt: 0.5 }}>
-              {activeTabMeta.caption}
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: { xs: 'column', sm: 'row' },
-              alignItems: { xs: 'stretch', sm: 'center' },
-              gap: 1.5,
-            }}
-          >
-            <StatusBar />
-            <Chip
-              label="Production"
-              size="small"
-              sx={{
-                height: 26,
-                px: 0.25,
-                borderRadius: '13px',
-                bgcolor: 'rgba(255,255,255,0.035)',
-                color: '#dbe7fb',
-                borderColor: 'rgba(189, 205, 232, 0.20)',
-                border: '1px solid',
-                fontWeight: 600,
-                letterSpacing: '0.01em',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
-              }}
-            />
-          </Box>
-        </Paper>
-
-        {/* Settings tab */}
-        {activeTab === 0 && (
-          <>
-            {CONFIG_SCHEMA.map((section) => (
-              <Box key={section.id}>
-                <ConfigSection
-                  ref={(el) => {
-                    sectionRefs.current[section.id] = el;
-                  }}
-                  section={section}
-                  config={config}
-                  onUpdate={onConfigUpdate}
-                  onToast={showToast}
-                />
-                {section.id === 'api' && (
-                  <ModelSettingsSection
-                    ref={(el) => {
-                      sectionRefs.current['model-presets'] = el;
-                    }}
-                    config={config}
-                    onUpdate={onConfigUpdate}
-                    onToast={showToast}
-                  />
-                )}
-              </Box>
-            ))}
-          </>
-        )}
-
-        {/* Personality tab */}
-        {activeTab === 1 && <PersonalitySection onToast={showToast} />}
-
-        {/* Chats tab */}
-        {activeTab === 2 && <ChatsSection />}
-
-        {/* Health tab */}
-        {activeTab === 3 && <HealthSection />}
-
-        {/* Memory tab */}
-        {activeTab === 4 && <MemorySection onToast={showToast} />}
-
-        {/* Monitoring tab */}
-        {activeTab === 5 && <MonitoringSection />}
-
-        {/* Recurring tasks tab */}
-        {activeTab === 6 && <RecurringTasksSection />}
+          ))}
+        </Box>
+        {CONFIG_SCHEMA.filter(section => visitedDialogs.has(section.id)).map(section => <ConfigSection
+          key={section.id} ref={element => { sectionRefs.current[section.id] = element; }}
+          section={section} config={config} onUpdate={onConfigUpdate} onToast={showToast}
+          onDirtyChange={markDirty} open={configDialog === section.id} onClose={() => setConfigDialog(null)}
+        />)}
+        {page === 'personality' && <PersonalitySection onToast={showToast} />}
+        {page === 'chats' && <ChatsSection />}
+        {page === 'health' && <HealthSection />}
+        {page === 'memory' && <MemorySection onToast={showToast} />}
+        {page === 'monitoring' && <>
+          <Stack component="nav" aria-label="Разделы мониторинга" direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 2 }}>
+            {[
+              ['monitor-overview', 'Обзор'], ['monitor-deps', 'Сервисы'],
+              ['monitor-ai-usage', 'Расходы AI'], ['monitor-chains', 'Маршруты'],
+              ['monitor-failures', 'Ошибки'],
+            ].map(([id, label]) => <Button key={id} size="small" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' })}>{label}</Button>)}
+          </Stack>
+          <MonitoringSection />
+        </>}
+        {page === 'tasks' && <RecurringTasksSection />}
+        {page === 'analytics' && <ProductAnalyticsSection />}
       </Box>
-      </Box>
-
-      {/* Toast */}
-      <Snackbar open={toast !== null} autoHideDuration={4500} onClose={() => setToast(null)}>
-        <Alert
-          onClose={() => setToast(null)}
-          severity={toast?.severity ?? 'success'}
-          variant="filled"
-          sx={{ width: '100%', maxWidth: 380 }}
-        >
-          {toast?.message}
-        </Alert>
-      </Snackbar>
+      <Menu id="service-menu" anchorEl={serviceMenu} open={Boolean(serviceMenu)} onClose={() => setServiceMenu(null)}>
+        <MenuItem disabled={restarting} onClick={() => { setServiceMenu(null); setRestartOpen(true); }}><ListItemIcon><RestartAltIcon fontSize="small" /></ListItemIcon>Перезапустить бота</MenuItem>
+        <Divider />
+        <MenuItem onClick={() => { setServiceMenu(null); void logout().then(onLogout).catch(() => showToast('Не удалось выйти. Повторите попытку.', 'error')); }}><ListItemIcon><LogoutIcon fontSize="small" /></ListItemIcon>Выйти</MenuItem>
+      </Menu>
+      <Dialog open={restartOpen} onClose={() => setRestartOpen(false)} aria-labelledby="restart-title">
+        <DialogTitle id="restart-title">Перезапустить бота?</DialogTitle>
+        <DialogContent><DialogContentText>Во время перезапуска Кира ненадолго перестанет отвечать. Несохранённые настройки не применятся.</DialogContentText></DialogContent>
+        <DialogActions><Button onClick={() => setRestartOpen(false)}>Отмена</Button><Button variant="contained" onClick={() => void handleRestart()}>Перезапустить</Button></DialogActions>
+      </Dialog>
+      <Snackbar open={toast !== null} autoHideDuration={4500} onClose={() => setToast(null)}><Alert onClose={() => setToast(null)} severity={toast?.severity ?? 'success'} variant="filled" sx={{ maxWidth: 420 }}>{toast?.message}</Alert></Snackbar>
     </Box>
   );
 }

@@ -2,15 +2,18 @@ import type {
   ConfigResponse,
   AiUsageQuery,
   AiUsageSummaryResponse,
+  AiUsageTraceChain,
   HealthExportFormat,
   HealthLogQuery,
   HealthLogsResponse,
   AiPresetName,
   AiPresetResponse,
+  ModelPreferencesResponse,
   MemoryFormPayload,
   MemoryGraphQuery,
   MemoryGraphResponse,
   MemoryQuery,
+  MemoryRecord,
   MemoryResponse,
   MonitoringHealthResponse,
   PersonalityConfig,
@@ -18,29 +21,132 @@ import type {
   RecurringTaskSchedule,
   RecurringTaskStatus,
 } from './types';
+import type { BudgetMode } from '../../ai/budgetMode';
+import type { BackgroundFeature, BackgroundFeatureState } from '../../ai/backgroundFeatures';
 
 export const AUTH_REQUIRED_EVENT = 'kira:auth-required';
 
+export type McpEffect = 'read' | 'external';
+export interface McpServerSettings {
+  description: string; transport: 'http' | 'jsonrpc' | 'stdio'; url?: string;
+  headers?: Record<string, string | null>; command?: string; args?: string[]; env?: Record<string, string | null>;
+  oauth?: { tokenUrl: string; clientId: string; clientSecret: string | null; scope?: string; audience?: string };
+  tools: Record<string, McpEffect>; fixedArguments?: Record<string, unknown>; timeoutMs: number;
+}
+export interface McpConnection { id: string; config: McpServerSettings }
+export interface McpConnectionSettings {
+  revision: string; servers: McpConnection[]; templates: Array<McpConnection & { name: string }>;
+}
+export interface McpConnectionDraft { revision: string; config: McpServerSettings }
+export interface McpProbeResult { success: boolean; toolCount: number; tools: Array<{ name: string; description: string }>; truncated: boolean; resources: boolean }
+async function mcpApi(method = 'GET', data?: McpConnectionDraft | { revision: string }, suffix = '') {
+  const response = await apiFetch(`/api/mcp/servers${suffix}`, { method,
+    ...(data ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } : {}) });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось настроить MCP');
+  return body;
+}
+export function fetchMcpConnections(): Promise<McpConnectionSettings> { return mcpApi(); }
+export function saveMcpConnection(id: string, data: McpConnectionDraft, create = false): Promise<McpConnectionSettings> { return mcpApi(create ? 'POST' : 'PUT', data, `/${encodeURIComponent(id)}`); }
+export function deleteMcpConnection(id: string, revision: string): Promise<McpConnectionSettings> { return mcpApi('DELETE', { revision }, `/${encodeURIComponent(id)}`); }
+export function checkMcpConnection(id: string, data: McpConnectionDraft): Promise<McpProbeResult> { return mcpApi('POST', data, `/${encodeURIComponent(id)}/check`); }
+
+export interface ImageGenerationConfig {
+  settings: { enabled: boolean; model: string; size: string; quality: string };
+  models: string[]; sizes: string[]; qualities: string[];
+  connection: { configured: boolean; baseUrlSource: string; keySource: string };
+  reference: { present: boolean; sha256?: string; source?: 'default' | 'custom' };
+}
+async function imageApi(path: string, init?: RequestInit) {
+  const response = await apiFetch(`/api/image-generation${path}`, init);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Ошибка настройки изображений');
+  return data;
+}
+export function fetchImageGeneration(): Promise<ImageGenerationConfig> { return imageApi(''); }
+export function saveImageGeneration(settings: ImageGenerationConfig['settings']) {
+  return imageApi('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+}
+export function uploadCharacterReference(file: File) {
+  return imageApi('/reference', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
+}
+export function removeCharacterReference() { return imageApi('/reference', { method: 'DELETE' }); }
+export function checkImageConnection(): Promise<{ success: boolean; models: string[] }> { return imageApi('/connection'); }
+
+export interface ImageRecognitionConfig {
+  settings: import('../../ai/imageRecognition').ImageRecognitionSettings;
+  models: Array<{ id: string; label: string; loaded: boolean; loadedIds: string[] }>;
+  connectionError: string | null;
+}
+export async function fetchImageRecognition(): Promise<ImageRecognitionConfig> {
+  const response = await apiFetch('/api/image-recognition');
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Не удалось загрузить настройки распознавания');
+  return data;
+}
+export async function saveImageRecognition(settings: ImageRecognitionConfig['settings']): Promise<{ settings: ImageRecognitionConfig['settings'] }> {
+  const response = await apiFetch('/api/image-recognition', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings }) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || 'Не удалось сохранить настройки распознавания');
+  return data;
+}
+
+const operatorBase = typeof window !== 'undefined' && window.location.pathname.startsWith('/operator/') ? '/operator' : '';
+export interface OperatorAuthContext {
+  csrfToken: string; csrfEnabled: boolean; accountLoginEnabled: boolean;
+  accountAuthorized: boolean; legacyAuthenticated: boolean; accountConsoleUrl: string;
+}
+export async function fetchOperatorAuthContext(): Promise<OperatorAuthContext> {
+  const response = await fetch(operatorBase + '/api/auth/context', { credentials: 'same-origin', cache: 'no-store' });
+  if (!response.ok) throw new Error('Не удалось проверить вход');
+  return response.json();
+}
+let refreshingAccount: Promise<boolean> | undefined;
+function refreshAccountSession(): Promise<boolean> {
+  if (refreshingAccount) return refreshingAccount;
+  refreshingAccount = (async () => {
+    try {
+      const context = await fetchOperatorAuthContext();
+      if (!context.accountLoginEnabled) return false;
+      const configResponse = await fetch('/api/v1/web/config', { credentials: 'same-origin', cache: 'no-store' });
+      if (!configResponse.ok) return false;
+      const config = await configResponse.json();
+      const result = await fetch('/api/v1/web/auth/refresh', { method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': config.csrfToken }, body: JSON.stringify({ version: 1 }) });
+      return result.ok;
+    } catch { return false; }
+  })().finally(() => { refreshingAccount = undefined; });
+  return refreshingAccount;
+}
+
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
-  if (response.status === 401) {
-    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+  const ownApi = typeof input === 'string' && input.startsWith('/api/');
+  const target = ownApi ? operatorBase + input : input;
+  const method = (init?.method || 'GET').toUpperCase();
+  const headers = new Headers(init?.headers);
+  if (ownApi && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const context = await fetchOperatorAuthContext();
+    if (context.csrfEnabled) headers.set('x-csrf-token', context.csrfToken);
   }
+  const options = { ...init, headers };
+  let response = await fetch(target, options);
+  // A 401 is an authorization refusal before the handler. Keep the original
+  // action/body/idempotency key when retrying after canonical account refresh.
+  if (response.status === 401 && ownApi && input !== '/api/login' && !String(input).includes('/operator/link-account')
+    && !String(input).includes('/operator/unlink-account') && await refreshAccountSession()) response = await fetch(target, options);
+  if (response.status === 401) window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
   return response;
 }
 
 export async function login(username: string, password: string) {
-  const r = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  return r.json() as Promise<{ success: boolean; error?: string }>;
+  const response = await apiFetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+  return response.json() as Promise<{ success: boolean; error?: string }>;
 }
-
-export async function logout() {
-  await fetch('/api/logout', { method: 'POST' });
+export async function loginWithAccount() {
+  const response = await apiFetch('/api/operator/login-account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  return response.json() as Promise<{ success: boolean; error?: string }>;
 }
+export async function logout() { await apiFetch('/api/logout', { method: 'POST' }); }
 
 export async function fetchConfig(): Promise<ConfigResponse> {
   const r = await apiFetch('/api/config');
@@ -66,6 +172,50 @@ export async function fetchAiPreset(): Promise<AiPresetResponse> {
   return r.json();
 }
 
+export async function fetchModelPreferences(): Promise<ModelPreferencesResponse> {
+  const r = await apiFetch('/api/model-preferences');
+  if (!r.ok) throw new Error('Не удалось загрузить настройки моделей');
+  return r.json();
+}
+export async function saveModelPreferences(preferences: import('../../ai/modelPreferences').StrategyRequest) {
+  const r = await apiFetch('/api/model-preferences', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(preferences) });
+  return r.json() as Promise<{ success: boolean; error?: string }>;
+}
+
+export async function fetchBudgetMode(): Promise<{ mode: BudgetMode }> {
+  const response = await apiFetch('/api/budget-mode');
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось загрузить режим бюджета');
+  return body;
+}
+
+export async function fetchBackgroundFeatures(): Promise<{ mode: BudgetMode; features: BackgroundFeatureState[] }> {
+  const response = await apiFetch('/api/background-features');
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось загрузить фоновые функции');
+  return body;
+}
+
+export async function saveBackgroundFeature(feature: BackgroundFeature, enabled: boolean): Promise<{ message: string }> {
+  const response = await apiFetch('/api/background-features', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feature, enabled }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось сохранить функцию');
+  return body;
+}
+
+export async function saveBudgetMode(mode: BudgetMode): Promise<{ mode: BudgetMode; message: string }> {
+  const response = await apiFetch('/api/budget-mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || 'Не удалось сохранить режим бюджета');
+  return body;
+}
+
 export async function fetchMonitoringHealth(): Promise<MonitoringHealthResponse> {
   const r = await apiFetch('/api/monitoring/health');
   if (!r.ok) {
@@ -82,6 +232,16 @@ export async function fetchAiUsageSummary(query: AiUsageQuery = {}): Promise<AiU
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
     throw new Error(body.error || 'Failed to load AI usage summary');
+  }
+  return r.json();
+}
+
+export async function fetchAiUsageTraces(query: AiUsageQuery, quickFilter: string, limit: number, offset: number): Promise<{ total: number; chains: AiUsageTraceChain[] }> {
+  const params = toSearchParams({ ...query, quickFilter, limit, offset });
+  const r = await apiFetch(`/api/ai-usage/traces?${params}`);
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || 'Не удалось загрузить цепочки');
   }
   return r.json();
 }
@@ -183,6 +343,13 @@ export async function fetchMemories(query: MemoryQuery = {}, signal?: AbortSigna
     throw new Error(body.error || 'Failed to load memories');
   }
   return r.json();
+}
+
+export async function fetchMemoryRecord(domain: string, id: string, scope: Pick<MemoryQuery, 'profile' | 'userId'>, signal?: AbortSignal): Promise<MemoryRecord> {
+  const params = toSearchParams(scope);
+  const response = await apiFetch(`/api/memory/${encodeURIComponent(domain)}/${encodeURIComponent(id)}?${params}`, { signal });
+  if (!response.ok) throw new Error('Не удалось загрузить полный текст воспоминания');
+  return (await response.json()).record;
 }
 
 export async function fetchMemoryGraph(query: MemoryGraphQuery = {}, signal?: AbortSignal): Promise<MemoryGraphResponse> {

@@ -1,7 +1,10 @@
+import { accountOpenAiFetch } from '../accountPolicy';
 import { OpenAI } from 'openai';
 import { config } from '../../config';
+import { aiRequestOptions } from '../executionScope';
 import { getAiProviderDescriptor } from '../providerMetadata';
 import type { AiProviderAdapter, AiProviderCapabilities } from './types';
+import { gpt6Family, normalizeGpt6Chat, normalizeGpt6Response } from './openaiCompatibility';
 import {
     applyChatTokenParamMode,
     resolveModelCapabilities,
@@ -9,6 +12,7 @@ import {
 
 const OPENAI_CAPABILITIES: AiProviderCapabilities = {
     supportsOpenAiCompatibleTransport: true,
+    supportsNativeResponses: true,
     defaultModelCapabilities: {
         chatTokenParam: 'max_tokens',
         supportsChatCompletions: true,
@@ -23,6 +27,18 @@ const OPENAI_CAPABILITIES: AiProviderCapabilities = {
         supportsOpenAiCompatibleTransport: true,
     },
     modelCapabilityOverrides: {
+        'gpt-6-luna': {
+            chatTokenParam: 'max_completion_tokens',
+            supportsReasoningEffort: true,
+            supportsEmbedding: false,
+            supportsTranscription: false,
+        },
+        'gpt-6.1-sol': {
+            chatTokenParam: 'max_completion_tokens',
+            supportsReasoningEffort: true,
+            supportsEmbedding: false,
+            supportsTranscription: false,
+        },
         'gpt-5.4': {
             chatTokenParam: 'max_completion_tokens',
         },
@@ -36,29 +52,44 @@ const OPENAI_CAPABILITIES: AiProviderCapabilities = {
 };
 
 const openaiClient = new OpenAI({
-    apiKey: config.openAiApiKey || process.env.OPENAI_API_KEY,
+    fetch:accountOpenAiFetch('openai'),
+    apiKey: config.openAiApiKey || process.env.OPENAI_API_KEY || 'missing-openai-api-key',
+    baseURL: process.env.OPENAI_BASE_URL || undefined,
     maxRetries: 0,
 });
+
+function requireOpenAiKey(): void {
+    if (!config.openAiApiKey?.trim() && !process.env.OPENAI_API_KEY?.trim()) {
+        throw Object.assign(new Error('OpenAI API не настроен для этой операции.'), { code: 'provider_not_configured', status: 503 });
+    }
+}
 
 export const openaiProviderAdapter: AiProviderAdapter = {
     provider: 'openai',
     client: openaiClient,
+    async createDecision(params) {
+        requireOpenAiKey();
+        return this.client.post('/decisions', { body: params, timeout: 5_000, maxRetries: 0 });
+    },
     capabilities: OPENAI_CAPABILITIES,
     descriptor: getAiProviderDescriptor('openai'),
     getModelCapabilities(model) {
-        return resolveModelCapabilities(OPENAI_CAPABILITIES, model);
+        const family = gpt6Family(model);
+        return resolveModelCapabilities(OPENAI_CAPABILITIES, family === 'luna' ? 'gpt-6-luna' : family === 'sol' ? 'gpt-6.1-sol' : model);
     },
     normalizeChatParams(model, params) {
         const capabilities = this.getModelCapabilities(model);
-        return applyChatTokenParamMode(params, capabilities.chatTokenParam);
+        return applyChatTokenParamMode(normalizeGpt6Chat(model, params), capabilities.chatTokenParam);
     },
-    async createChatCompletion(model, params) {
+    async createChatCompletion(model, params, generation) {
+        requireOpenAiKey();
         return this.client.chat.completions.create({
-            ...this.normalizeChatParams(model, params),
+            ...this.normalizeChatParams(model, normalizeGpt6Chat(model, params, generation?.reasoningEffort)),
             model,
-        });
+        }, aiRequestOptions());
     },
-    async createResponse(model, params) {
+    async createResponse(model, params, generation) {
+        requireOpenAiKey();
         const capabilities = this.getModelCapabilities(model);
 
         if (!capabilities.supportsResponsesApi) {
@@ -66,11 +97,12 @@ export const openaiProviderAdapter: AiProviderAdapter = {
         }
 
         return this.client.responses.create({
-            ...params,
+            ...normalizeGpt6Response(model, params, generation?.reasoningEffort),
             model,
         });
     },
     async createEmbedding(model, params) {
+        requireOpenAiKey();
         const capabilities = this.getModelCapabilities(model);
         if (!capabilities.supportsEmbedding) {
             throw new Error(`Provider ${this.provider} does not support embeddings`);
@@ -95,6 +127,7 @@ export const openaiProviderAdapter: AiProviderAdapter = {
         };
     },
     async createTranscription(model, params) {
+        requireOpenAiKey();
         const capabilities = this.getModelCapabilities(model);
         if (!capabilities.supportsTranscription) {
             throw new Error(`Provider ${this.provider} does not support transcription`);

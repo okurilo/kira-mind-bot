@@ -2,20 +2,28 @@
 
 const express = require('express');
 const compression = require('compression');
-const session = require('express-session');
+const { createOperatorAuth } = require('./operatorAuth');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const { Pool } = require('pg');
 const { AI_PRESETS, AI_PRESET_NAMES, parseAiPresetName } = require('./aiPresetRegistry');
+const { registerModelPreferenceRoutes } = require('./modelPreferences');
+const { registerBudgetModeRoutes } = require('./budgetMode');
+const { registerBackgroundFeatureRoutes } = require('./backgroundFeatures');
+const { registerLocalModelRoutes, readLocalRoutes, resolveLocalPreset } = require('./localModels');
+const { registerImageGenerationRoutes } = require('./imageGeneration');
+const { registerImageRecognitionRoutes } = require('./imageRecognition');
+const { registerMcpRoutes } = require('./mcp');
 const {
   DEFAULT_MEMORY_EMBEDDING_PROFILE,
   getMemoryEmbeddingProfile,
   parseMemoryEmbeddingProfileName,
 } = require('./memoryEmbeddingProfileRegistry');
 const { createMonitoringService } = require('./monitoring');
-const { buildAiUsageSummary } = require('./aiUsageAnalytics');
+const { buildAiUsageSummary, buildAiUsageTracePage } = require('./aiUsageAnalytics');
+const { registerProductAnalyticsRoutes } = require('./productAnalytics');
 const { getPresetAvailabilityForMemoryProfile, getProviderDescriptor } = require('./presetAvailability');
 const { hasLegacyDigitalBiography } = require('../utils/legacyPersonalitySanitizer');
 const { createMemoryEmbeddingHttp } = require('../ai/memoryEmbeddingHttp');
@@ -65,14 +73,12 @@ const SESSION_COOKIE_INSTANCE = String(KIRA_INSTANCE_NAME)
   .trim()
   .replace(/[^A-Za-z0-9._-]/g, '_') || 'kira-mind-bot';
 const SESSION_COOKIE_NAME = `kira.sid.${SESSION_COOKIE_INSTANCE}`;
-
-// Rate limiting
-const loginAttempts = new Map();
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_MS = 10 * 60 * 1000;
+const operatorAuth = createOperatorAuth({ username: ADMIN_USERNAME, password: ADMIN_PASSWORD, sessionSecret: SESSION_SECRET, cookieName: SESSION_COOKIE_NAME });
 
 const SENSITIVE_KEYS = new Set([
-  'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'ZAI_API_KEY', 'ELEVENLABS_API_KEY', 'KIRA_BOT_TOKEN',
+  'OPENAI_IMAGE_API_KEY',
+  'LM_STUDIO_API_KEY',
+  'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'ZAI_API_KEY', 'KIMI_API_KEY', 'ELEVENLABS_API_KEY', 'KIRA_BOT_TOKEN',
   'KIRA_ALLOWED_USER_ID',
   'DB_PASSWORD', 'QDRANT_API_KEY', 'TELEGRAM_API_HASH',
   'TELEGRAM_SESSION_STRING', 'IDEOGRAM_API_KEY', 'GOOGLE_MAPS_API_KEY',
@@ -84,7 +90,9 @@ const ALLOWED_TIMEZONES = new Set(COMMON_TIMEZONES.map((item) => item.value));
 const MEMORY_EMBEDDING_PROFILE_SETTING_KEY = 'MEMORY_EMBEDDING_PROFILE';
 
 const EDITABLE_KEYS = new Set([
-  'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'ZAI_API_KEY', 'KIRA_BOT_TOKEN',
+  'OPENAI_IMAGE_API_KEY', 'OPENAI_IMAGE_BASE_URL',
+  'OPENAI_BASE_URL', 'LM_STUDIO_BASE_URL', 'LM_STUDIO_MODEL', 'LM_STUDIO_API_KEY',
+  'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'ZAI_API_KEY', 'KIMI_API_KEY', 'KIRA_BOT_TOKEN',
   'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID', 'ELEVENLABS_VOICE_NAME',
   'ELEVENLABS_MODEL_ID', 'ELEVENLABS_OUTPUT_FORMAT',
   'ELEVENLABS_VOICE_STABILITY', 'ELEVENLABS_VOICE_SIMILARITY_BOOST',
@@ -161,11 +169,15 @@ function buildMemoryProfileSource(technicalPath, appliesImmediately, description
   );
 }
 
-function buildAiPresetResponseEntry(name, vars, memoryProfileName) {
-  const preset = AI_PRESETS[name];
+function buildAiPresetResponseEntry(name, vars, memoryProfileName, localRoutes) {
+  const preset = resolveLocalPreset(AI_PRESETS[name], localRoutes);
   const availability = getPresetAvailabilityForMemoryProfile(preset, vars, memoryProfileName);
   return {
     ...preset,
+    models: Object.fromEntries(Object.entries(preset.models).map(([task, ref]) => [task, {
+      ...ref,
+      model: localRoutes?.[ref.localRole]?.model || (ref.modelEnvKey && (vars[ref.modelEnvKey] || process.env[ref.modelEnvKey])) || ref.model,
+    }])),
     ...availability,
   };
 }
@@ -278,65 +290,25 @@ function dockerRequest(method, path) {
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
+app.use(operatorAuth.prepare);
 app.use(compression({ threshold: 1024 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use(session({
-  name: SESSION_COOKIE_NAME,
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 8 * 3600 * 1000, httpOnly: true, sameSite: 'strict' },
-}));
+app.use(operatorAuth.session);
+app.use(operatorAuth.csrfGuard);
+const requireAuth = operatorAuth.requireAuth;
+operatorAuth.register(app);
 
-function requireAuth(req, res, next) {
-  if (req.session.authenticated) return next();
-  res.status(401).json({ error: 'Не авторизован' });
-}
-
-function rateLimit(req, res, next) {
-  const ip = req.ip || req.socket.remoteAddress;
-  const entry = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
-  if (entry.lockedUntil > Date.now()) {
-    const mins = Math.ceil((entry.lockedUntil - Date.now()) / 60000);
-    return res.status(429).json({ error: `Слишком много попыток. Попробуйте через ${mins} мин.` });
-  }
-  next();
-}
-
-// ── API routes ────────────────────────────────────────────────────────────────
-
-app.post('/api/login', rateLimit, (req, res) => {
-  const { username, password } = req.body;
-  const ip = req.ip || req.socket.remoteAddress;
-
-  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
-    req.session.authenticated = true;
-    loginAttempts.delete(ip);
-    return res.json({ success: true });
-  }
-
-  const entry = loginAttempts.get(ip) || { count: 0, lockedUntil: 0 };
-  entry.count++;
-  if (entry.count >= MAX_ATTEMPTS) entry.lockedUntil = Date.now() + LOCKOUT_MS;
-  loginAttempts.set(ip, entry);
-  res.status(401).json({ error: 'Неверный логин или пароль' });
-});
+// Existing operator-password recovery stays separate from account SSO.
+app.post('/api/login', operatorAuth.rateLimit, operatorAuth.login);
 
 app.post('/api/logout', (req, res) => {
   req.session.destroy(() => res.json({ success: true }));
 });
 
 app.get('/api/config', requireAuth, async (req, res) => {
-  const vars = readEnvFile();
-  const result = {};
-  for (const [key, value] of Object.entries(vars)) {
-    if (SENSITIVE_KEYS.has(key) && value && value.length > 6) {
-      result[key] = { value: value.slice(0, 4) + '••••', masked: true };
-    } else {
-      result[key] = { value, masked: false };
-    }
-  }
+  const vars = require('./configValues').mergeEditableDefaults(readEnvFile(), process.env, EDITABLE_KEYS);
+  const result = require('./configValues').maskConfigValues(vars, SENSITIVE_KEYS);
   for (const [key, value] of Object.entries(SYSTEM_DEFAULT_CONFIG)) {
     if (!(key in result)) {
       result[key] = { value, masked: false, source: 'system_default' };
@@ -391,6 +363,17 @@ async function readMemoryEmbeddingProfileState(pool, vars) {
   };
 }
 
+registerModelPreferenceRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile,
+  memoryProfile: async (pool, vars) => (await readMemoryEmbeddingProfileState(pool, vars)).profile.name });
+
+registerBudgetModeRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable });
+registerBackgroundFeatureRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
+registerLocalModelRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
+registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
+registerImageRecognitionRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
+registerMcpRoutes(app, { requireAuth, runtimeDir: process.env.KIRA_RUNTIME_DATA_DIR || path.join(__dirname, '..', 'data'),
+  accountMode: process.env.KIRA_MCP_ACCOUNT_MODE === 'true' });
+
 app.get('/api/ai-preset', requireAuth, async (_req, res) => {
   const vars = readEnvFile();
   const envDefaultPreset = parseAiPresetName(vars.AI_MODEL_PRESET || process.env.AI_MODEL_PRESET) || 'gpt-balanced';
@@ -400,7 +383,8 @@ app.get('/api/ai-preset', requireAuth, async (_req, res) => {
     const result = await pool.query('SELECT value FROM bot_settings WHERE key = $1', ['AI_MODEL_PRESET']);
     const storedPreset = parseAiPresetName(result.rows[0]?.value);
     const memoryEmbeddingProfile = await buildMemoryEmbeddingProfileStatus(pool, vars);
-    const availablePresets = AI_PRESET_NAMES.map((name) => buildAiPresetResponseEntry(name, vars, memoryEmbeddingProfile.name));
+    const localRoutes = await readLocalRoutes(pool, { ...process.env, ...vars });
+    const availablePresets = AI_PRESET_NAMES.map((name) => buildAiPresetResponseEntry(name, vars, memoryEmbeddingProfile.name, localRoutes));
     const hasRuntimeOverride = Boolean(storedPreset);
     const configuredPresetName = storedPreset || envDefaultPreset;
     const activeSourceSummary = hasRuntimeOverride
@@ -441,12 +425,13 @@ app.post('/api/ai-preset', requireAuth, async (req, res) => {
   try {
     await ensureBotSettingsTable(pool);
     const memoryProfileState = await readMemoryEmbeddingProfileState(pool, vars);
-    const availability = getPresetAvailabilityForMemoryProfile(AI_PRESETS[preset], vars, memoryProfileState.profile.name);
+    const localRoutes = await readLocalRoutes(pool, { ...process.env, ...vars });
+    const availability = getPresetAvailabilityForMemoryProfile(resolveLocalPreset(AI_PRESETS[preset], localRoutes), vars, memoryProfileState.profile.name);
     if (!availability.enabled) {
       return res.status(400).json({ error: availability.unavailableReason || 'AI preset недоступен без обязательных API ключей' });
     }
     await pool.query(
-      'INSERT INTO bot_settings (key, value, "updatedAt") VALUES ($1, $2, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = now()',
+      'WITH removed AS (DELETE FROM bot_settings WHERE key = \'AI_MODEL_POLICY\') INSERT INTO bot_settings (key, value, "updatedAt") VALUES ($1, $2, now()) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, "updatedAt" = now()',
       ['AI_MODEL_PRESET', preset]
     );
     res.json({ success: true, configuredPresetName: preset, message: 'AI preset сохранён. Бот подхватит его без перезапуска.' });
@@ -458,6 +443,11 @@ app.post('/api/ai-preset', requireAuth, async (req, res) => {
 });
 
 app.post('/api/config', requireAuth, async (req, res) => {
+  for (const key of ['OPENAI_BASE_URL', 'OPENAI_IMAGE_BASE_URL']) {
+    if (Object.hasOwn(req.body, key) && !require('./configValues').isValidProxyUrl(req.body[key])) {
+      return res.status(400).json({ error: 'Введите URL прокси с http:// или https:// без логина, пароля и параметров запроса.' });
+    }
+  }
   const envUpdates = {};
   const runtimeUpdates = {};
   for (const [key, value] of Object.entries(req.body)) {
@@ -516,17 +506,39 @@ app.post('/api/restart/:service', requireAuth, async (req, res) => {
 
 // ── Chats ─────────────────────────────────────────────────────────────────────
 
-function createDbPool() {
+function createDbPool(database) {
   const vars = readEnvFile();
   return new Pool({
     host: vars.DB_HOST || 'postgres',
     port: Number(vars.DB_PORT || 5432),
     user: vars.DB_USER || 'postgres',
     password: vars.DB_PASSWORD,
-    database: vars.DB_NAME || 'KiraMind',
+    database: database || vars.DB_NAME || 'KiraMind',
     connectionTimeoutMillis: 5000,
+    statement_timeout: 15000,
   });
 }
+
+async function analyticsSources() {
+  const vars = readEnvFile();
+  const platform = createDbPool(vars.KIRA_PLATFORM_DB_NAME || 'KiraPlatform');
+  try {
+    const exists = await platform.query("SELECT to_regclass('kira_analytics_sources') AS name");
+    if (exists.rows[0]?.name) {
+      const { rows } = await platform.query(`SELECT a.id,a.created_at,s.database_name,s.imported,m.started_at
+        FROM kira_accounts a LEFT JOIN kira_analytics_sources s ON s.account_id=a.id CROSS JOIN kira_analytics_meta m WHERE m.id=1`);
+      if (rows.some(row => row.database_name && !/^[A-Za-z0-9_-]{1,63}$/.test(row.database_name))) throw new Error('Invalid analytics source');
+      return rows.map(row => ({ id: row.id, registeredAt: row.imported ? null : row.created_at,
+        cohortStartedAt: row.started_at, pool: row.database_name ? createDbPool(row.database_name) : null }));
+    }
+  } catch (error) {
+    if (error.code !== '3D000') throw error;
+    if (vars.KIRA_ACCOUNTS_MODE === 'true') throw error;
+  } finally { await platform.end(); }
+  return [{ id: 'instance', registeredAt: null, pool: createDbPool() }];
+}
+
+registerProductAnalyticsRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, analyticsSources });
 
 app.get('/api/chats', requireAuth, async (_req, res) => {
   const pool = createDbPool();
@@ -1003,6 +1015,7 @@ async function createMemoryEmbedding(text, memoryProfile) {
   const vars = readEnvFile();
   return createMemoryEmbeddingHttp(text, memoryProfile, {
     fetchImpl: fetch,
+    env: { ...process.env, ...vars },
     resolveApiKey(provider) {
       return getMemoryEmbeddingProviderKey(provider, vars);
     },
@@ -1678,6 +1691,10 @@ app.get('/api/memory/graph', requireAuth, async (req, res) => {
   }
 });
 
+require('./memoryDetail').registerMemoryDetailRoute(app, {
+  requireAuth, getMemoryProfile, getMemoryUserId, normalizeMemoryDomain, fetchExistingMemoryPayload, normalizeMemoryPoint,
+});
+
 app.get('/api/memory', requireAuth, async (req, res) => {
   try {
     const profile = getMemoryProfile(req.query.profile);
@@ -2318,6 +2335,17 @@ app.get('/api/ai-usage/summary', requireAuth, async (req, res) => {
     res.json(summary);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : `Ошибка AI usage analytics: ${err.message}` });
+  } finally {
+    await pool.end().catch(() => {});
+  }
+});
+
+app.get('/api/ai-usage/traces', requireAuth, async (req, res) => {
+  const pool = createDbPool();
+  try {
+    res.json(await buildAiUsageTracePage({ pool, query: req.query, now: new Date() }));
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : `Ошибка загрузки цепочек: ${err.message}` });
   } finally {
     await pool.end().catch(() => {});
   }

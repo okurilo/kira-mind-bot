@@ -1,4 +1,7 @@
+import { accountOpenAiFetch } from '../accountPolicy';
 import { OpenAI } from 'openai';
+import { aiRequestOptions } from '../executionScope';
+import { assertAiResponseAllowed } from '../contentSafety';
 import { getAiProviderDescriptor } from '../providerMetadata';
 import type { AiProviderAdapter, AiProviderCapabilities, ResponseResult } from './types';
 import providerCapabilityOverrides from '../provider-capability-overrides.json';
@@ -32,6 +35,7 @@ const ZAI_CAPABILITIES: AiProviderCapabilities = {
 };
 
 const zaiClient = new OpenAI({
+    fetch:accountOpenAiFetch('zai'),
     apiKey: process.env.ZAI_API_KEY || 'missing-zai-api-key',
     baseURL: 'https://api.z.ai/api/paas/v4/',
     maxRetries: 0,
@@ -58,7 +62,7 @@ export const zaiProviderAdapter: AiProviderAdapter = {
         return this.client.chat.completions.create({
             ...this.normalizeChatParams(model, params),
             model,
-        });
+        }, aiRequestOptions());
     },
     async createResponse(model, params) {
         const messages = convertResponsesInputToChatMessages(params)
@@ -76,6 +80,7 @@ export const zaiProviderAdapter: AiProviderAdapter = {
             max_tokens: typeof params.max_output_tokens === 'number' ? params.max_output_tokens : undefined,
         });
 
+        assertAiResponseAllowed(result);
         return {
             id: result.id,
             object: 'response',

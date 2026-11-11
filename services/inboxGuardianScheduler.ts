@@ -9,6 +9,7 @@ import { parseLLMJson } from "../utils";
 import { getProactiveChatId } from "../utils/allowedUserChatStore";
 import { getActiveBotProfile } from "../utils/botIdentity";
 import { getSetting, setSetting } from "./botSettingsService";
+import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
 import { esc, heading, paragraph, footer, RichBlock, sendStructured, checklist } from "../utils/richMessage";
 
 const CHECK_INTERVAL_MS = 60_000;
@@ -187,7 +188,7 @@ function buildGuardianPrompt(
         ? "Ты фильтр своевременной дневной рефлексии персонального Telegram-ассистента."
         : "Ты вечерний Inbox Guardian персонального Telegram-ассистента.";
     const focus = options.focusMessageIds?.size
-        ? `\nАнализируй новый фрагмент с message ID: ${[...options.focusMessageIds].join(", ")}. Каждый выбранный пункт обязан ссылаться хотя бы на один из этих ID.`
+        ? `\nАнализируй новый входящий фрагмент с message ID: ${[...options.focusMessageIds].join(", ")}. Каждый выбранный пункт обязан ссылаться хотя бы на один из этих ID и описывать сигнал собеседника, а не исходящую реплику владельца.`
         : "";
     return `${mode}
 
@@ -409,20 +410,33 @@ export function selectDaytimeContext(
         .sort((a, b) => a.date.getTime() - b.date.getTime());
 }
 
+export function selectIncomingDaytimeFocusIds(
+    messages: StoredMessage[],
+    currentMessageIds: number[],
+): Set<number> {
+    const requestedIds = new Set(currentMessageIds.filter(Number.isInteger));
+    return new Set(
+        messages
+            .filter(message => !message.isOwn && requestedIds.has(message.id))
+            .map(message => message.id),
+    );
+}
+
 export async function sendDaytimeReflection(
     bot: Bot<BotContext>,
     input: { chatId: string; currentMessageIds: number[] },
 ): Promise<boolean> {
     if (
         getActiveBotProfile() !== "KiraMindBot"
-        || !config.daytimeReflectionEnabled
+        || !await isBackgroundFeatureEnabled('daytimeReflection')
         || inProactiveQuietHours(new Date())
     ) return false;
-    const focusIds = new Set(input.currentMessageIds.filter(Number.isInteger));
+    const storedMessages = MessageStore.getInstance().getMessages(input.chatId);
+    const focusIds = selectIncomingDaytimeFocusIds(storedMessages, input.currentMessageIds);
     if (focusIds.size === 0) return false;
 
     const messages = selectDaytimeContext(
-        MessageStore.getInstance().getMessages(input.chatId),
+        storedMessages,
         focusIds,
     );
     const lastIncoming = lastWhere(messages, message => !message.isOwn);
@@ -499,6 +513,7 @@ async function runGuardian(bot: Bot<BotContext>): Promise<void> {
     isRunning = true;
 
     try {
+        if (!await isBackgroundFeatureEnabled('inboxGuardian')) return;
         const dateKey = todayDateKey();
         const lastRunDate = await getSetting(LAST_RUN_SETTING_KEY, "");
         if (lastRunDate === dateKey) return;
@@ -531,9 +546,6 @@ export function startInboxGuardianScheduler(bot: Bot<BotContext>): void {
         return;
     }
 
-    if (!config.inboxGuardianEnabled) {
-        return;
-    }
 
     if (timer) clearInterval(timer);
 

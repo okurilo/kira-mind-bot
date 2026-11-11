@@ -1,7 +1,8 @@
+import { generatedImageInput, generatedImageHistoryText } from "../utils/generatedImage";
 import fs from "fs";
 import path from "path";
 import { Bot, InputFile } from "grammy";
-import type { BotContext, SessionData } from "../types";
+import type { BotContext, SentMessageContext, SessionData } from "../types";
 import type { RecurringTask } from "../types/recurringTaskTypes";
 import { processMessage } from "../orchestrator";
 import { RecurringTaskRepository } from "./RecurringTaskRepository";
@@ -10,6 +11,7 @@ import {
     appendPersistedHistory,
     appendPersistedSentMessageContext,
     mergePersistedBackgroundContinuation,
+    BackgroundContinuationConflictError,
 } from "./SessionStorage";
 import { saveRemindersFromResult } from "../handlers/shared";
 import { computeFollowingRecurringRun, formatRecurringSchedule } from "../utils/recurringTaskSchedule";
@@ -20,6 +22,8 @@ import {
     normalizeRecurringExecutionPrompt,
 } from "../utils/recurringTaskPrompt";
 import { esc, footer, heading, paragraph, sendStructured } from "../utils/richMessage";
+import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
+import { config } from '../config';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_RESULT_LENGTH = 20_000;
@@ -32,6 +36,10 @@ const MAX_CONCURRENT_TASKS = 3;
 let timer: NodeJS.Timeout | undefined;
 let polling = false;
 const runningTaskIds = new Set<string>();
+
+class RuntimeExecutionFailure extends Error {
+    constructor(readonly result: Awaited<ReturnType<typeof processMessage>>) { super(`Runtime status: ${result.operationStatus}`); }
+}
 
 function initialSession(): SessionData {
     return {
@@ -49,7 +57,11 @@ async function buildBackgroundContext(
     bot: Bot<BotContext>,
     task: RecurringTask,
 ): Promise<BotContext> {
-    const persisted = await new TypeORMSessionStorage().read(String(task.chatId));
+    const ledgerKey = `task:${task.chatId}:${task.id}`;
+    const [persisted, ledger] = await Promise.all([
+        new TypeORMSessionStorage().read(String(task.chatId)),
+        new TypeORMSessionStorage(true).read(ledgerKey),
+    ]);
     const contextHistory = (task.contextHistory ?? []).map((item) => ({
         ...item,
         timestamp: new Date(task.createdAt),
@@ -57,6 +69,8 @@ async function buildBackgroundContext(
     const session: SessionData = {
         ...initialSession(),
         ...(persisted ?? {}),
+        agentRuntime: ledger?.agentRuntime,
+        agentRuntimePending: undefined,
         messageHistory: contextHistory.slice().reverse(),
         dialogueSummary: "",
         lastSummarizedIndex: -1,
@@ -65,6 +79,7 @@ async function buildBackgroundContext(
         isAllowedUser: true,
         lastIntentDedup: undefined,
         activePersonContext: undefined,
+        memoryRecallFocus: undefined,
         pendingImplicitReminder: undefined,
         pendingMemoryGap: undefined,
         pendingBrowserTask: undefined,
@@ -103,7 +118,13 @@ async function buildBackgroundContext(
             first_name: "Владелец",
         },
         session,
+        agentRuntimeStorageKey: ledgerKey,
+        agentRuntimeRequestKey: `${task.id}:${new Date(task.nextRunAt).toISOString()}`,
         api,
+        persistOutgoingImageContext: async (context: SentMessageContext) => {
+            await appendPersistedHistory(task.chatId, 'bot', context.text, { kind: 'image' });
+            await appendPersistedSentMessageContext(task.chatId, context);
+        },
         reply: (text: string, options?: any) => api.sendMessage(task.chatId, text, options),
         replyWithPhoto: (photo: any, options?: any) => api.sendPhoto(task.chatId, photo, options),
         replyWithDocument: (document: any, options?: any) => api.sendDocument(task.chatId, document, options),
@@ -141,8 +162,46 @@ async function sendRecurringResult(
         });
     }
 
-    if (result.imageGenerated && result.generatedImageUrl) {
-        await bot.api.sendPhoto(task.chatId, result.generatedImageUrl);
+    await sendRecurringArtifacts(bot, task, result);
+    await (await import('./productAnalytics')).recordBackgroundDelivery('recurring', 'action', config.allowedUserId,
+        `${task.id}:${messageId}`, Date.now());
+}
+
+async function sendRecurringArtifacts(bot: Bot<BotContext>, task: RecurringTask, result: Awaited<ReturnType<typeof processMessage>>): Promise<void> {
+    if (result.artifacts?.length) {
+        for (const artifact of result.artifacts) {
+            if (artifact.kind === 'image') {
+                const input = generatedImageInput({ generatedImagePath: artifact.path, generatedImageUrl: artifact.url });
+                if (input) {
+                    const photo = await bot.api.sendPhoto(task.chatId, input);
+                    const description = generatedImageHistoryText(artifact);
+                    await appendPersistedHistory(task.chatId, 'bot', description, { kind: 'image' });
+                    await appendPersistedSentMessageContext(task.chatId, {
+                        messageId: photo.message_id,
+                        text: description,
+                        kind: 'image',
+                        delivery: 'photo',
+                        createdAt: Date.now(),
+                    });
+                }
+            } else if (artifact.path) {
+                try { await bot.api.sendDocument(task.chatId, new InputFile(artifact.path, artifact.filename || path.basename(artifact.path)), artifact.caption ? { caption: artifact.caption } : undefined); }
+                finally { fs.promises.unlink(artifact.path).catch(() => {}); }
+            }
+        }
+        return;
+    }
+    if (result.imageGenerated && generatedImageInput(result)) {
+        const photo = await bot.api.sendPhoto(task.chatId, generatedImageInput(result)!);
+        const description = generatedImageHistoryText(result);
+        await appendPersistedHistory(task.chatId, 'bot', description, { kind: 'image' });
+        await appendPersistedSentMessageContext(task.chatId, {
+            messageId: photo.message_id,
+            text: description,
+            kind: 'image',
+            delivery: 'photo',
+            createdAt: Date.now(),
+        });
     }
     if (result.documentFilePath) {
         const filename = result.documentFilename || path.basename(result.documentFilePath);
@@ -175,17 +234,19 @@ async function sendRecurringFailure(
     error: string,
     paused: boolean,
     autoPaused: boolean,
+    immediatePause = false,
+    keyboard?: Awaited<ReturnType<typeof processMessage>>['keyboard'],
 ): Promise<void> {
     await sendStructured(bot.api as any, task.chatId, [
         heading(`⚠️ ${esc(task.title)}`, 3),
-        paragraph(autoPaused
+        paragraph(immediatePause ? 'Регулярная задача приостановлена: требуется проверка результата или ответ владельца.' : autoPaused
             ? "Регулярная задача три раза подряд завершилась ошибкой и поставлена на паузу."
             : "Не получилось выполнить регулярную задачу в этот раз."),
         paragraph(`<b>Ошибка:</b> ${esc(error)}`),
         footer(paused
             ? "Задача на паузе. Исправь её или возобнови через /tasks."
             : "Следующая попытка останется в обычном расписании."),
-    ]);
+    ], keyboard ? { replyMarkup: keyboard } : undefined);
 }
 
 export async function executeRecurringTask(
@@ -223,8 +284,17 @@ export async function executeRecurringTask(
         if (result.reminderCreated && !isExplicitReminderRequest(executionPrompt)) {
             throw new Error("Вложенное напоминание заблокировано внутри регулярной задачи.");
         }
-        await mergePersistedBackgroundContinuation(task.chatId, ctx.session, startedAt);
+        try {
+            await mergePersistedBackgroundContinuation(task.chatId, ctx.session, startedAt);
+        } catch (error) {
+            if (!(error instanceof BackgroundContinuationConflictError)) throw error;
+            result.responseText = `${result.responseText}\n\n${error.message}`;
+            result.operationStatus = 'needs_input';
+            result.keyboard = undefined;
+            throw new RuntimeExecutionFailure(result);
+        }
         await saveRemindersFromResult(ctx, result);
+        if (result.operationStatus && result.operationStatus !== 'ok') throw new RuntimeExecutionFailure(result);
         await sendRecurringResult(bot, task, result);
         await appendPersistedHistory(
             task.chatId,
@@ -243,9 +313,11 @@ export async function executeRecurringTask(
         });
         console.info(`[recurring-task] event=completed id=${task.id} next=${nextRunAt.toISOString()}`);
     } catch (cause) {
-        const error = cause instanceof Error ? cause.message : String(cause);
+        const runtimeFailure = cause instanceof RuntimeExecutionFailure ? cause.result : undefined;
+        const error = runtimeFailure ? runtimeFailure.responseText : cause instanceof Error ? cause.message : String(cause);
         const consecutiveFailures = task.consecutiveFailures + 1;
-        const autoPaused = consecutiveFailures >= FAILURE_PAUSE_THRESHOLD;
+        const immediatePause = runtimeFailure?.operationStatus === 'unknown' || runtimeFailure?.operationStatus === 'needs_input';
+        const autoPaused = immediatePause || consecutiveFailures >= FAILURE_PAUSE_THRESHOLD;
         let nextRunAt: Date;
         try {
             nextRunAt = computeFollowingRecurringRun(task.schedule, scheduledFor, new Date(), task.timezone);
@@ -261,10 +333,11 @@ export async function executeRecurringTask(
             pauseAfterFailure: autoPaused,
         });
         const paused = autoPaused || failedTask?.status === "paused";
-        await sendRecurringFailure(bot, task, error.slice(0, 500), paused, autoPaused).catch((notifyError) => {
+        await sendRecurringFailure(bot, task, error.slice(0, 1800), paused, autoPaused, immediatePause, runtimeFailure?.keyboard).catch((notifyError) => {
             console.error("[recurring-task] failure notification failed:", notifyError);
         });
-        console.error(`[recurring-task] event=failed id=${task.id} failures=${consecutiveFailures}`, cause);
+        if (runtimeFailure) await sendRecurringArtifacts(bot, task, runtimeFailure).catch(() => console.error('[recurring-task] partial artifact delivery failed'));
+        console.error(`[recurring-task] event=failed id=${task.id} failures=${consecutiveFailures}`, runtimeFailure ? { status: runtimeFailure.operationStatus } : cause);
     } finally {
         clearInterval(heartbeat);
     }
@@ -274,6 +347,7 @@ async function poll(bot: Bot<BotContext>): Promise<void> {
     if (polling) return;
     polling = true;
     try {
+        if (!await isBackgroundFeatureEnabled('recurringTasks')) return;
         const availableSlots = Math.max(0, MAX_CONCURRENT_TASKS - runningTaskIds.size);
         if (availableSlots === 0) return;
         const tasks = await RecurringTaskRepository.claimDue(new Date(), availableSlots);

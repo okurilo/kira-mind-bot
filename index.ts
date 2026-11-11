@@ -12,10 +12,13 @@ import { NegotiationStore } from "./stores/NegotiationStore";
 import { getVectorService } from "./services/VectorServiceFactory";
 import { devLog } from "./utils";
 import { AppDataSource } from "./data-source";
+import { ensureWorkoutSchema } from './services/workouts/store';
 import { ReminderRepository } from "./services/ReminderRepository";
 import { getTelegramMenuCommands } from "./capabilities";
 import { warmAiPresetCache } from "./services/aiRuntimeConfigService";
+import { getBudgetMode } from "./services/budgetModeService";
 import { startRuntimeHealthServer } from "./services/runtimeHealthServer";
+import { startExternalApiServer } from "./services/externalApiServer";
 import { startKiraLifeScheduler } from "./services/kiraLifeScheduler";
 import { startDmReportScheduler } from "./services/dmReportScheduler";
 import { startMemoryInsightScheduler } from "./services/memoryInsightScheduler";
@@ -27,8 +30,10 @@ import { startChatGroupTracker } from "./services/chatGroupTracker";
 import { startChatPromptWatchPolling } from "./services/chatPromptWatchers";
 import { startInboxGuardianScheduler } from "./services/inboxGuardianScheduler";
 import { startRecurringTaskScheduler } from "./services/recurringTaskScheduler";
+import { registerDialogueLifecycle, startDialogueJobScheduler } from './services/dialogueJobs';
 import { initReflectionMode } from "./services/reflectionModeService";
 import { REACTIONS_ENABLED, ALLOWED_REACTIONS } from "./handlers/shared";
+import { isApiOnlyRuntime } from './utils/runtimeIdentity';
 
 
 // Загрузка переменных окружения
@@ -39,9 +44,10 @@ const bot = createBot();
 setBotRef(bot);
 setBotApi(bot.api);
 console.log('🤖 Бот создан успешно');
-startRuntimeHealthServer();
+if (process.env.KIRA_RUNTIME_HEALTH_DISABLED !== 'true') startRuntimeHealthServer();
 
 // Регистрация всех обработчиков
+registerDialogueLifecycle(bot);
 registerForwardedTextGuard(bot);
 registerCommandHandlers(bot);
 console.log('⚙️ Обработчики команд зарегистрированы');
@@ -98,11 +104,14 @@ async function startBot() {
 
         console.log("🗄️  Инициализация базы данных...");
         await AppDataSource.initialize();
+        if (!process.env.KIRA_TENANT_ID && process.env.KIRA_DATABASE_SYNC !== 'false') await AppDataSource.transaction(ensureWorkoutSchema);
+        await (await import('./services/productAnalytics')).initializeProductAnalytics();
         console.log("✅ База данных подключена");
 
         console.log("🤖 Загрузка runtime AI preset...");
         const activeAiPreset = await warmAiPresetCache();
         console.log("✅ Runtime AI preset загружен:", activeAiPreset);
+        console.log("💰 Режим бюджета:", await getBudgetMode(true));
 
         console.log("📅 Загрузка активных напоминаний из БД...");
         const activeReminders = await ReminderRepository.loadActive();
@@ -113,6 +122,8 @@ async function startBot() {
 
         console.log("🔗 Инициализация векторного сервиса...");
         await initializeVectorService();
+
+        const apiServer = await startExternalApiServer(bot);
 
         console.log("🎯 Запуск прослушивания событий...");
         startKiraLifeScheduler(bot);
@@ -125,10 +136,30 @@ async function startBot() {
         startMorningDigestScheduler(bot);
         startInboxGuardianScheduler(bot);
         startRecurringTaskScheduler(bot);
+        startDialogueJobScheduler(bot);
         startChatGroupTracker(bot);
         startChatPromptWatchPolling(bot.api);
-        await bot.api.setMyCommands(getTelegramMenuCommands());
-        await bot.start();
+        if(isApiOnlyRuntime()){
+            const address=apiServer?.address();
+            if(!address || typeof address==='string')throw new Error('API-only runtime needs its API');
+            process.send?.({type:'kira-ready',port:address.port});
+        }else if (process.env.KIRA_TENANT_ID) {
+            await bot.api.setMyCommands(getTelegramMenuCommands());
+            const offset = Number(process.env.KIRA_TELEGRAM_UPDATE_OFFSET);
+            if (Number.isSafeInteger(offset) && offset > 0) {
+                await bot.api.getUpdates({ offset, timeout: 0, limit: 1 });
+            }
+            await bot.start({
+                allowed_updates: ['message', 'edited_message', 'callback_query', 'message_reaction', 'message_reaction_count'],
+                onStart: () => {
+                    const address = apiServer?.address();
+                    if (address && typeof address !== 'string') process.send?.({ type: 'kira-ready', port: address.port });
+                },
+            });
+        } else {
+            await bot.api.setMyCommands(getTelegramMenuCommands());
+            await bot.start();
+        }
 
         console.log("✅ Бот успешно запущен и готов к работе!");
         console.log("📡 Бот ожидает сообщения...");
@@ -143,3 +174,20 @@ async function startBot() {
 
 console.log("🔄 Инициализация завершена, запуск бота...");
 startBot();
+
+// Workers must not outlive the account manager that owns their API and polling lease.
+if (process.env.KIRA_TENANT_ID) {
+    let stopping = false;
+    const stop = async () => {
+        if (stopping) return;
+        stopping = true;
+        const timeout = setTimeout(() => process.exit(1), 4000);
+        try {
+            if (bot.isRunning()) await bot.stop();
+            if (AppDataSource.isInitialized) await AppDataSource.destroy();
+        } finally { clearTimeout(timeout); process.exit(0); }
+    };
+    process.once('disconnect', () => { void stop(); });
+    process.once('SIGTERM', () => { void stop(); });
+    process.once('SIGINT', () => { void stop(); });
+}

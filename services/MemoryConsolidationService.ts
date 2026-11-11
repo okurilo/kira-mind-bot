@@ -5,6 +5,8 @@ import { createChatCompletionForTask } from '../ai/chatCompletion';
 import { devLog, parseLLMJson } from '../utils';
 import { getVectorService } from './VectorServiceFactory';
 import { isEligibleForUserSynthesis } from '../utils/userSynthesisFilter';
+import { replaceDerivedMemories } from './derivedMemoryReplacement';
+import { snapshotMemorySources } from '../utils/derivedMemoryFreshness';
 
 const CHAPTER_TAG = 'memory-chapter';
 const DEFAULT_LIMIT = 600;
@@ -139,6 +141,7 @@ function normalizeChapter(chapter: ChapterLLMResult, domain: string, fallbackSou
     const sourceIdSet = new Set(fallbackSources.map((m) => m.id));
     const sourceIds = normalizeStringList(chapter.sourceIds, MAX_SOURCE_IDS_PER_CHAPTER)
         .filter((id) => sourceIdSet.has(id));
+    if (!sourceIds.length) return null;
 
     return {
         title,
@@ -148,9 +151,7 @@ function normalizeChapter(chapter: ChapterLLMResult, domain: string, fallbackSou
         timeRangeLabel: String(chapter.timeRangeLabel || '').trim().slice(0, 120),
         currentState: String(chapter.currentState || '').trim().slice(0, 700),
         openLoops: normalizeStringList(chapter.openLoops, 10),
-        sourceIds: sourceIds.length > 0
-            ? sourceIds
-            : fallbackSources.slice(0, 20).map((m) => m.id),
+        sourceIds,
         salience: clamp01(chapter.salience, domain === PREDEFINED_DOMAINS.GENERAL ? 0.72 : 0.78),
     };
 }
@@ -236,19 +237,17 @@ JSON:
     }
 }
 
-async function replaceExistingChapters(userId: string, chapterKey: string, domain: string): Promise<number> {
+async function readExistingChapters(userId: string, chapterKey: string, domain: string) {
     const svc = getVectorService();
-    if (!svc) return 0;
+    if (!svc) return [];
 
     const tag = `chapter_key:${chapterKey}`;
-    const existing = await svc.getMemoriesByTag(userId, CHAPTER_TAG).catch(() => []);
-    const toDelete = existing.filter((memory) =>
+    const existing = await svc.getMemoriesByTag(userId, CHAPTER_TAG, { includeStaleDerived: true });
+    return existing.filter((memory) =>
         memory.domain === domain &&
         (memory.tags ?? []).includes(tag)
     );
 
-    await Promise.allSettled(toDelete.map((memory) => svc.deleteMemory(memory.id, memory.domain)));
-    return toDelete.length;
 }
 
 export async function runMemoryConsolidationForUser(
@@ -271,7 +270,7 @@ export async function runMemoryConsolidationForUser(
     const eligible = all.filter((memory) => {
         if (isChapter(memory)) return false;
         if (isPortrait(memory)) return false;
-        if (memory.status === 'expired') return false;
+        if (memory.status === 'expired' || memory.status === 'superseded') return false;
         // Глава строится о владельце: исключаем чужие/contact-источники.
         if (!isEligibleForUserSynthesis(memory)) return false;
         if (new Date(memory.timestamp).getTime() < cutoff) return false;
@@ -316,7 +315,8 @@ export async function runMemoryConsolidationForUser(
         }
 
         const chapterKey = `${safeTagValue(domain)}:rolling-${periodDays}d`;
-        replaced += await replaceExistingChapters(userId, chapterKey, domain);
+        const previous = await readExistingChapters(userId, chapterKey, domain);
+        const replacements: Array<Omit<MemoryEntry, 'id'>> = [];
 
         for (const chapter of chapters) {
             const sourceIds = chapter.sourceIds?.slice(0, MAX_SOURCE_IDS_PER_CHAPTER) ?? [];
@@ -329,7 +329,7 @@ export async function runMemoryConsolidationForUser(
                 ? new Date(Math.min(...sourceDates))
                 : new Date(cutoff);
 
-            await svc.saveMemory({
+            replacements.push({
                 content: formatChapterContent(chapter),
                 domain,
                 timestamp: now,
@@ -353,6 +353,7 @@ export async function runMemoryConsolidationForUser(
                 specificity: Math.min(1, 0.45 + (chapter.entities?.length ?? 0) * 0.025 + sourceIds.length * 0.004),
                 sourceContext: `Сводная глава по ${sources.length} воспоминаниям домена ${domain} за ${periodDays} дней.`,
                 sourceMemoryIds: sourceIds,
+                sourceMemorySnapshots: snapshotMemorySources(sources, sourceIds),
                 extractionMethod: 'consolidation',
                 subject: 'user',
                 predicate: `memory_chapter:${domain}`,
@@ -362,9 +363,12 @@ export async function runMemoryConsolidationForUser(
                 confirmationCount: sourceIds.length || sources.length,
                 lastConfirmedAt: now,
             });
-            created++;
-            sourceCount += sourceIds.length || sources.length;
+            sourceCount += sourceIds.length;
         }
+
+        const result = await replaceDerivedMemories(svc, previous, replacements);
+        created += result.created;
+        replaced += result.replaced;
 
         domains.push(domain);
     }

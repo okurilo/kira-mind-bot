@@ -4,6 +4,8 @@ import { AppDataSource } from '../data-source';
 import { SessionEntity } from '../entity/SessionEntity';
 import type { BotContext, SentMessageContext, SessionData } from '../types';
 import { scopedBotKey } from '../utils/botIdentity';
+import { PENDING_CONTACT_MEMORY_TTL_MS } from '../utils/contactMemoryConstants';
+import { availableBrowserWorkspace, type BrowserWorkspace } from './browserWorkspace';
 
 const MAX_HISTORY = 20;
 export const MAX_SENT_MESSAGE_CONTEXTS = 50;
@@ -15,6 +17,9 @@ const SESSION_SNAPSHOT = Symbol('persistedSessionSnapshot');
 
 /** Подмножество SessionData, которое мы сохраняем в БД. */
 interface PersistedSession {
+    agentRuntime?: SessionData['agentRuntime'];
+    agentRuntimePending?: SessionData['agentRuntimePending'];
+    apiActionVersion?: string;
     messageHistory: SessionData['messageHistory'];
     dialogueSummary: SessionData['dialogueSummary'];
     lastSummarizedIndex: SessionData['lastSummarizedIndex'];
@@ -26,6 +31,7 @@ interface PersistedSession {
     sentMessages?: SessionData['sentMessages'];
     sentMessageContexts?: SessionData['sentMessageContexts'];
     activePersonContext?: SessionData['activePersonContext'];
+    memoryRecallFocus?: SessionData['memoryRecallFocus'];
     lastMemoryGapAt?: SessionData['lastMemoryGapAt'];
     lastImplicitReminderAt?: SessionData['lastImplicitReminderAt'];
     pendingImplicitReminder?: SessionData['pendingImplicitReminder'];
@@ -41,6 +47,7 @@ interface PersistedSession {
     pendingHealthDiscomfort?: SessionData['pendingHealthDiscomfort'];
     activeBrowserTask?: SessionData['activeBrowserTask'];
     lastBrowserTask?: SessionData['lastBrowserTask'];
+    browserWorkspace?: SessionData['browserWorkspace'];
     pendingQuickChoices?: SessionData['pendingQuickChoices'];
     studyChatRequest?: SessionData['studyChatRequest'];
     chatAnalysisPeriodRequest?: SessionData['chatAnalysisPeriodRequest'];
@@ -169,8 +176,20 @@ function applyPersistedSessionDelta(
     const currentRecord = current as unknown as Record<string, unknown>;
     for (const key of new Set([...Object.keys(baseRecord), ...Object.keys(currentRecord)])) {
         if (jsonEquals(baseRecord[key], currentRecord[key])) continue;
+        if (key === 'browserWorkspace' && currentRecord[key] === undefined) {
+            const before = base.browserWorkspace, stored = latest.browserWorkspace;
+            if (!stored || before && stored.id === before.id && stored.operationId === before.operationId) delete merged[key];
+            continue;
+        }
         if (!(key in currentRecord) || currentRecord[key] === undefined) {
             delete merged[key];
+            continue;
+        }
+        if (key === 'browserWorkspace') {
+            const before = base.browserWorkspace, next = current.browserWorkspace, stored = latest.browserWorkspace;
+            // An old operation cannot restore a cleared workspace or overwrite its successor.
+            if (before && next?.id === before.id && (!stored || stored.id !== before.id || stored.operationId !== before.operationId && next.operationId === before.operationId)) continue;
+            merged[key] = currentRecord[key];
             continue;
         }
         merged[key] = key === 'messageHistory'
@@ -205,9 +224,12 @@ async function ensureSessionRow(rawQuery: RawQuery, key: string): Promise<void> 
     `, [key, emptySession]);
 }
 
-function extract(data: SessionData): PersistedSession {
+function extract(data: SessionData, key: string): PersistedSession {
     const now = Date.now();
     return {
+        agentRuntime: data.agentRuntime,
+        agentRuntimePending: data.agentRuntimePending?.slice(-4),
+        apiActionVersion: data.apiActionVersion,
         // messageHistory is stored newest-first; keep the head or we persist the oldest messages.
         messageHistory: (data.messageHistory ?? []).slice(0, MAX_HISTORY),
         dialogueSummary: data.dialogueSummary ?? '',
@@ -224,6 +246,7 @@ function extract(data: SessionData): PersistedSession {
         activePersonContext: data.activePersonContext && data.activePersonContext.expiresAt > now
             ? data.activePersonContext
             : undefined,
+        memoryRecallFocus: data.memoryRecallFocus && data.memoryRecallFocus.expiresAt > now ? data.memoryRecallFocus : undefined,
         lastMemoryGapAt: data.lastMemoryGapAt,
         lastImplicitReminderAt: data.lastImplicitReminderAt,
         pendingImplicitReminder: data.pendingImplicitReminder && now - data.pendingImplicitReminder.createdAt <= PENDING_DIALOGUE_CONTEXT_TTL_MS
@@ -261,6 +284,7 @@ function extract(data: SessionData): PersistedSession {
         lastBrowserTask: data.lastBrowserTask && data.lastBrowserTask.expiresAt > now
             ? data.lastBrowserTask
             : undefined,
+        browserWorkspace: availableBrowserWorkspace(data.browserWorkspace, data.browserWorkspace?.owner ?? 0, key, now),
         pendingQuickChoices: prunePendingQuickChoices(data.pendingQuickChoices, now),
         studyChatRequest: pruneStudyChatRequest(data.studyChatRequest, now),
         chatAnalysisPeriodRequest: pruneChatAnalysisPeriodRequest(data.chatAnalysisPeriodRequest, now),
@@ -271,6 +295,8 @@ function extract(data: SessionData): PersistedSession {
 function merge(initial: SessionData, persisted: PersistedSession): SessionData {
     return {
         ...initial,
+        agentRuntime: persisted.agentRuntime ?? initial.agentRuntime,
+        agentRuntimePending: persisted.agentRuntimePending ?? initial.agentRuntimePending,
         messageHistory: persisted.messageHistory ?? initial.messageHistory,
         dialogueSummary: persisted.dialogueSummary ?? initial.dialogueSummary,
         lastSummarizedIndex: persisted.lastSummarizedIndex ?? initial.lastSummarizedIndex,
@@ -282,6 +308,7 @@ function merge(initial: SessionData, persisted: PersistedSession): SessionData {
         sentMessages: persisted.sentMessages ?? initial.sentMessages,
         sentMessageContexts: persisted.sentMessageContexts ?? initial.sentMessageContexts,
         activePersonContext: persisted.activePersonContext ?? initial.activePersonContext,
+        memoryRecallFocus: persisted.memoryRecallFocus ?? initial.memoryRecallFocus,
         lastMemoryGapAt: persisted.lastMemoryGapAt ?? initial.lastMemoryGapAt,
         lastImplicitReminderAt: persisted.lastImplicitReminderAt ?? initial.lastImplicitReminderAt,
         pendingImplicitReminder: persisted.pendingImplicitReminder ?? initial.pendingImplicitReminder,
@@ -297,6 +324,7 @@ function merge(initial: SessionData, persisted: PersistedSession): SessionData {
         pendingHealthDiscomfort: persisted.pendingHealthDiscomfort ?? initial.pendingHealthDiscomfort,
         activeBrowserTask: persisted.activeBrowserTask ?? initial.activeBrowserTask,
         lastBrowserTask: persisted.lastBrowserTask ?? initial.lastBrowserTask,
+        browserWorkspace: persisted.browserWorkspace,
         pendingQuickChoices: persisted.pendingQuickChoices ?? initial.pendingQuickChoices,
         studyChatRequest: persisted.studyChatRequest ?? initial.studyChatRequest,
         chatAnalysisPeriodRequest: persisted.chatAnalysisPeriodRequest ?? initial.chatAnalysisPeriodRequest,
@@ -391,6 +419,7 @@ function pruneChatPromptWatchState(
  * Non-serializable fields (Map, timers) and reminders are excluded — reminders live in ReminderRegistry/DB.
  */
 export class TypeORMSessionStorage implements StorageAdapter<SessionData> {
+    constructor(private readonly strict = false) {}
     private get repo() {
         return AppDataSource.getRepository(SessionEntity);
     }
@@ -443,6 +472,7 @@ export class TypeORMSessionStorage implements StorageAdapter<SessionData> {
             if (persisted.lastBrowserTask?.expiresAt && persisted.lastBrowserTask.expiresAt <= now) {
                 persisted.lastBrowserTask = undefined;
             }
+            persisted.browserWorkspace = availableBrowserWorkspace(persisted.browserWorkspace, persisted.browserWorkspace?.owner ?? 0, key, now);
             persisted.pendingQuickChoices = prunePendingQuickChoices(persisted.pendingQuickChoices, now);
             persisted.studyChatRequest = pruneStudyChatRequest(persisted.studyChatRequest, now);
             persisted.chatAnalysisPeriodRequest = pruneChatAnalysisPeriodRequest(persisted.chatAnalysisPeriodRequest, now);
@@ -452,6 +482,7 @@ export class TypeORMSessionStorage implements StorageAdapter<SessionData> {
             return persisted as unknown as SessionData;
         } catch (e) {
             console.error('[SessionStorage] read error:', e);
+            if (this.strict) throw e;
             return undefined;
         }
     }
@@ -459,7 +490,7 @@ export class TypeORMSessionStorage implements StorageAdapter<SessionData> {
     async write(key: string, value: SessionData): Promise<void> {
         try {
             const scopedKey = scopedBotKey(key);
-            const current = extract(value);
+            const current = extract(value, key);
             const base = (value as SessionWithSnapshot)[SESSION_SNAPSHOT] ?? {};
             const manager = this.repo.manager;
 
@@ -491,6 +522,7 @@ export class TypeORMSessionStorage implements StorageAdapter<SessionData> {
             attachSessionSnapshot(value, current);
         } catch (e) {
             console.error('[SessionStorage] write error:', e);
+            if (this.strict) throw e;
         }
     }
 
@@ -504,10 +536,31 @@ export class TypeORMSessionStorage implements StorageAdapter<SessionData> {
     }
 }
 
+/** Save only this workspace delta; never flush a held request's old history/runtime over a later turn. */
+export async function persistBrowserWorkspace(key: string, workspace: BrowserWorkspace, active: () => boolean = () => true): Promise<void> {
+    const storage = new TypeORMSessionStorage(true), loaded = await storage.read(key);
+    if (!active() || loaded?.browserWorkspace && loaded.browserWorkspace.id !== workspace.id) return;
+    const value = Object.assign({ reminders: [], messageHistory: [], dialogueSummary: '', lastSummarizedIndex: -1, domains: {} }, loaded) as SessionData;
+    value.browserWorkspace = workspace.status === 'cancelled' ? undefined : structuredClone(workspace);
+    if (workspace.status === 'cancelled') value.lastBrowserTask = undefined;
+    await storage.write(key, value);
+}
+
 export async function persistSessionNow(ctx: BotContext): Promise<void> {
-    const key = ctx.chat?.id != null ? String(ctx.chat.id) : undefined;
+    const key = ctx.agentRuntimeStorageKey ?? ctx.sessionStorageKey ?? (ctx.chat?.id != null ? String(ctx.chat.id) : undefined);
     if (!key || !ctx.session) return;
-    await new TypeORMSessionStorage().write(key, ctx.session);
+    const value = ctx.agentRuntimeStorageKey ? { ...ctx.session } : ctx.session;
+    if (ctx.agentRuntimeStorageKey) delete (value as SessionWithSnapshot)[SESSION_SNAPSHOT];
+    await new TypeORMSessionStorage(Boolean(ctx.agentRuntimeStorageKey || ctx.sessionStorageKey)).write(key, value);
+}
+
+/** Write-ahead persistence must fail closed before a tool can mutate external state. */
+export async function persistAgentRuntime(ctx: BotContext): Promise<void> {
+    const key = ctx.agentRuntimeStorageKey ?? ctx.sessionStorageKey ?? (ctx.chat?.id != null ? String(ctx.chat.id) : undefined);
+    if (!key || !ctx.session) throw new Error('Нет контекста для журнала выполнения');
+    const value = ctx.agentRuntimeStorageKey ? { ...ctx.session } : ctx.session;
+    if (ctx.agentRuntimeStorageKey) delete (value as SessionWithSnapshot)[SESSION_SNAPSHOT];
+    await new TypeORMSessionStorage(true).write(key, value);
 }
 
 /**
@@ -591,9 +644,10 @@ export async function appendPersistedSentMessageContext(
 }
 
 export async function appendPersistedHistory(
-    chatId: number,
+    chatId: number | string,
     role: string,
-    content: string
+    content: string,
+    options: { kind?: 'image' } = {},
 ): Promise<void> {
     try {
         const repo = AppDataSource.getRepository(SessionEntity);
@@ -601,7 +655,7 @@ export async function appendPersistedHistory(
         const rawQuery = repositoryRawQuery(repo);
         if (rawQuery) {
             await ensureSessionRow(rawQuery, key);
-            const historyEntry = JSON.stringify({ role, content, timestamp: new Date() });
+            const historyEntry = JSON.stringify({ role, content, timestamp: new Date(), ...options });
             await rawQuery(`
                 UPDATE bot_sessions
                 SET data = jsonb_set(
@@ -632,6 +686,7 @@ export async function appendPersistedHistory(
             role,
             content,
             timestamp: new Date(),
+            ...options,
         });
 
         const next: PersistedSession = {
@@ -678,6 +733,10 @@ export async function appendPersistedHistory(
  * выполнением. Так recurring task не перезаписывает живую Telegram-сессию,
  * но пользователь может ответить на уточнение browser/health-flow.
  */
+export class BackgroundContinuationConflictError extends Error {
+    constructor() { super('Фоновая задача остановлена: в диалоге уже ожидается другое уточнение личности. Заверши его перед новым запуском задачи.'); }
+}
+
 export async function mergePersistedBackgroundContinuation(
     chatId: number,
     data: SessionData,
@@ -691,6 +750,7 @@ export async function mergePersistedBackgroundContinuation(
         )
         : undefined;
     const patch: Partial<PersistedSession> = {
+        pendingContactMemory: isFresh(data.pendingContactMemory) ? data.pendingContactMemory : undefined,
         pendingBrowserTask: isFresh(data.pendingBrowserTask) ? data.pendingBrowserTask : undefined,
         pendingHealthLog: isFresh(data.pendingHealthLog) ? data.pendingHealthLog : undefined,
         pendingHealthDiscomfort: isFresh(data.pendingHealthDiscomfort) ? data.pendingHealthDiscomfort : undefined,
@@ -702,12 +762,17 @@ export async function mergePersistedBackgroundContinuation(
     const serializablePatch = Object.fromEntries(
         Object.entries(patch).filter(([, value]) => value !== undefined),
     );
-    if (Object.keys(serializablePatch).length === 0) return;
+    const waitingRuntime = data.agentRuntime?.status === 'waiting' && data.agentRuntime.startedAt >= startedAt - 1000 ? data.agentRuntime : undefined;
+    if (Object.keys(serializablePatch).length === 0 && !waitingRuntime) return;
 
     const repo = AppDataSource.getRepository(SessionEntity);
     const key = scopedBotKey(chatId);
     const mergePatch = (persisted: Partial<PersistedSession>): Partial<PersistedSession> => {
         const next = { ...persisted } as Record<string, unknown>;
+        if (waitingRuntime) {
+            if (persisted.agentRuntime && ['waiting', 'running'].includes(persisted.agentRuntime.status)) next.agentRuntimePending = [...(persisted.agentRuntimePending ?? []).filter(run => run.runId !== waitingRuntime.runId), waitingRuntime].slice(-4);
+            else next.agentRuntime = waitingRuntime;
+        }
         const now = Date.now();
         for (const [field, value] of Object.entries(serializablePatch)) {
             if (field === "pendingQuickChoices") {
@@ -728,6 +793,10 @@ export async function mergePersistedBackgroundContinuation(
                 continue;
             }
             const existingExpiresAt = Number(existing?.expiresAt ?? 0);
+            if (field === 'pendingContactMemory' && existing && existingCreatedAt + PENDING_CONTACT_MEMORY_TTL_MS > now) {
+                if (existing.confirmationId && existing.confirmationId === incoming?.confirmationId) continue;
+                throw new BackgroundContinuationConflictError();
+            }
             if (existing && (existingCreatedAt >= startedAt - 1_000 || existingExpiresAt > now)) {
                 continue;
             }

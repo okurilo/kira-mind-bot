@@ -37,9 +37,9 @@ describe("deterministic planner routes", () => {
         assert.equal(completion.mock.callCount(), 0);
     });
 
-    test("uses the strong route once for a compound action plan", async (t) => {
+    test("uses the dedicated planning route once for a compound action plan", async (t) => {
         const completion = t.mock.method(chatCompletion, 'createChatCompletionForTask', async (task: AiTaskKey) => {
-            assert.equal(task, 'complexReasoning');
+            assert.equal(task, 'runtimePlanning');
             return { choices: [{ message: { content: JSON.stringify({ steps: [
                 { agentId: 'webSearch' }, { agentId: 'sendMessage' },
             ] }) } }] } as any;
@@ -182,7 +182,7 @@ describe("reflection memory quality thresholds", () => {
 
     test("keeps durable routines despite technical keywords", () => {
         assert.equal(isReflectionMemoryNoiseCandidate({
-            content: "Дмитрий регулярно использует ChatGPT для черновой расшифровки",
+            content: "Синтетический пользователь регулярно использует ChatGPT для черновой расшифровки",
             temporalScope: "routine",
             importance: 0.7,
         }), false);

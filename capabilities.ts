@@ -30,6 +30,21 @@ export interface CapabilitiesAnswerOptions {
 
 export const BOT_COMMANDS: BotCommandDescription[] = [
     {
+        command: 'cancel_deep',
+        description: 'Остановить фоновый разбор вопроса',
+        scope: 'owner',
+        usage: '/cancel_deep',
+        showInTelegramMenu: true,
+    },
+    {
+        command: "budget",
+        description: "Режим экономии AI-бюджета",
+        scope: "owner",
+        usage: "/budget [on|off|status]",
+        examples: ["/budget", "/budget on", "/budget off"],
+        showInTelegramMenu: true,
+    },
+    {
         command: "help",
         description: "Спросить о возможностях бота",
         scope: "public",
@@ -336,6 +351,15 @@ export const BOT_CAPABILITIES: BotCapabilityDescription[] = [
         ],
         commands: ["/health", "/health_export [дней]"],
         limitations: ["Это дневник наблюдений, не диагноз и не медицинская рекомендация. Фото-анализ описывает видимые признаки и неопределённость."],
+        ownerOnly: true,
+    },
+    {
+        id: "workouts",
+        title: "Тренировки и Apple Health",
+        category: "Здоровье",
+        summary: "Ведёт тренировки, подходы и планы, показывает сохранённые результаты и сравнения. Передаёт команды подключённому iPhone с подтверждением устройства; импортирует разрешённые данные Apple Health.",
+        examples: ["Начни тренировку", "Заверши текущую тренировку", "Покажи результаты последней пробежки", "Сколько шагов я прошёл сегодня?", "Составь тренировку на полчаса"],
+        limitations: ["Запись и управление выполняет приложение Киры. Без связи сервер не может гарантировать выполнение команды на телефоне."],
         ownerOnly: true,
     },
     {

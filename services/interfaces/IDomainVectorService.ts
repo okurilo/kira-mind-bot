@@ -1,5 +1,18 @@
-import { IVectorService, MemoryEntry, SearchOptions, SearchResult, MemoryStats } from './IVectorService';
+import { IVectorService, MemoryEntry, SearchOptions, SearchResult, MemoryStats, MemoryMutationOptions } from './IVectorService';
 import { DomainConfig, SearchStrategy, DomainStats, DomainTrend } from '../../types';
+
+export interface MemoryCandidateOptions {
+    /** Conversational recall filters before top-k; storage/dedup callers keep their ranking. */
+    acceptCandidate?: (candidate: SearchResult) => boolean;
+    relevanceOnly?: boolean;
+    /** Read-only candidates from a rejected summary, separate from dense/lexical scores. */
+    onStaleDerivedSources?: (parent: SearchResult, sources: SearchResult[]) => void;
+}
+
+export interface MemoryPoolReadOptions {
+    /** Apply evidence eligibility while paging, before the accepted-record limit. */
+    acceptCandidate?: (candidate: SearchResult) => boolean;
+}
 
 export abstract class IDomainVectorService extends IVectorService {
     abstract createDomain(config: DomainConfig): Promise<void>;
@@ -11,17 +24,17 @@ export abstract class IDomainVectorService extends IVectorService {
 
     abstract searchInDomain(query: string, domain: string, userId: string, options?: SearchOptions): Promise<SearchResult[]>;
     abstract searchCrossDomain(query: string, userId: string, strategy: SearchStrategy): Promise<SearchResult[]>;
-    abstract searchAllDomains(query: string, userId: string, limit?: number): Promise<SearchResult[]>;
+    abstract searchAllDomains(query: string, userId: string, limit?: number, options?: MemoryCandidateOptions): Promise<SearchResult[]>;
     /**
      * Опциональный lexical candidate source для гибридного retrieval.
      * `score` здесь служит только локальной сортировке; dense cosine возвращает
      * `searchAllDomains` и сохраняется отдельно при fusion.
      */
-    abstract searchLexicalAllDomains?(query: string, userId: string, limit?: number): Promise<SearchResult[]>;
+    abstract searchLexicalAllDomains?(query: string, userId: string, limit?: number, options?: MemoryCandidateOptions): Promise<SearchResult[]>;
     /** Якорные факты (явные «Запомни») для подмешивания в контекст */
     abstract getAnchorMemories(userId: string, limit?: number): Promise<SearchResult[]>;
     /** Обновить существующую точку (при дедупликации) */
-    abstract updateMemory(memoryId: string, domain: string, memory: Omit<MemoryEntry, 'id'>): Promise<void>;
+    abstract updateMemory(memoryId: string, domain: string, memory: Omit<MemoryEntry, 'id'>, options?: MemoryMutationOptions): Promise<void>;
     abstract suggestDomains(query: string, userId: string): Promise<string[]>;
 
     abstract getDomainStats(userId: string): Promise<DomainStats[]>;
@@ -32,5 +45,11 @@ export abstract class IDomainVectorService extends IVectorService {
      * Возвращает все записи пользователя с указанным тегом (во всех доменах).
      * Используется для получения психологических портретов по тегу `portrait:<Name>`.
      */
-    abstract getMemoriesByTag(userId: string, tag: string): Promise<SearchResult[]>;
+    abstract getMemoriesByTag(userId: string, tag: string, options?: { includeStaleDerived?: boolean }): Promise<SearchResult[]>;
+    /** Bounded, paginated identity pool; no embedding or model call. */
+    abstract getMemoriesByTags?(userId: string, tags: string[], limit?: number, options?: MemoryPoolReadOptions): Promise<SearchResult[]>;
+    /** Read-only, bounded owner-subject evidence in validated topic domains. */
+    abstract getOwnerMemories?(userId: string, domains?: string[], limit?: number, options?: MemoryPoolReadOptions): Promise<SearchResult[]>;
+    /** Candidate people evidence; ownership of the archive does not establish a relationship. */
+    abstract getPeopleMemories?(userId: string, domains?: string[], limit?: number, options?: MemoryPoolReadOptions): Promise<SearchResult[]>;
 }

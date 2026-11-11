@@ -1,3 +1,4 @@
+import { isValidRuntimeOwnerId } from '../utils/runtimeIdentity';
 import { Bot, InlineKeyboard } from "grammy";
 import { BotContext } from "../types";
 import { ContactsStore } from "../stores/ContactsStore";
@@ -39,6 +40,10 @@ import { isStatusCommandArg, parseBooleanCommandArg } from "../utils/booleanComm
 import { buildHelpOverviewBlocks, buildHelpTopicBlocks } from "../utils/helpMessage";
 import { sendRecurringTasksMenu } from "../services/recurringTaskService";
 import { getBotGenderedText } from "../persona";
+import { registerBudgetCommands } from "./budgetCommands";
+import { isMaximumSavingsEnabled } from "../services/budgetModeService";
+import { config } from '../config';
+import { orchestrationMode } from '../orchestration/runtime/kernel';
 
 
 function parseCommandArgument(text: string | undefined, command: string): string {
@@ -51,6 +56,19 @@ function formatToggleState(enabled: boolean): string {
 }
 
 export function registerCommandHandlers(bot: Bot<BotContext>) {
+    bot.command('runtime', async ctx => {
+        if (!isValidRuntimeOwnerId(config.allowedUserId) || ctx.from?.id !== config.allowedUserId || ctx.chat.type !== 'private') return;
+        const run = ctx.session.agentRuntime;
+        await sendStructuredBlocks(ctx, ctx.chat.id, [
+            heading('Выполнение задач', 2),
+            paragraph(`Режим: ${esc(orchestrationMode())}`),
+            paragraph(run ? `Последний запрос: ${esc(run.status)}. Инструментов: ${run.toolNames.length}.` : 'В этом канале ещё нет журнала инструментов.'),
+            ...(run?.toolNames.length ? [paragraph(`Инструменты: ${esc(run.toolNames.join(', '))}`)] : []),
+            ...(run?.skills.length ? [paragraph(`Скиллы: ${esc(run.skills.join(', '))}`)] : []),
+            ...(run?.agents.length ? [list(run.agents.map(agent => `${esc(agent.kind)}: ${esc(agent.status)}`))] : []),
+        ]);
+    });
+    registerBudgetCommands(bot);
     registerMemoryCommands(bot);
     registerChatPromptWatchCommands(bot);
     registerChatGroupCommands(bot);
@@ -202,7 +220,7 @@ bot.command("clear", async (ctx) => {
     const userId = ctx.from?.id;
 
     if (userId) {
-        factAnalysisManager.cancelAnalysis(userId);
+        factAnalysisManager.cancelAnalysis(ctx.sessionStorageKey ?? userId);
     }
 
     let savedCount = 0;
@@ -508,9 +526,9 @@ bot.command("self_study", async (ctx) => {
 
 // ── Команда /reflection — режим рефлексии и накопления знаний ────────────────
 bot.command("reflection", async (ctx) => {
-    const enabled = isReflectionModeEnabled();
+    const enabled = await isReflectionModeEnabled();
     const stats = getReflectionStats();
-    await ctx.reply(buildReflectionStatusMessage(enabled, stats), {
+    await ctx.reply(buildReflectionStatusMessage(enabled, stats, await isMaximumSavingsEnabled()), {
         parse_mode: "Markdown",
         reply_markup: buildReflectionKeyboard(enabled),
     });
@@ -519,11 +537,11 @@ bot.command("reflection", async (ctx) => {
 // Callback: переключить режим рефлексии
 bot.callbackQuery("reflection_toggle", async (ctx) => {
     await ctx.answerCallbackQuery();
-    const current = isReflectionModeEnabled();
+    const current = await isReflectionModeEnabled();
     const next = !current;
     await setReflectionModeEnabled(next);
     const stats = getReflectionStats();
-    await ctx.editMessageText(buildReflectionStatusMessage(next, stats), {
+    await ctx.editMessageText(buildReflectionStatusMessage(next, stats, await isMaximumSavingsEnabled()), {
         parse_mode: "Markdown",
         reply_markup: buildReflectionKeyboard(next),
     });
@@ -532,9 +550,9 @@ bot.callbackQuery("reflection_toggle", async (ctx) => {
 // Callback: обновить статистику без смены режима
 bot.callbackQuery("reflection_refresh", async (ctx) => {
     await ctx.answerCallbackQuery("Обновлено");
-    const enabled = isReflectionModeEnabled();
+    const enabled = await isReflectionModeEnabled();
     const stats = getReflectionStats();
-    await ctx.editMessageText(buildReflectionStatusMessage(enabled, stats), {
+    await ctx.editMessageText(buildReflectionStatusMessage(enabled, stats, await isMaximumSavingsEnabled()), {
         parse_mode: "Markdown",
         reply_markup: buildReflectionKeyboard(enabled),
     });
@@ -542,10 +560,11 @@ bot.callbackQuery("reflection_refresh", async (ctx) => {
 
 function buildReflectionStatusMessage(
     enabled: boolean,
-    stats: ReturnType<typeof getReflectionStats>
+    stats: ReturnType<typeof getReflectionStats>,
+    savingsEnabled = false,
 ): string {
     const statusIcon = enabled ? "🟢" : "⚫";
-    const statusText = enabled ? "включён" : "выключен";
+    const statusText = savingsEnabled ? "приостановлен экономией бюджета (/budget)" : enabled ? "включён" : "выключен";
 
     const prescreenRate = stats.prescreenTotal > 0
         ? Math.round((stats.prescreenPassed / stats.prescreenTotal) * 100)

@@ -35,6 +35,8 @@ import { searchAllDomainsMemories } from '../utils/enhancedDomainMemory';
 import { getSetting, setSetting } from './botSettingsService';
 import { devLog, parseLLMJson } from '../utils';
 import { createChatCompletionForTask } from '../ai/chatCompletion';
+import { needsPriorityReflection } from '../ai/reflectionTriage';
+import { isBackgroundFeatureEnabled, getBackgroundFeaturePreference, setBackgroundFeatureEnabled } from './backgroundFeatureService';
 import { MessageStore } from '../stores/MessageStore';
 import { getVectorService } from './VectorServiceFactory';
 import { runMemorySchemaConsolidationForUser } from './MemorySchemaConsolidationService';
@@ -155,12 +157,11 @@ let lastActivityAt: Date | null = null;
 
 export async function initReflectionMode(): Promise<void> {
     try {
-        const stored = await getSetting(SETTING_KEY, 'true');
-        enabled = stored === 'true';
+        enabled = await getBackgroundFeaturePreference('reflection');
         console.log(`[reflection] Initialized: ${enabled ? 'ON' : 'OFF'}`);
     } catch {
-        enabled = true;
-        console.log('[reflection] Could not load setting, defaulting to ON');
+        enabled = false;
+        console.log('[reflection] Could not load setting, temporarily OFF');
     }
 
     // Fix 5: Загружаем кумулятивную статистику
@@ -182,8 +183,8 @@ export async function initReflectionMode(): Promise<void> {
 
 // ── Публичный API ─────────────────────────────────────────────────────────────
 
-export function isReflectionModeEnabled(): boolean {
-    return enabled;
+export async function isReflectionModeEnabled(): Promise<boolean> {
+    return getBackgroundFeaturePreference('reflection');
 }
 
 /**
@@ -200,6 +201,7 @@ export function markChatAsBot(chatId: string): void {
 }
 
 export async function setReflectionModeEnabled(value: boolean): Promise<void> {
+    await setBackgroundFeatureEnabled('reflection', value);
     enabled = value;
     await setSetting(SETTING_KEY, String(value));
     if (!value) chatBuffers.clear();
@@ -208,11 +210,11 @@ export async function setReflectionModeEnabled(value: boolean): Promise<void> {
 
 /**
  * Добавляет сообщение (входящее или исходящее) в буфер для последующего анализа.
- * Вызывается синхронно — не блокирует обработку сообщений.
+ * Проверяет runtime-переключатели до добавления в буфер и запуска AI-triage.
  *
  * @param isOwn true = исходящее сообщение от владельца бота
  */
-export function queueMessage(
+export async function queueMessage(
     chatId: string,
     senderName: string,
     text: string,
@@ -220,8 +222,8 @@ export function queueMessage(
     isOwn = false,
     messageId?: number,
     options: { isForwarded?: boolean; forwardSource?: string } = {},
-): void {
-    if (!enabled) return;
+): Promise<void> {
+    if (!await isBackgroundFeatureEnabled('reflection')) return;
     if (botChatIds.has(chatId)) return;
 
     const trimmed = text?.trim();
@@ -263,7 +265,7 @@ export function queueMessage(
     });
 
     // Асинхронный LLM-triage жизненных событий (fire-and-forget, дебаунс 2 мин)
-    if (!options.isForwarded) scheduleAsyncTriage(chatId, senderName, trimmed);
+    if (!isOwn && !options.isForwarded && date.getTime() >= Date.now() - BATCH_MAX_AGE_MS) scheduleAsyncTriage(chatId, senderName, trimmed);
 
     if (buf.messages.length > MAX_BUFFER_SIZE) {
         buf.messages.splice(0, buf.messages.length - MAX_BUFFER_SIZE);
@@ -284,38 +286,21 @@ function scheduleAsyncTriage(chatId: string, senderName: string, text: string): 
 }
 
 /**
- * Определяет через gpt-5.4-nano, является ли сообщение жизненно важным событием.
+ * Определяет одним AI-вызовом, требует ли новое сообщение своевременной рефлексии.
  * Если да — помечает буфер как highPriority для немедленного анализа.
  */
 async function triageForHighPriority(chatId: string, senderName: string, text: string): Promise<void> {
+    if (!await isBackgroundFeatureEnabled('reflection')) return;
     const buf = chatBuffers.get(chatId);
     if (!buf || buf.highPriority) return;
 
-    const prompt = `Сообщение от "${senderName}": "${text}"
-
-Требует ли это своевременной рефлексии в ближайшие минуты?
-Примеры ДА: увольнение, переезд, свадьба, развод, серьёзный диагноз, конкретная просьба со сроком, изменение договорённости, конфликт или сильный отношенческий сигнал.
-Примеры НЕТ: обычный разговор, планы на вечер, мелкие новости, реакции.
-
-JSON: {"urgent": true/false}`;
-
     try {
-        const resp = await createChatCompletionForTask('lightweightText', {
-            messages: [
-                { role: 'system', content: 'Отвечай только валидным JSON.' },
-                { role: 'user', content: prompt },
-            ],
-            temperature: 0,
-            max_completion_tokens: 15,
-        });
-        const raw = resp.choices[0]?.message?.content?.trim() || '';
-        const data = parseLLMJson<{ urgent?: boolean }>(raw);
-        if (data?.urgent === true) {
+        if (await needsPriorityReflection(senderName, text)) {
             // Перепроверяем — буфер мог быть уже обработан пока шёл запрос
             const currentBuf = chatBuffers.get(chatId);
-            if (currentBuf) {
+            if (currentBuf === buf && await isBackgroundFeatureEnabled('reflection')) {
                 currentBuf.highPriority = true;
-                devLog(`[reflection] LLM triage: HIGH PRIORITY from "${senderName}": ${text.slice(0, 80)}`);
+                devLog('[reflection] AI triage: high-priority buffer');
             }
         }
     } catch {
@@ -362,7 +347,7 @@ export function getReflectionStats(): {
  * Основной цикл обработки буферов — вызывается планировщиком каждые 5 минут.
  */
 export async function processBuffers(bot: Bot<BotContext>): Promise<void> {
-    if (!enabled) return;
+    if (!await isBackgroundFeatureEnabled('reflection')) return;
     resetHourWindowIfNeeded();
 
     if (analysesThisHour >= HOURLY_ANALYSIS_LIMIT) {
@@ -383,6 +368,7 @@ export async function processBuffers(bot: Bot<BotContext>): Promise<void> {
     const perChatLimit = Math.max(1, Math.ceil(HOURLY_ANALYSIS_LIMIT / Math.max(1, activeChats)));
 
     for (const [chatId, buf] of entries) {
+        if (!await isBackgroundFeatureEnabled('reflection')) break;
         if (analysesThisHour >= HOURLY_ANALYSIS_LIMIT) break;
         if (!isBufferReady(buf)) continue;
 
@@ -833,8 +819,10 @@ async function analyzeBatch(
         const sessionToAnalyze = sessions[sessions.length - 1];
         const emitDaytimeReflection = async (): Promise<void> => {
             const currentMessageIds = sessionToAnalyze
+                .filter(message => !message.isOwn)
                 .map(message => message.messageId)
                 .filter((id): id is number => Number.isInteger(id));
+            if (currentMessageIds.length === 0) return;
             await sendDaytimeReflection(bot, { chatId, currentMessageIds }).catch(error => {
                 console.error(`[daytime-reflection] failed for "${buf.chatTitle}":`, error);
             });
@@ -1001,7 +989,7 @@ async function analyzeBatch(
 
         devLog(`[reflection] Saved ${savedCount} facts from "${buf.chatTitle}"`);
 
-        if (savedCount > 0 && config.memoryConsolidationEnabled) {
+        if (savedCount > 0 && await isBackgroundFeatureEnabled('memoryConsolidation')) {
             Promise.allSettled([
                 runMemorySchemaConsolidationForUser(String(config.allowedUserId), {
                     minSources: Math.max(config.memoryConsolidationMinFacts, 12),

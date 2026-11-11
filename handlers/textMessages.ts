@@ -1,8 +1,10 @@
+import {bindAccountAiOperation} from '../ai/accountPolicy';
 import { Bot, InlineKeyboard } from "grammy";
 import { Chat, User } from "grammy/types";
 import { Reminder, postponeReminderUntil } from "../reminder";
 import { BotContext, ConversationTurn } from "../types";
 import { processMessage } from "../orchestrator";
+import { handleLiveBrowserText, runTelegramBrowserResponsive } from '../services/liveBrowserTelegram';
 import { getMessageDraft, saveMessageDraft } from "../agents/sendMessagesAgent";
 import {
     NegotiationStore,
@@ -15,7 +17,8 @@ import { addToHistory } from "../utils/history";
 import { ContactsStore } from "../stores/ContactsStore";
 import { ReminderRegistry } from "../stores/ReminderRegistry";
 import { reconsolidateAfterResponse } from "../services/MemoryReconsolidationService";
-import { looksLikeBrowserTaskCancellation } from "../utils/browserTaskCancellation";
+import { shouldCancelBrowserTask } from "../utils/browserTaskCancellation";
+import { browserConfirmationKey } from '../orchestration/runtime/confirmation';
 import { applyReminderEditInput, extractReminderPostponeDate } from "../utils/reminderEditor";
 import { stripVoiceReplyDirective, wantsVoiceReply } from "../utils/voiceReply";
 import { editMessageTextIfChanged } from "../utils/telegramMessageEdit";
@@ -35,7 +38,10 @@ import {
 } from "../utils/proactiveMemory";
 import { decideKnowledgeSource } from "../utils/knowledgeSource";
 import { handleRecurringTaskText } from "../services/recurringTaskService";
+import { orchestrationMode, hasCompoundActionRequest, cancelRuntimeContinuation } from '../orchestration/runtime/kernel';
 import { getForwardedMessageInfo } from "../utils/forwardedMessage";
+import { canUseFastDialogue, fastDialogueEnabled } from '../orchestration/fastDialogue';
+import { activateDialogueJob } from '../services/dialogueJobs';
 import {
     MEMORY_HEARS_RE,
     MEMORY_DELETE_RE,
@@ -85,9 +91,8 @@ function initOrReuseForwardGroup(
         clearTimeout(ctx.session.forwardGroups[forwardKey].timerId);
     }
 
-    const timerId = setTimeout(() => {
-        processForwardedGroup(ctx, forwardKey);
-    }, 2000);
+    const processGroup=bindAccountAiOperation(()=>processForwardedGroup(ctx,forwardKey));
+    const timerId = setTimeout(() => {void processGroup();}, 2000);
 
     ctx.session.forwardGroups[forwardKey].timerId = timerId;
 }
@@ -215,7 +220,7 @@ export function registerForwardedTextGuard(bot: Bot<BotContext>): void {
 
 // ── Регистрация обработчика текстовых сообщений ───────────
 
-export function registerTextMessageHandler(bot: Bot<BotContext>): void {
+export function registerTextMessageHandler(bot: Bot<BotContext>, options: { immediate?: boolean } = {}): void {
     bot.on("message:text", async (ctx, next) => {
         try {
             devLog('📨 Получено текстовое сообщение от пользователя:', ctx.from?.id);
@@ -231,19 +236,20 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                 return;
             }
 
+            if (handleLiveBrowserText(ctx, message, 'text')) return;
             if (message.startsWith('/')) {
                 await next();
                 return;
             }
 
             // These messages are handled by dedicated bot.hears handlers in memoryCommands
-            if (MEMORY_HEARS_RE.test(message) || MEMORY_DELETE_RE.test(message)) {
+            if (MEMORY_HEARS_RE.test(message) || MEMORY_DELETE_RE.test(message) && (orchestrationMode() === 'legacy' || !hasCompoundActionRequest(message))) {
                 return;
             }
 
             if (ctx.session.messageEditing && ctx.chat) {
                 ctx.session.messageEditing = false;
-                const draft = getMessageDraft(ctx.chat.id);
+                const draft = getMessageDraft(ctx.chat.id, ctx.sessionStorageKey);
                 if (!draft) {
                     await replyAndStore(ctx, "❌ Черновик сообщения не найден или устарел. Создай сообщение заново.");
                     return;
@@ -260,7 +266,8 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                     draft.notifyOnReply,
                     draft.isGroup ?? false,
                     draft.groupTitle,
-                    draft.deliveryMode
+                    draft.deliveryMode,
+                    ctx.sessionStorageKey,
                 );
 
                 const confirmKeyboard = new InlineKeyboard()
@@ -407,11 +414,12 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                 .slice(0, 8)
                 .reverse()
                 .map(({ role, content }) => ({ role, content: content.slice(0, 2_000) }));
-            await addToHistory(ctx, 'user', message, { turn });
+            const fastHistory = canUseFastDialogue(ctx, turn);
+            await addToHistory(ctx, 'user', message, { turn, deferAnalysis: fastHistory });
             if (pendingGap) ctx.session.pendingMemoryGap = undefined;
 
             // Устанавливаем таймер для обработки одиночного сообщения
-            setTimeout(async () => {
+            const processText = bindAccountAiOperation(async () => {
                 try {
                 if (ctx.session.lastUserMessage &&
                     ctx.session.lastUserMessage.text === message &&
@@ -506,7 +514,10 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                         return;
                     }
 
-                    if (await handleRecurringTaskText(ctx, message, {
+                    // An active website workflow needs the shared semantic pass:
+                    // "stop this browser task" is not recurring-task management.
+                    if ((orchestrationMode() === 'legacy' || ctx.session.pendingRecurringTaskEdit ||
+                        !ctx.session.pendingBrowserTask && !ctx.session.activeBrowserTask && !hasCompoundActionRequest(message)) && await handleRecurringTaskText(ctx, message, {
                         messageId: ctx.message.message_id,
                         contextHistory: recurringContextHistory,
                     })) {
@@ -524,26 +535,29 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                             }
                             ctx.session.pendingBrowserTask = undefined;
                         } else {
-                            if (looksLikeBrowserTaskCancellation(message)) {
+                            if (shouldCancelBrowserTask(message)) {
                                 if (pendingBrowserTask.sessionId) {
                                     import('../agents/browserAgent')
                                         .then((m) => m.cancelPausedBrowserSession(pendingBrowserTask.sessionId))
                                         .catch(() => {});
                                 }
                                 ctx.session.pendingBrowserTask = undefined;
+                                if (pendingBrowserTask.sessionId) await cancelRuntimeContinuation(ctx, ['agents.start', 'agents.resume'], browserConfirmationKey(pendingBrowserTask.sessionId));
                                 await replyAndStore(ctx, 'Браузерная задача отменена.');
                                 return;
                             }
 
-                            pendingBrowserTask.userAnswer = message;
-                            messageForProcessing = [
-                                'Продолжи задачу в браузере через Playwright.',
-                                `browserSessionId: ${pendingBrowserTask.sessionId ?? 'none'}`,
-                                `Исходная задача пользователя: ${pendingBrowserTask.originalTask}`,
-                                `Вопрос агента пользователю: ${pendingBrowserTask.question}`,
-                                `Ответ пользователя: ${message}`,
-                                'Используй ответ как недостающий параметр, подтяни долговременную память как обычно и продолжи выполнение.',
-                            ].join('\n');
+                            if (orchestrationMode() === 'legacy') {
+                                pendingBrowserTask.userAnswer = message;
+                                messageForProcessing = [
+                                    'Продолжи задачу в браузере через Playwright.',
+                                    `browserSessionId: ${pendingBrowserTask.sessionId ?? 'none'}`,
+                                    `Исходная задача пользователя: ${pendingBrowserTask.originalTask}`,
+                                    `Вопрос агента пользователю: ${pendingBrowserTask.question}`,
+                                    `Ответ пользователя: ${message}`,
+                                    'Используй ответ как недостающий параметр, подтяни долговременную память как обычно и продолжи выполнение.',
+                                ].join('\n');
+                            }
                         }
                     }
 
@@ -562,7 +576,7 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                         "",
                         ctx.session.messageHistory.slice().reverse(),
                         undefined,
-                        { voiceReplyRequested: voiceReplyRequested, turn }
+                        { voiceReplyRequested: voiceReplyRequested, turn, fastDialogue: true }
                     );
 
                     await saveRemindersFromResult(ctx, result);
@@ -571,8 +585,9 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                     // отдельным fire-and-forget сообщением после него.
                     let identityGapCandidate: Awaited<ReturnType<typeof detectMemoryGapCandidate>>;
                     let proactiveCandidate: ProactiveHintCandidate | undefined;
+                    // a spoken talk in the AR room stays a talk: no «кстати…» questions or offers tacked onto her answer
                     if (
-                        shouldRunProactiveHint(result, messageForProcessing) &&
+                        !result.skipOptionalFollowups && !ctx.arRoom && shouldRunProactiveHint(result, messageForProcessing) &&
                         !decideKnowledgeSource(message, turn.replyContext, turn.currentTopic).requiresWeb &&
                         !result.keyboard &&
                         !ctx.session.pendingContactMemory
@@ -611,10 +626,17 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                         return;
                     }
 
-                    await addToHistory(ctx, 'bot', result.responseText);
+                    await addToHistory(ctx, 'bot', result.responseText, { deferAnalysis: fastHistory });
 
                     // Единая отправка результата вместо дублированного if/else
                     const sentResult = await sendResultToUser(ctx, result, voiceReplyRequested);
+                    if (result.dialogueJobId) {
+                        ctx.dialogueJobId = result.dialogueJobId;
+                        if (!ctx.sessionStorageKey?.startsWith('api:')) {
+                            await flushSessionAfterAsyncWork(ctx, 'fast dialogue initial response');
+                            await activateDialogueJob(ctx, result.dialogueJobId);
+                        }
+                    }
                     ctx.session.lastSchedulableRequest = {
                         text: pendingBrowserTask?.originalTask ?? message,
                         messageId: ctx.message.message_id,
@@ -644,7 +666,7 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                     await checkLastFactSaveError(ctx);
 
                     // Reconsolidation
-                    reconsolidateAfterResponse(ctx, message, result.responseText, result.recalledMemories, turn).catch(() => {});
+                    if (!result.fastResponse) reconsolidateAfterResponse(ctx, message, result.responseText, result.recalledMemories, turn).catch(() => {});
                 }
                 } catch (timerError) {
                     console.error("Ошибка при обработке сообщения в setTimeout:", timerError);
@@ -652,7 +674,11 @@ export function registerTextMessageHandler(bot: Bot<BotContext>): void {
                 } finally {
                     await flushSessionAfterAsyncWork(ctx, 'message:text delayed processing');
                 }
-            }, 2000);
+            });
+            // HTTP callers must await the same complete flow, including its session flush.
+            if (options.immediate) await processText();
+            else if (fastDialogueEnabled()) await runTelegramBrowserResponsive(ctx, processText);
+            else setTimeout(processText, 2000);
         } catch (error) {
             console.error("Ошибка при обработке сообщения:", error);
             await ctx.reply("Что-то пошло не так... Давай попробуем еще раз? 💫");

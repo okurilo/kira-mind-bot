@@ -40,6 +40,7 @@ import {
   parseKiraLifeWebGrounding,
 } from "../utils/kiraLifeWebGrounding";
 import { getKiraResidence } from "./kiraResidenceService";
+import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
 
 let proactiveTimer: NodeJS.Timeout | undefined;
 let innerTimer: NodeJS.Timeout | undefined;
@@ -110,7 +111,7 @@ async function researchKiraLifeWebGrounding(input: {
   recentTopics: string;
   currentResidence: string;
 }): Promise<KiraLifeWebGrounding | undefined> {
-  if (!config.kiraLifeWebGroundingEnabled) return undefined;
+  if (!await isBackgroundFeatureEnabled('kiraLifeWebSearch')) return undefined;
 
   const query = buildKiraLifeWebGroundingQuery({
     characterName: config.characterName,
@@ -417,12 +418,13 @@ async function buildProactiveMessage(generatedEvent: GeneratedKiraLifeEvent): Pr
 }
 
 async function runInnerDevelopmentCycle(): Promise<void> {
-  if (!config.kiraLifeInnerDevelopmentEnabled || isInnerRunning) {
+  if (isInnerRunning) {
     return;
   }
 
   isInnerRunning = true;
   try {
+    if (!await isBackgroundFeatureEnabled('kiraInnerDevelopment')) return;
     lastInnerDevelopmentAt = Math.max(lastInnerDevelopmentAt, await loadLastInnerDevelopmentAt());
     if (lastInnerDevelopmentAt > 0 && Date.now() - lastInnerDevelopmentAt < config.kiraLifeInnerDevelopmentIntervalMs) {
       return;
@@ -439,12 +441,13 @@ async function runInnerDevelopmentCycle(): Promise<void> {
 }
 
 async function runProactiveCycle(bot: Bot<BotContext>): Promise<void> {
-  if (!config.kiraLifeProactiveEnabled || isProactiveRunning) {
+  if (isProactiveRunning) {
     return;
   }
 
   isProactiveRunning = true;
   try {
+    if (!await isBackgroundFeatureEnabled('kiraLife')) return;
     const now = new Date();
     if (inQuietHours(now)) {
       return;
@@ -465,7 +468,7 @@ async function runProactiveCycle(bot: Bot<BotContext>): Promise<void> {
     const proactive = await buildProactiveMessage(generatedEvent);
 
     const chatId = await getProactiveChatId();
-    const sent = await bot.api.sendMessage(chatId, proactive.message);
+    const sent = await (await import('./productAnalytics')).sendProactiveWithAnalytics(bot, chatId, proactive.message, 'conversation');
 
     lastSentAt = Date.now();
     await saveLastSentAt(lastSentAt);
@@ -500,34 +503,10 @@ async function runProactiveCycle(bot: Bot<BotContext>): Promise<void> {
 }
 
 export function startKiraLifeScheduler(bot: Bot<BotContext>): void {
-  if (!config.kiraLifeProactiveEnabled && !config.kiraLifeInnerDevelopmentEnabled) {
-    return;
-  }
-
-  if (proactiveTimer) {
-    clearInterval(proactiveTimer);
-  }
-  if (innerTimer) {
-    clearInterval(innerTimer);
-  }
-
-  if (config.kiraLifeInnerDevelopmentEnabled) {
-    innerTimer = setInterval(() => {
-      runInnerDevelopmentCycle();
-    }, config.kiraLifeInnerDevelopmentIntervalMs);
-
-    setTimeout(() => {
-      runInnerDevelopmentCycle();
-    }, 60_000);
-  }
-
-  if (config.kiraLifeProactiveEnabled) {
-    proactiveTimer = setInterval(() => {
-      runProactiveCycle(bot);
-    }, Math.min(config.kiraLifeProactiveIntervalMs, PROACTIVE_CHECK_INTERVAL_MS));
-
-    setTimeout(() => {
-      runProactiveCycle(bot);
-    }, 30_000);
-  }
+  if (proactiveTimer) clearInterval(proactiveTimer);
+  if (innerTimer) clearInterval(innerTimer);
+  innerTimer = setInterval(() => { void runInnerDevelopmentCycle(); }, config.kiraLifeInnerDevelopmentIntervalMs);
+  setTimeout(() => { void runInnerDevelopmentCycle(); }, 60_000);
+  proactiveTimer = setInterval(() => { void runProactiveCycle(bot); }, Math.min(config.kiraLifeProactiveIntervalMs, PROACTIVE_CHECK_INTERVAL_MS));
+  setTimeout(() => { void runProactiveCycle(bot); }, 30_000);
 }

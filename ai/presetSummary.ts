@@ -4,7 +4,9 @@ import { getAiProviderDescriptor } from './providerMetadata';
 export const GENERATIVE_TASK_KEYS: readonly AiTaskKey[] = [
     'defaultText',
     'lightweightText',
+    'fastDialogue',
     'complexReasoning',
+    'runtimePlanning',
     'intentClassification',
     'intentDedup',
     'conversation',
@@ -25,7 +27,9 @@ const GENERATIVE_PROVIDER_LABELS: Readonly<Record<AiProvider, string>> = {
     openai: 'GPT',
     gemini: 'Gemini',
     zai: 'GLM',
-    openrouter: 'OpenRouter Auto',
+    openrouter: 'OpenRouter',
+    lmstudio: 'LM Studio',
+    kimi: 'Kimi',
 };
 
 export interface PresetProviderCount {
@@ -58,7 +62,8 @@ export function getGenerativeProviderCounts(models: Record<string, AiModelRef>):
     return [...counts.entries()]
         .map(([provider, count]) => ({
             provider,
-            label: getGenerativeProviderLabel(provider),
+            label: provider === 'openrouter' && Object.values(models).filter(ref => ref.provider === provider).every(ref => ref.model === 'openrouter/auto')
+                ? 'OpenRouter Auto' : getGenerativeProviderLabel(provider),
             count,
         }))
         .sort((left, right) => {

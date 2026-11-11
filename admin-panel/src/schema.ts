@@ -1,7 +1,8 @@
 import type { SectionDef } from './types';
 import COMMON_TIMEZONES from './timezones.json';
+import backgroundFeatures from '../../ai/background-features.json';
 
-export const CONFIG_SCHEMA: SectionDef[] = [
+const BASE_CONFIG_SCHEMA: SectionDef[] = [
   {
     id: 'api',
     title: 'API Ключи',
@@ -11,14 +12,40 @@ export const CONFIG_SCHEMA: SectionDef[] = [
         key: 'OPENAI_API_KEY',
         label: 'OpenAI API Key',
         type: 'password',
-        required: true,
-        hint: 'Используется для GPT fallback, web reasoning, embeddings, vision и whisper.',
+        required: false,
+        hint: 'Необязателен для текста через Kimi/OpenRouter. Ключ OpenAI или вашего прокси. Адрес прокси задаётся отдельно ниже.',
+      },
+      {
+        key: 'OPENAI_BASE_URL',
+        label: 'Использовать прокси для моделей OpenAI',
+        type: 'proxy',
+        placeholder: 'http://host.docker.internal:8080/v1',
+        hint: 'При выключении запросы идут напрямую в OpenAI. Прокси применяется к тексту, поиску, голосу и векторам памяти; изображения наследуют его, если отдельный адрес не задан.',
+      },
+      {
+        key: 'LM_STUDIO_BASE_URL',
+        label: 'LM Studio Base URL',
+        type: 'text',
+        placeholder: 'http://host.docker.internal:1234/v1',
+        hint: 'Из Docker Desktop адрес вашего компьютера — host.docker.internal. Изменение применяется после пересоздания контейнеров.',
+      },
+      {
+        key: 'LM_STUDIO_MODEL',
+        label: 'Модель LM Studio',
+        type: 'text',
+        hint: 'Точный ID из /v1/models. Используется локальным и гибридным пресетами; требуется пересоздание контейнеров.',
+      },
+      {
+        key: 'LM_STUDIO_API_KEY',
+        label: 'LM Studio API token',
+        type: 'password',
+        hint: 'Заполняйте, если в LM Studio включена авторизация. Применяется после пересоздания контейнеров.',
       },
       {
         key: 'OPENROUTER_API_KEY',
         label: 'OpenRouter API Key',
         type: 'password',
-        hint: 'Нужен для пресета Hybrid OpenRouter + GPT. Применяется после рестарта процесса.',
+        hint: 'Один ключ для разных текстовых моделей. Применяется после пересоздания контейнеров.',
       },
       {
         key: 'GEMINI_API_KEY',
@@ -27,16 +54,28 @@ export const CONFIG_SCHEMA: SectionDef[] = [
         hint: 'Нужен для пресетов Hybrid Gemini + GPT и Gemini Direct Balanced. Применяется после рестарта процесса.',
       },
       {
+        key: 'KIMI_API_KEY',
+        label: 'Kimi API Key (Moonshot)',
+        type: 'password',
+        hint: 'Ключ API платформы Moonshot, не подписки Kimi Code. Текст работает без OpenAI. Применяется после пересоздания контейнеров.',
+      },
+      {
         key: 'ZAI_API_KEY',
         label: 'Z.ai API Key',
         type: 'password',
         hint: 'Нужен для пресета GLM Balanced и обычного Z.ai API endpoint. Применяется после рестарта процесса.',
       },
       {
-        key: 'IDEOGRAM_API_KEY',
-        label: 'Ideogram API Key',
+        key: 'OPENAI_IMAGE_API_KEY',
+        label: 'Отдельный ключ OpenAI Image (необязательно)',
         type: 'password',
-        hint: 'Для генерации изображений через Ideogram',
+        hint: 'Пустое поле использует OPENAI_API_KEY. Применяется после пересоздания контейнеров. Модель выбирается на странице «Модели», внешность — в «Личность».',
+      },
+      {
+        key: 'OPENAI_IMAGE_BASE_URL',
+        label: 'Отдельный OpenAI Image Base URL (необязательно)',
+        type: 'text',
+        hint: 'Пустое поле использует OPENAI_BASE_URL, включая ваш lmrouter. Адрес должен включать /v1. Применяется после пересоздания контейнеров.',
       },
       {
         key: 'GOOGLE_MAPS_API_KEY',
@@ -59,33 +98,33 @@ export const CONFIG_SCHEMA: SectionDef[] = [
       },
       {
         key: 'ELEVENLABS_VOICE_ID',
-        label: 'ElevenLabs Voice ID',
+        label: 'ID голоса',
         type: 'text',
-        hint: 'ID голоса Nastya. Если оставить пустым, бот попробует найти голос по имени ниже.',
+        hint: 'ID выбранного голоса в ElevenLabs.',
       },
       {
         key: 'ELEVENLABS_VOICE_NAME',
-        label: 'ElevenLabs Voice Name',
+        label: 'Имя голоса',
         type: 'text',
         placeholder: 'Nastya',
-        hint: 'Используется только если Voice ID не задан',
+        hint: 'Используется, если ID голоса не указан.',
       },
       {
         key: 'ELEVENLABS_MODEL_ID',
-        label: 'ElevenLabs Model',
+        label: 'Модель речи',
         type: 'text',
         placeholder: 'eleven_v3',
       },
       {
         key: 'ELEVENLABS_OUTPUT_FORMAT',
-        label: 'ElevenLabs Output Format',
+        label: 'Формат аудио',
         type: 'text',
         placeholder: 'mp3_44100_128',
-        hint: 'Формат из quickstart и со скрина. Перед отправкой в Telegram бот перекодирует в OGG/Opus voice.',
+        hint: 'Формат аудио, который возвращает сервис озвучивания.',
       },
       {
         key: 'ELEVENLABS_VOICE_STABILITY',
-        label: 'Voice Stability',
+        label: 'Стабильность голоса',
         type: 'text',
         placeholder: '0.5',
       },
@@ -366,3 +405,30 @@ export const CONFIG_SCHEMA: SectionDef[] = [
     ],
   },
 ];
+
+const backgroundEnvKeys = new Set<string>(Object.values(backgroundFeatures).map(feature => feature.envKey));
+const allFields = BASE_CONFIG_SCHEMA.flatMap(section => section.fields);
+const take = (keys: string[]) => allFields.filter(field => keys.includes(field.key));
+export const KEY_SECTIONS: SectionDef[] = [
+  { id: 'keys-ai', title: 'Ключи AI', icon: '🔑', fields: take(['OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'ZAI_API_KEY', 'KIMI_API_KEY', 'OPENAI_IMAGE_API_KEY', 'LM_STUDIO_API_KEY']) },
+  { id: 'keys-voice', title: 'Озвучивание', icon: '🎙️', fields: take(['ELEVENLABS_API_KEY']) },
+  { id: 'keys-telegram', title: 'Telegram', icon: '✉️', fields: take(['KIRA_BOT_TOKEN', 'TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_SESSION_STRING']) },
+  { id: 'keys-services', title: 'Другие сервисы', icon: '🔌', fields: take(['GOOGLE_MAPS_API_KEY', 'QDRANT_API_KEY']) },
+  { id: 'model-proxy', title: 'Прокси для моделей', icon: '🌐', fields: take(['OPENAI_BASE_URL']) },
+];
+export const LOCAL_MODEL_CONNECTION_SECTION: SectionDef = {
+  id: 'local-model-connection', title: 'Подключение LM Studio', icon: '💻', fields: take(['LM_STUDIO_BASE_URL', 'LM_STUDIO_MODEL']),
+};
+export const VOICE_MODEL_SECTION: SectionDef = {
+  id: 'voice-model', title: 'Модель и голос озвучивания', icon: '🎙️', fields: allFields.filter(field => field.key.startsWith('ELEVENLABS_') && field.key !== 'ELEVENLABS_API_KEY'),
+};
+export const IMAGE_CONNECTION_SECTION: SectionDef = {
+  id: 'image-connection', title: 'Отдельный прокси изображений', icon: '🌐', fields: take(['OPENAI_IMAGE_BASE_URL']).map(field => ({ ...field, type: 'proxy', label: 'Использовать отдельный прокси для изображений', hint: 'При выключении используется общее подключение OpenAI из раздела «Подключения».' })),
+};
+const movedKeys = new Set([...KEY_SECTIONS, LOCAL_MODEL_CONNECTION_SECTION, VOICE_MODEL_SECTION, IMAGE_CONNECTION_SECTION].flatMap(section => section.fields.map(field => field.key)));
+export const CONFIG_SCHEMA: SectionDef[] = BASE_CONFIG_SCHEMA.filter(section => !['api', 'elevenlabs', 'bots', 'telegram'].includes(section.id)).map(section => ({
+  ...section,
+  fields: [...section.fields, ...(section.id === 'general' ? take(['KIRA_ALLOWED_USER_ID']) : [])].filter(field => !backgroundEnvKeys.has(field.key) && !movedKeys.has(field.key)),
+}));
+
+export const ALL_CONFIG_SECTIONS = [...KEY_SECTIONS, ...CONFIG_SCHEMA, LOCAL_MODEL_CONNECTION_SECTION, VOICE_MODEL_SECTION, IMAGE_CONNECTION_SECTION];

@@ -1,3 +1,4 @@
+import { generatedImageInput, generatedImageHistoryText } from "../utils/generatedImage";
 import { InlineKeyboard, InputFile } from "grammy";
 import { BotContext, ConversationReplyContext, SentMessageContext } from "../types";
 import * as fs from 'fs';
@@ -7,6 +8,7 @@ import {
     resolveTargetChat,
 } from "../reminder";
 import { type ProcessingResult } from "../orchestrator";
+import { recordResultDelivery } from '../services/productAnalytics';
 import { devLog, sendMessage } from "../utils";
 import { addToHistory } from "../utils/history";
 import { config } from "../config";
@@ -21,10 +23,11 @@ import {
     buildReminderConfirmationText,
 } from '../utils/reminderConfirmation';
 import { esc, paragraph } from '../utils/richMessage';
+import { RUNTIME_DATA_DIR } from '../utils/runtimeData';
 
 // ── Константы ──────────────────────────────────────────────
 
-export const TEMP_DIR = path.join(__dirname, 'temp');
+export const TEMP_DIR = process.env.KIRA_TENANT_ID ? path.join(RUNTIME_DATA_DIR, 'temp') : path.join(__dirname, 'temp');
 if (!fs.existsSync(TEMP_DIR)) {
     console.log('📂 Создание временной директории:', TEMP_DIR);
     fs.mkdirSync(TEMP_DIR, { recursive: true });
@@ -92,6 +95,25 @@ export async function replyAndStore(ctx: BotContext, text: string, options: any 
     return msg;
 }
 
+/** Photos stay separate from spoken text; their visual context lives in history and reply metadata. */
+export async function replyWithPhotoAndStore(ctx: BotContext, photo: InputFile | string, description: string) {
+    const sent = await ctx.replyWithPhoto(photo);
+    storeSentMessageText(ctx, sent.message_id, description);
+    storeSentMessageContext(ctx, sent.message_id, description, { kind: 'image', delivery: 'photo' });
+    await addToHistory(ctx, 'bot', description, { kind: 'image' });
+    if (ctx.persistOutgoingImageContext) {
+        await ctx.persistOutgoingImageContext(ctx.session.sentMessageContexts![sent.message_id]);
+    }
+    return sent;
+}
+
+export async function sendGeneratedImageAndStore(ctx: BotContext, result: ProcessingResult) {
+    const photo = generatedImageInput(result);
+    if (!photo) return;
+    await ctx.api.sendChatAction(ctx.chat!.id, 'upload_photo');
+    return replyWithPhotoAndStore(ctx, photo, generatedImageHistoryText(result));
+}
+
 // ── Реакции ─────────────────────────────────────────────────
 
 export function maybeReactToUser(ctx: BotContext, emoji?: string) {
@@ -118,7 +140,7 @@ export function canSendResultAsVoice(result: ProcessingResult): boolean {
         !result.icsFilePath &&
         !result.documentFilePath &&
         !result.imageGenerated &&
-        !result.generatedImageUrl;
+        !result.generatedImageUrl && !result.generatedImagePath;
 }
 
 export function shouldRunProactiveHint(result: ProcessingResult, processedMessage: string): boolean {
@@ -126,7 +148,7 @@ export function shouldRunProactiveHint(result: ProcessingResult, processedMessag
     if (result.reminderAction || result.reminderCreationFailures?.length) return false;
     if (result.reminderCreated) return false;
     if (result.messageDraft) return false;
-    if (result.imageGenerated || result.generatedImageUrl) return false;
+    if (result.imageGenerated || generatedImageInput(result)) return false;
     if (result.icsFilePath || result.documentFilePath) return false;
     if (result.negotiationSummarySent) return false;
     if (/^Продолжи задачу в браузере через Playwright\.|browserSessionId:/i.test(processedMessage)) return false;
@@ -209,6 +231,7 @@ export async function saveRemindersFromResult(
     service: Pick<typeof reminderService, 'createReminder'> = reminderService,
     resolveReminderTarget: typeof resolveTargetChat = resolveTargetChat,
 ) {
+    if (result.remindersPersisted) return;
     if (!result.reminderCreated && !result.reminderCreationFailures?.length) return;
     const list = result.reminderDetailsList ?? (result.reminderDetails ? [result.reminderDetails] : []);
     const requestedTargetNotificationCandidates: Reminder[] = [];
@@ -223,6 +246,7 @@ export async function saveRemindersFromResult(
             if (reminder.targetChat) requestedTargetNotificationCandidates.push(reminder);
         } catch (error) {
             console.error('[reminder] create failed:', error);
+            result.reminderPersistenceUncertain = true;
             failures.push({
                 text: details.text,
                 error: error instanceof Error ? error.message : String(error),
@@ -310,6 +334,7 @@ export async function sendDocumentFromResult(ctx: BotContext, result: Processing
         fs.unlinkSync(result.documentFilePath);
     } catch (fileError) {
         console.error("Ошибка при отправке документа:", fileError);
+        result.operationStatus = 'failed';
         await ctx.reply("Не удалось отправить документ. Попробуй запросить экспорт ещё раз.");
     }
 }
@@ -387,6 +412,22 @@ export async function sendResultToUser(
     result: ProcessingResult,
     voiceRequested = false,
 ): Promise<{ message_id: number }> {
+    return recordResultDelivery(ctx, result, () => sendResultPayload(ctx, result, voiceRequested));
+}
+
+async function sendResultPayload(ctx: BotContext, result: ProcessingResult, voiceRequested: boolean): Promise<{ message_id: number }> {
+    if (result.artifacts?.length) {
+        const sent = await replyProcessingResult(ctx, result, voiceRequested);
+        for (const artifact of result.artifacts) {
+            if (artifact.kind === 'image') {
+                const image = generatedImageInput({ generatedImagePath: artifact.path, generatedImageUrl: artifact.url });
+                if (image) await replyWithPhotoAndStore(ctx, image, generatedImageHistoryText(artifact));
+            } else if (artifact.path) {
+                await sendDocumentFromResult(ctx, { responseText: '', documentFilePath: artifact.path, documentFilename: artifact.filename, documentCaption: artifact.caption });
+            }
+        }
+        return sent;
+    }
     // ICS-файл (календарное событие)
     if (result.reminderCreated && result.icsFilePath) {
         const sent = await replyAndStore(ctx, result.responseText, result.keyboard ? {
@@ -420,17 +461,16 @@ export async function sendResultToUser(
     }
 
     // Сгенерированное изображение
-    if (result.imageGenerated && result.generatedImageUrl) {
+    if (result.imageGenerated && generatedImageInput(result)) {
         const sent = await replyAndStore(ctx, result.responseText, result.keyboard ? {
             reply_markup: result.keyboard
         } : {});
 
         try {
-            await ctx.api.sendChatAction(ctx.chat!.id, "upload_photo");
-            await ctx.replyWithPhoto(result.generatedImageUrl);
-            await addToHistory(ctx, 'bot', `[Сгенерированное изображение: ${result.generatedImageUrl}]`);
+            await sendGeneratedImageAndStore(ctx, result);
         } catch (imageError) {
             console.error("Ошибка при отправке сгенерированного изображения:", imageError);
+            result.operationStatus = 'failed';
             await ctx.reply("К сожалению, не удалось отправить сгенерированное изображение. Возможно, проблема с URL или сервисом генерации изображений.");
         }
         return sent;

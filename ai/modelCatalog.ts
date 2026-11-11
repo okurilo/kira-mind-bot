@@ -1,3 +1,6 @@
+import aggregatorModels from './aggregator-text-models.json';
+import capabilityOverrides from './provider-capability-overrides.json';
+
 export interface AiModelCatalogEntry {
     provider: string;
     model: string;
@@ -10,6 +13,21 @@ export interface AiModelCatalogEntry {
 }
 
 export const AI_MODEL_CATALOG: Readonly<Record<string, AiModelCatalogEntry>> = {
+    ...Object.fromEntries(Object.entries(aggregatorModels).flatMap(([provider, entry]) => entry.models.map(model => [
+        `${provider}:${model}`, { provider, model, modalities: provider === 'kimi'
+            || (capabilityOverrides as Record<string, Record<string, { supportsVision?: boolean }>>)[provider]?.[model]?.supportsVision
+            ? ['text', 'vision'] : ['text'], preferredApi: 'chat.completions' } as AiModelCatalogEntry,
+    ]))),
+    'openai:gpt-6-luna': {
+        provider: 'openai', model: 'gpt-6-luna', modalities: ['text', 'vision'],
+        maxContextTokens: 1050000, maxOutputTokens: 128000,
+        supportsReasoning: true, supportsCaching: true, preferredApi: 'responses',
+    },
+    'openai:gpt-6.1-sol': {
+        provider: 'openai', model: 'gpt-6.1-sol', modalities: ['text', 'vision'],
+        maxContextTokens: 1050000, maxOutputTokens: 128000,
+        supportsReasoning: true, supportsCaching: true, preferredApi: 'responses',
+    },
     'openai:gpt-5.4': {
         provider: 'openai',
         model: 'gpt-5.4',
@@ -95,6 +113,10 @@ export const AI_MODEL_CATALOG: Readonly<Record<string, AiModelCatalogEntry>> = {
         provider: 'openrouter',
         model: 'openrouter/auto',
         modalities: ['text'],
+        preferredApi: 'chat.completions',
+    },
+    'openrouter:moonshotai/kimi-k2.5': {
+        provider: 'openrouter', model: 'moonshotai/kimi-k2.5', modalities: ['text'],
         preferredApi: 'chat.completions',
     },
     'zai:glm-5.2': {

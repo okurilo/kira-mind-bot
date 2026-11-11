@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { CONFIG_SCHEMA } from "../admin-panel/src/schema";
+import { ALL_CONFIG_SECTIONS as CONFIG_SCHEMA } from "../admin-panel/src/schema";
 
 describe("admin configuration schema", () => {
     const fields = CONFIG_SCHEMA.flatMap((section) => section.fields);
@@ -25,7 +25,7 @@ describe("admin configuration schema", () => {
     });
 
     test("provides labels and supported editor types for every field", () => {
-        const supported = new Set(["text", "password", "number", "toggle", "textarea", "duration", "select"]);
+        const supported = new Set(["text", "password", "number", "toggle", "textarea", "duration", "select", "proxy"]);
         for (const field of fields) {
             assert.ok(field.key.trim());
             assert.ok(field.label.trim(), field.key);
@@ -34,12 +34,19 @@ describe("admin configuration schema", () => {
     });
 
     test("keeps critical credentials marked as required passwords", () => {
-        for (const key of ["OPENAI_API_KEY", "KIRA_BOT_TOKEN", "DB_PASSWORD"]) {
+        for (const key of ["KIRA_BOT_TOKEN", "DB_PASSWORD"]) {
             const field = fields.find((candidate) => candidate.key === key);
             assert.ok(field, key);
             assert.equal(field?.required, true, key);
             assert.equal(field?.type, "password", key);
         }
+    });
+
+    test("OpenAI credentials remain optional for independent local and alternative provider routes", () => {
+        const field = fields.find(candidate => candidate.key === "OPENAI_API_KEY");
+        assert.ok(field);
+        assert.equal(field.type, "password");
+        assert.equal(field.required, false);
     });
 
     test("keeps interval settings on the duration editor", () => {

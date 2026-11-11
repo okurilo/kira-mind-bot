@@ -10,6 +10,9 @@ import { GroupChatMessageEntity } from './entity/GroupChatMessageEntity';
 import { AiUsageLogEntity } from './entity/AiUsageLogEntity';
 import { PersonIdentityEntity } from './entity/PersonIdentityEntity';
 import { RecurringTaskEntity } from './entity/RecurringTaskEntity';
+import { ApiOperationEntity } from './entity/ApiOperationEntity';
+import { DialogueJobEntity } from './entity/DialogueJobEntity';
+import { WorkoutPrivacyLogger } from './services/workouts/privacyLogger';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -18,8 +21,10 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USER ?? 'postgres',
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME ?? 'KiraMind',
-  synchronize: true,
+  synchronize: process.env.KIRA_DATABASE_SYNC !== 'false',
+  ...(process.env.KIRA_TENANT_ID ? { extra: { max: 3 } } : {}),
   logging: process.env.NODE_ENV === 'development',
-  entities: [ReminderEntity, ChatEntity, BotSettingEntity, ChatGroupEntity, SessionEntity, HealthLogEntity, GroupChatMessageEntity, AiUsageLogEntity, PersonIdentityEntity, RecurringTaskEntity],
+  logger: new WorkoutPrivacyLogger(process.env.NODE_ENV === 'development'),
+  entities: [ReminderEntity, ChatEntity, BotSettingEntity, ChatGroupEntity, SessionEntity, HealthLogEntity, GroupChatMessageEntity, AiUsageLogEntity, PersonIdentityEntity, RecurringTaskEntity, ApiOperationEntity, DialogueJobEntity],
   migrations: [],
 });

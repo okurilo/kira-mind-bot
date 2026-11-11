@@ -6,6 +6,7 @@ import { USER_TIMEZONE } from "../constants";
 import { getProactiveChatId } from "../utils/allowedUserChatStore";
 import { getBotPersona, getCommunicationStyle } from "../persona";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
+import { isBackgroundFeatureEnabled } from "./backgroundFeatureService";
 import { getZonedDateKey, getZonedDateTimeParts } from "../utils/time";
 import { esc, paragraph, table, heading, RichBlock, sendStructured } from "../utils/richMessage";
 
@@ -61,8 +62,9 @@ function formatReminderTime(dueDate: string | Date): string {
     });
 }
 
-async function buildDigestGreeting(reminderCount: number): Promise<string> {
+export async function buildDigestGreeting(reminderCount: number): Promise<string> {
     const fallbackGreeting = buildDigestFallbackGreeting(reminderCount);
+    if (!await isBackgroundFeatureEnabled('morningDigestAi')) return fallbackGreeting;
 
     try {
         const response = await createChatCompletionForTask('lightweightText', {
@@ -95,6 +97,7 @@ export function buildDigestFallbackGreeting(reminderCount: number): string {
 }
 
 async function runDigest(bot: Bot<BotContext>): Promise<void> {
+    if (!await isBackgroundFeatureEnabled('morningDigest')) return;
     const dateKey = todayDateKey();
     if (lastSentDate === dateKey) return;
 
@@ -111,7 +114,6 @@ async function runDigest(bot: Bot<BotContext>): Promise<void> {
 }
 
 export function startMorningDigestScheduler(bot: Bot<BotContext>): void {
-    if (!config.morningDigestEnabled) return;
 
     if (timer) clearInterval(timer);
 

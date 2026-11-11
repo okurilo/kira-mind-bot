@@ -1,6 +1,9 @@
+import { accountOpenAiFetch, accountPolicyFetch } from '../accountPolicy';
 import path from 'path';
 import { readFile, stat } from 'fs/promises';
 import { OpenAI } from 'openai';
+import { assertAiResponseAllowed } from '../contentSafety';
+import { aiRequestOptions } from '../executionScope';
 import { getAiProviderDescriptor } from '../providerMetadata';
 import type { AiModelRef } from '../modelPresets';
 import type { AiProviderAdapter, AiProviderCapabilities, EmbeddingResult, ResponseResult, RetryPolicy } from './types';
@@ -91,7 +94,10 @@ function getGeminiAbortSignal(timeoutMs = getGeminiRequestTimeoutMs()): AbortSig
     return AbortSignal.timeout(timeoutMs);
 }
 
+const fetch=accountPolicyFetch('gemini');
+
 const geminiClient = new OpenAI({
+    fetch:accountOpenAiFetch('gemini'),
     apiKey: process.env.GEMINI_API_KEY || 'missing-gemini-api-key',
     baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     maxRetries: 0,
@@ -586,7 +592,7 @@ export const geminiProviderAdapter: AiProviderAdapter = {
         return withGeminiRequestSlot(() => this.client.chat.completions.create({
             ...this.normalizeChatParams(model, params),
             model,
-        }));
+        }, aiRequestOptions()));
     },
     async createResponse(model, params) {
         return withGeminiRequestSlot(async () => {
@@ -629,6 +635,7 @@ export const geminiProviderAdapter: AiProviderAdapter = {
             }
 
             const payload = await response.json() as Record<string, any>;
+            assertAiResponseAllowed(payload);
             const interactionUsage = payload.usage as Record<string, any> | undefined;
             const legacyUsage = payload.usage_metadata as Record<string, any> | undefined;
 

@@ -1,3 +1,4 @@
+import { isApiOnlyRuntime } from './utils/runtimeIdentity';
 import { Bot, InlineKeyboard } from "grammy";
 import { BotContext } from "./types";
 import { devLog } from "./utils";
@@ -267,7 +268,7 @@ async function sendReminder(bot: Bot<BotContext>, reminder: Reminder): Promise<v
 
         // В групповых чатах (chatId < 0) не добавляем кнопки —
         // посторонние могут нажимать их и вызывать спам-ответы бота
-        const isGroupReminder = reminder.chatId < 0;
+        const isGroupReminder = reminder.chatId < 0 && !(isApiOnlyRuntime() && reminder.chatId===Number(process.env.KIRA_RUNTIME_PRINCIPAL));
 
         const keyboard = isGroupReminder
             ? undefined
@@ -286,6 +287,8 @@ async function sendReminder(bot: Bot<BotContext>, reminder: Reminder): Promise<v
 
         // Сохраняем ID сообщения для последующих обновлений
         reminder.messageId = (sentMessage as { message_id?: number })?.message_id;
+        await (await import('./services/productAnalytics')).recordBackgroundDelivery('reminder_delivery', 'reminder', config.allowedUserId,
+            `${reminder.id}:${new Date(reminder.dueDate).toISOString()}`, Date.now());
         reminder.status = ReminderStatus.Sent;
 
         // Сохраняем обновлённый статус в БД
@@ -557,6 +560,8 @@ export async function postponeReminderUntil(
  */
 export async function cancelReminder(reminderId: string): Promise<boolean> {
     try {
+        // Persist before clearing live timers; a database failure must not report cancellation.
+        await ReminderRepository.delete(reminderId);
         // Отменяем таймер напоминания, если он существует
         const timer = remindersTimers.get(reminderId);
         if (timer) {
@@ -570,8 +575,6 @@ export async function cancelReminder(reminderId: string): Promise<boolean> {
             clearTimeout(expiryTimer);
             expiryTimers.delete(reminderId);
         }
-
-        await ReminderRepository.delete(reminderId).catch(e => console.error('[reminder] DB delete failed on cancel:', e));
 
         console.info(`[reminder] event=cancelled id=${reminderId}`);
         devLog(`Reminder ${reminderId} cancelled`);
