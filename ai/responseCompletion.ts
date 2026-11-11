@@ -171,7 +171,7 @@ export async function createResponseForTask(
             // Non-retryable: либо проброс (true-full), либо cross-provider fallback.
             if (!diagnostics.retryable) {
                 if (!allowsCrossProviderFallback(route.presetName)) throw error;
-                const fallbackModel = getTaskFallbackModel(taskKey, route.presetName);
+                const fallbackModel = getTaskFallbackModel(taskKey);
                 console.warn('[AI responses fallback]', {
                     taskKey,
                     traceId: trace.traceId,
@@ -234,7 +234,7 @@ export async function createResponseForTask(
                 return result;
             }
 
-            const fallbackModel = getTaskFallbackModel(taskKey, route.presetName);
+            const fallbackModel = getTaskFallbackModel(taskKey);
             console.warn('[AI responses fallback]', {
                 taskKey,
                 traceId: trace.traceId,

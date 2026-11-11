@@ -1,14 +1,11 @@
 import { getFallbackModel } from './fallbackModels';
-import { aiPresets, isTrueFullAiPreset, parseAiPresetName, type AiModelRef, type AiTaskKey } from './modelPresets';
+import { isTrueFullAiPreset, parseAiPresetName, type AiModelRef, type AiTaskKey } from './modelPresets';
 import { getAiProviderAdapter } from './providers/registry';
 import { resolveDegradationChain, type DegradationContext } from './providers/policyDefaults';
 
 export type FallbackPolicyMode = 'task-default';
 
-export function getTaskFallbackModel(taskKey: AiTaskKey, presetName?: string): AiModelRef {
-    if (parseAiPresetName(presetName) === 'gpt-lean') {
-        return aiPresets['gpt-lean'].models[taskKey];
-    }
+export function getTaskFallbackModel(taskKey: AiTaskKey): AiModelRef {
     return getFallbackModel(taskKey);
 }
 
