@@ -57,12 +57,12 @@ function lastEvolutionAgeMs(lastEvolutionAt: string | undefined): number {
   return Date.now() - timestamp;
 }
 
-function shouldAnalyzeConversation(message: string, lastEvolutionAt: string | undefined): boolean {
+export function shouldAnalyzeConversation(message: string, lastEvolutionAt: string | undefined): boolean {
   const trimmed = message.trim();
   if (trimmed.length < 24) return false;
 
   const age = lastEvolutionAgeMs(lastEvolutionAt);
-  const direct = DIRECT_SELF_MODEL_RE.test(trimmed) || (config.characterName.length > 2 && trimmed.toLocaleLowerCase('ru-RU').includes(config.characterName.toLocaleLowerCase('ru-RU')));
+  const direct = DIRECT_SELF_MODEL_RE.test(trimmed);
   const feedback = FEEDBACK_RE.test(trimmed);
 
   if ((direct || feedback) && age >= ACTIVE_EVOLUTION_INTERVAL_MS) {

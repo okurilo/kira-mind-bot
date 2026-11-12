@@ -57,6 +57,7 @@ test('a proposal is only a card; consent creates one real reminder and survives 
     assert.equal(f.messages.length, 1); assert.equal(f.saved.size, 0); assert.equal(f.scheduled.length, 0);
     assert.match(f.messages[0].body.html, /Контакт &lt;Альфа&gt;/);
     assert.match(f.messages[0].body.html, /Предлагаю напомнить/);
+    assert.doesNotMatch(f.messages[0].body.html, /заметила|заметил/u);
     const p = f.store.state.proposals[0], c = f.ctx();
     assert.match(f.messages[0].extra.reply_markup.inline_keyboard[0][0].callback_data, new RegExp(p.id));
     f.restart();

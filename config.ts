@@ -388,7 +388,7 @@ function createConfig() {
     openAiApiKey: process.env.OPENAI_API_KEY || "",
     elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || "",
     elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID || undefined,
-    elevenLabsVoiceName: process.env.ELEVENLABS_VOICE_NAME || "Nastya",
+    elevenLabsVoiceName: process.env.ELEVENLABS_VOICE_NAME?.trim() || (selectedConfig.eventDescriptionGender === 'мужской' ? undefined : 'Nastya'),
     elevenLabsModelId: process.env.ELEVENLABS_MODEL_ID || "eleven_v3",
     elevenLabsOutputFormat: process.env.ELEVENLABS_OUTPUT_FORMAT || "mp3_44100_128",
     elevenLabsVoiceStability: toOptionalNumber(process.env.ELEVENLABS_VOICE_STABILITY),

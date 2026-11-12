@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Box,
   Card,
@@ -249,6 +249,7 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
   const [loading, setLoading] = useState(true);
   const [savingKira, setSavingKira] = useState(false);
   const [savedName, setSavedName] = useState('');
+  const editRevision = useRef(0);
   const [tab, setTab] = useState<'character' | 'appearance'>('character');
   const [appearanceVisited, setAppearanceVisited] = useState(false);
 
@@ -264,6 +265,7 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
     key: keyof PersonalityProfile,
     value: string
   ) => {
+    editRevision.current += 1;
     setData((prev) => ({
       ...prev,
       [profile]: { ...prev[profile], [key]: value },
@@ -271,13 +273,15 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
   };
 
   const handleSave = async () => {
+    const savedRevision = editRevision.current;
+    const snapshot = data;
     setSavingKira(true);
     try {
-      const result = await savePersonality(data);
+      const result = await savePersonality(snapshot);
       if (result.success) {
         const refreshed = await fetchPersonality().catch(() => null);
-        if (refreshed) setData(refreshed);
-        const name = (refreshed || data).KiraMindBot.characterName.trim();
+        if (refreshed && editRevision.current === savedRevision) setData(refreshed);
+        const name = (refreshed || snapshot).KiraMindBot.characterName.trim();
         setSavedName(name);
         onSavedName?.(name);
         onToast(result.message || '✅ Личность сохранена. Перезапустите бота.', 'success');

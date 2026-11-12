@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { InputFile } from 'grammy';
+import { config } from '../config';
 import * as completion from '../ai/chatCompletion';
 import * as generation from '../services/imageGenerationService';
 import * as selfMemory from '../utils/kiraSelfMemory';
@@ -122,6 +123,9 @@ test('selfie details come from the photo rather than biography or the requested 
 });
 
 test('map history describes the actual marker without a provider URL or API key', async t => {
+    const previousGender = config.eventDescriptionGender;
+    config.eventDescriptionGender = 'мужской';
+    t.after(() => { config.eventDescriptionGender = previousGender; });
     t.mock.method(completion, 'createChatCompletionForTask', async () => answer('{"queryType":"address_lookup","address":"Тестовая улица, 12"}'));
     t.mock.method(GoogleMapsService.prototype, 'geocodeAddress', async () => ({
         formatted_address: 'Тестовый город, Тестовая улица, 12', place_id: 'synthetic-place', geometry: { location: { lat: 1, lng: 2 } },
@@ -130,6 +134,8 @@ test('map history describes the actual marker without a provider URL or API key'
     const result = await mapsAgent('Покажи на карте Тестовую улицу, 12');
     const text = generatedImageHistoryText(result);
     assert.equal(result.imageGenerated, true);
+    assert.match(result.responseText ?? '', /Я также подготовил карту/u);
+    assert.doesNotMatch(result.responseText ?? '', /подготовила/u);
     assert.match(text, /Тестовая улица, 12/);
     assert.match(text, /красным маркером/);
     assert.ok(!text.includes('https:') && !text.includes('synthetic-private-key'));

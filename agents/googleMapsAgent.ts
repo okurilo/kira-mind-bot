@@ -432,7 +432,7 @@ async function processAddressLookupQuery(
             `Полный адрес: ${geocoded.formatted_address}\n` +
             `Координаты: ${lat}, ${lng}\n` +
             `ID места: ${geocoded.place_id}\n\n` +
-            `Я также подготовила карту для наглядности. 🗺️`;
+            `${getBotGenderedText('Я также подготовила', 'Я также подготовил')} карту для наглядности. 🗺️`;
 
         // Возвращаем результат с URL статической карты
         return {

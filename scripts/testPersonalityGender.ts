@@ -25,11 +25,18 @@ try {
 
     process.env.PERSONALITY_FILE = personalityFile;
     process.env.KIRA_BOT_TOKEN = "test-token";
+    process.env.ELEVENLABS_VOICE_ID = '';
+    process.env.ELEVENLABS_VOICE_NAME = '';
 
     const { config } = require("../config") as typeof import("../config");
 
     assert.equal(config.characterName, "Макс");
     assert.equal(config.eventDescriptionGender, "мужской");
+    assert.equal(config.elevenLabsVoiceName, undefined);
+    process.env.ELEVENLABS_VOICE_NAME = 'Синтетический голос';
+    delete require.cache[require.resolve('../config')];
+    assert.equal((require('../config') as typeof import('../config')).config.elevenLabsVoiceName, 'Синтетический голос');
+    process.env.ELEVENLABS_VOICE_NAME = '';
     assert.match(config.persona, /мужчин|мужском роде/u);
     assert.doesNotMatch(config.persona, /женщин|женском роде/u);
     assert.doesNotMatch(config.persona, /Кира/u);
@@ -103,6 +110,7 @@ try {
     fs.writeFileSync(personalityFile, JSON.stringify({ KiraMindBot: { characterName: 'Кира', characterGender: 'женский' } }));
     delete require.cache[require.resolve('../config')];
     const kiraConfig = (require('../config') as typeof import('../config')).config;
+    assert.equal(kiraConfig.elevenLabsVoiceName, 'Nastya');
     assert.match(kiraConfig.persona, /^Ты — Кира, женщина-собеседница/u);
     assert.match(kiraConfig.biography, /окончила СПбГУ по направлению психологии/u);
     const originalName = config.characterName;

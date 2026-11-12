@@ -167,7 +167,7 @@ EOF
     if [ -n "${ELEVENLABS_API_KEY:-}" ]; then
         cat >> "$ENV_FILE" << EOF
 ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
-ELEVENLABS_VOICE_NAME=Nastya
+ELEVENLABS_VOICE_NAME=
 ELEVENLABS_MODEL_ID=eleven_v3
 ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
 ELEVENLABS_VOICE_STABILITY=0.5
@@ -279,7 +279,7 @@ collect_config() {
     prompt_optional_default IDEOGRAM_API_KEY "Ideogram API Key" "${IDEOGRAM_API_KEY:-}" "https://ideogram.ai/manage-api"
     prompt_optional_default ELEVENLABS_API_KEY "ElevenLabs API Key" "${ELEVENLABS_API_KEY:-}" "https://elevenlabs.io/app/settings/api-keys"
     if [ -n "${ELEVENLABS_API_KEY:-}" ]; then
-        prompt_optional_default ELEVENLABS_VOICE_ID "ElevenLabs Voice ID (Nastya)" "${ELEVENLABS_VOICE_ID:-}" "Можно оставить пустым: бот найдёт голос по имени Nastya через /v2/voices"
+        prompt_optional_default ELEVENLABS_VOICE_ID "ElevenLabs Voice ID" "${ELEVENLABS_VOICE_ID:-}" "Для мужского персонажа укажите ID или имя подходящего голоса; женский профиль по умолчанию использует Nastya"
     fi
 
     echo -e "\n${BOLD}Telegram User Client (чтение входящих сообщений)${NC}"

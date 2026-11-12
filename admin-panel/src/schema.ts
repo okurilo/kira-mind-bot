@@ -106,8 +106,7 @@ const BASE_CONFIG_SCHEMA: SectionDef[] = [
         key: 'ELEVENLABS_VOICE_NAME',
         label: 'Имя голоса',
         type: 'text',
-        placeholder: 'Nastya',
-        hint: 'Используется, если ID голоса не указан.',
+        hint: 'Используется, если ID голоса не указан. Для мужского персонажа выберите подходящий голос.',
       },
       {
         key: 'ELEVENLABS_MODEL_ID',

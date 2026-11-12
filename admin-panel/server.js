@@ -27,6 +27,7 @@ const { buildAiUsageSummary, buildAiUsageTracePage } = require('./aiUsageAnalyti
 const { registerProductAnalyticsRoutes } = require('./productAnalytics');
 const { getPresetAvailabilityForMemoryProfile, getProviderDescriptor } = require('./presetAvailability');
 const { hasLegacyDigitalBiography, isLegacyKiraDefault } = require('../utils/legacyPersonalitySanitizer');
+const { readPersonalityDocument, writePersonalityProfile } = require('./personalityFile');
 const { createMemoryEmbeddingHttp } = require('../ai/memoryEmbeddingHttp');
 const COMMON_TIMEZONES = require('./src/timezones.json');
 const {
@@ -2360,7 +2361,7 @@ app.get('/api/ai-usage/traces', requireAuth, async (req, res) => {
 function readPersonality() {
   if (!fs.existsSync(PERSONALITY_FILE)) return DEFAULT_PERSONALITY;
   try {
-    const raw = JSON.parse(fs.readFileSync(PERSONALITY_FILE, 'utf8'));
+    const raw = readPersonalityDocument(PERSONALITY_FILE);
     const gender = raw.KiraMindBot?.characterGender === 'мужской' ? 'мужской' : 'женский';
     const defaults = getDefaultPersonalityProfile(gender);
     // Merge with defaults so missing keys always have a value
@@ -2373,9 +2374,7 @@ function readPersonality() {
 }
 
 function writePersonality(data) {
-  const dir = path.dirname(PERSONALITY_FILE);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(PERSONALITY_FILE, JSON.stringify(data, null, 2));
+  writePersonalityProfile(PERSONALITY_FILE, data.KiraMindBot);
 }
 
 async function readKiraResidenceFromDb(pool, fallbackCity) {
@@ -2428,6 +2427,7 @@ app.post('/api/personality', requireAuth, async (req, res) => {
     const currentResidence = await readKiraResidenceFromDb(pool, fallbackCity);
     const currentCity = requestedCity || currentResidence.city;
     const sanitized = sanitizeLegacyPersonality({ ...KiraMindBot, currentCity });
+    readPersonalityDocument(PERSONALITY_FILE);
     await writeKiraResidenceToDb(pool, currentResidence, currentCity);
     writePersonality({ KiraMindBot: sanitized });
     res.json({ success: true, message: '✅ Личность сохранена. Текущий город применится сразу, остальные поля — после перезапуска.' });

@@ -76,7 +76,7 @@ function when(iso: string): string {
     return new Date(iso).toLocaleString('ru-RU', { timeZone: USER_TIMEZONE, day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 function blocks(p: TelegramReminderProposal) {
-    return [heading('⏰ Предложение напоминания', 3), paragraph(`В переписке с <b>${esc(p.chatTitle)}</b> заметила повод напомнить:`),
+    return [heading('⏰ Предложение напоминания', 3), paragraph(`В переписке с <b>${esc(p.chatTitle)}</b> есть повод напомнить:`),
         paragraph(`<b>${esc(p.text)}</b>`), paragraph(`${p.timing === 'suggested' ? 'Предлагаю напомнить' : 'Напомнить'}: <b>${esc(when(p.remindAt))}</b> (${esc(USER_TIMEZONE)}).`),
         paragraph('Создать это напоминание?')];
 }

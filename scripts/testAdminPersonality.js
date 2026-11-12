@@ -1,6 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { writePersonalityProfile } = require('../admin-panel/personalityFile');
 const {
   DEFAULT_PERSONALITY,
   getDefaultPersonalityProfile,
@@ -40,6 +44,22 @@ assert.equal(customPersona.characterName, 'Макс');
 assert.equal(customPersona.persona, 'Пользовательский мужской промпт');
 assert.equal(customPersona.biography, 'Пользовательская биография');
 assert.equal(customPersona.proactiveMessageHint, maleDefaults.proactiveMessageHint);
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'personality-profile-'));
+try {
+  const file = path.join(directory, 'personality.json');
+  const otherProfile = { characterName: 'Лея', biography: 'Синтетическая биография' };
+  fs.writeFileSync(file, JSON.stringify({ KiraMindBot: femaleDefaults, OtherBot: otherProfile }));
+  writePersonalityProfile(file, { ...maleDefaults, characterName: 'Макс' });
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(saved.KiraMindBot.characterName, 'Макс');
+  assert.deepEqual(saved.OtherBot, otherProfile);
+  fs.writeFileSync(file, '{invalid');
+  assert.throws(() => writePersonalityProfile(file, maleDefaults));
+  assert.equal(fs.readFileSync(file, 'utf8'), '{invalid');
+} finally {
+  fs.rmSync(directory, { recursive: true, force: true });
+}
 
 const {
   normalizeKiraResidenceCity,

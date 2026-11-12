@@ -197,7 +197,7 @@ prompt_optional GOOGLE_MAPS_API_KEY "Google Maps API Key" "https://console.cloud
 prompt_optional IDEOGRAM_API_KEY "Ideogram API Key" "https://ideogram.ai/manage-api"
 prompt_optional ELEVENLABS_API_KEY "ElevenLabs API Key" "https://elevenlabs.io/app/settings/api-keys"
 if [ -n "${ELEVENLABS_API_KEY:-}" ]; then
-    prompt_optional ELEVENLABS_VOICE_ID "ElevenLabs Voice ID (Nastya)" "Можно оставить пустым: бот найдёт голос по имени Nastya через /v2/voices"
+    prompt_optional ELEVENLABS_VOICE_ID "ElevenLabs Voice ID" "Для мужского персонажа укажите ID или имя подходящего голоса; женский профиль по умолчанию использует Nastya"
 fi
 
 # Telegram User Client
@@ -282,7 +282,7 @@ if [ -n "${IDEOGRAM_API_KEY:-}" ]; then
 fi
 if [ -n "${ELEVENLABS_API_KEY:-}" ]; then
     echo "ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}" >> "$ENV_FILE"
-    echo "ELEVENLABS_VOICE_NAME=Nastya" >> "$ENV_FILE"
+    echo "ELEVENLABS_VOICE_NAME=" >> "$ENV_FILE"
     echo "ELEVENLABS_MODEL_ID=eleven_v3" >> "$ENV_FILE"
     echo "ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128" >> "$ENV_FILE"
     echo "ELEVENLABS_VOICE_STABILITY=0.5" >> "$ENV_FILE"

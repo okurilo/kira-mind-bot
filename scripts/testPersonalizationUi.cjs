@@ -23,6 +23,7 @@ async function main() {
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   let current = { ...profile };
+  let delayedRefresh;
   try {
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
@@ -34,6 +35,12 @@ async function main() {
             current.proactiveMessageHint = 'как будто ты сам написал первым';
           }
           return route.fulfill({ json: { success: true } });
+        }
+        if (delayedRefresh) {
+          const delayed = delayedRefresh;
+          delayedRefresh = undefined;
+          delayed.started();
+          await delayed.release;
         }
         return route.fulfill({ json: { KiraMindBot: current } });
       }
@@ -76,6 +83,17 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('input[placeholder="как будто ты сам написал первым"]')?.value === 'как будто ты сам написал первым');
     assert.equal(await page.getByLabel('Подсказка для проактивных сообщений').inputValue(), 'как будто ты сам написал первым');
     assert.match(await page.title(), /^Лев/);
+    let refreshStarted;
+    let releaseRefresh;
+    const started = new Promise(resolve => { refreshStarted = resolve; });
+    const release = new Promise(resolve => { releaseRefresh = resolve; });
+    delayedRefresh = { started: refreshStarted, release };
+    await page.getByRole('button', { name: 'Сохранить' }).click();
+    await started;
+    await page.getByLabel('Стиль общения').fill('Несохранённая правка во время обновления');
+    releaseRefresh();
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent?.includes('Сохранить') && !button.disabled));
+    assert.equal(await page.getByLabel('Стиль общения').inputValue(), 'Несохранённая правка во время обновления');
     await page.getByRole('tab', { name: 'Внешность' }).click();
     await page.getByText('Ваш референс').waitFor();
     await page.getByRole('button', { name: 'Настройки' }).first().click();
