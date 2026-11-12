@@ -127,7 +127,7 @@ export const McpSettingsSection = forwardRef<McpSettingsHandle, Props>(function 
     setDisconnect(false);
     if (!saved || !editor) return;
     setBusy(true); setError('');
-    try { setSaved(await deleteMcpConnection(editor.id, saved.revision)); closeEditor(); onToast('MCP отключён в Кире', 'success'); }
+    try { setSaved(await deleteMcpConnection(editor.id, saved.revision)); closeEditor(); onToast('MCP отключён у бота', 'success'); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось отключить MCP'); }
     finally { setBusy(false); }
   }
@@ -140,7 +140,7 @@ export const McpSettingsSection = forwardRef<McpSettingsHandle, Props>(function 
   return <Card><CardContent><Stack spacing={2.5}>
     <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} spacing={1.5}>
       <Box sx={{ flex: 1 }}><Typography variant="h6" component="h3">MCP-серверы</Typography>
-        <Typography variant="body2" color="text.secondary">Подключай внешние данные и инструменты к Кире. Каждый сервер настраивается отдельно.</Typography></Box>
+        <Typography variant="body2" color="text.secondary">Подключай внешние данные и инструменты к боту. Каждый сервер настраивается отдельно.</Typography></Box>
       {saved && <Chip size="small" variant="outlined" label={`Подключено: ${saved.servers.length} / 16`} />}
       {busy && <CircularProgress size={20} />}
     </Stack>
@@ -164,12 +164,12 @@ export const McpSettingsSection = forwardRef<McpSettingsHandle, Props>(function 
     {editor && <Box ref={editorRef} sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 2.5, scrollMarginTop: 24 }}><Stack spacing={2.5}>
       <Typography variant="h6" component="h4">{editor.creating ? 'Новое подключение' : `Настройки ${editor.id}`}</Typography>
       <TextField label="ID сервера" value={editor.id} disabled={locked || !editor.creating} fullWidth onChange={event => change({ id: event.target.value })} helperText="Уникальное короткое имя латиницей, например notes или money-maker." />
-      <TextField label="Описание для Киры" value={editor.description} disabled={locked} fullWidth multiline minRows={2} onChange={event => change({ description: event.target.value })} helperText="Какие данные и действия даёт сервер. По описанию Кира выбирает подходящее подключение." />
+      <TextField label="Описание для бота" value={editor.description} disabled={locked} fullWidth multiline minRows={2} onChange={event => change({ description: event.target.value })} helperText="Какие данные и действия даёт сервер. По описанию бот выбирает подходящее подключение." />
       <TextField select label="Транспорт" value={editor.transport} disabled={locked} fullWidth onChange={event => change({ transport: event.target.value as Editor['transport'] })}>
         <MenuItem value="http">Streamable HTTP</MenuItem><MenuItem value="jsonrpc">POST JSON-RPC</MenuItem><MenuItem value="stdio">Локальный процесс (stdio)</MenuItem>
       </TextField>
       {editor.transport === 'stdio' ? <>
-        <TextField label="Команда" value={editor.command} disabled={locked} fullWidth onChange={event => change({ command: event.target.value })} placeholder="/usr/local/bin/my-mcp-server" helperText="Путь внутри окружения Киры и админки. Команда запускается без shell." />
+        <TextField label="Команда" value={editor.command} disabled={locked} fullWidth onChange={event => change({ command: event.target.value })} placeholder="/usr/local/bin/my-mcp-server" helperText="Путь внутри окружения бота и админки. Команда запускается без shell." />
         <TextField label="Аргументы команды · JSON" value={editor.args} disabled={locked} fullWidth multiline minRows={2} onChange={event => change({ args: event.target.value })} helperText={'Массив строк, например ["--port", "3000"]. Секреты передавай через переменные окружения.'} />
         <SecretFields rows={editor.env} label="Переменные окружения" disabled={locked} onChange={env => change({ env })} />
       </> : <>
@@ -211,11 +211,11 @@ export const McpSettingsSection = forwardRef<McpSettingsHandle, Props>(function 
         {!editor.creating && <Button color="error" disabled={locked} onClick={() => setDisconnect(true)}>Отключить</Button>}
       </Stack>
     </Stack></Box>}
-    <Typography variant="caption" color="text.secondary">Настройки применяются без перезапуска. Секреты хранятся на сервере. Отключение удаляет подключение из Киры; токен отзывается у его поставщика.</Typography>
+    <Typography variant="caption" color="text.secondary">Настройки применяются без перезапуска. Секреты хранятся на сервере. Отключение удаляет подключение у бота; токен отзывается у его поставщика.</Typography>
   </Stack></CardContent>
     <Dialog open={disconnect} onClose={() => setDisconnect(false)}>
       <DialogTitle>Отключить {editor?.id}?</DialogTitle>
-      <DialogContent>Кира удалит это подключение и его сохранённые секреты. Остальные MCP продолжат работать.</DialogContent>
+      <DialogContent>Бот удалит это подключение и его сохранённые секреты. Остальные MCP продолжат работать.</DialogContent>
       <DialogActions><Button onClick={() => setDisconnect(false)}>Отмена</Button><Button color="error" onClick={() => { void remove(); }}>Отключить</Button></DialogActions>
     </Dialog>
   </Card>;

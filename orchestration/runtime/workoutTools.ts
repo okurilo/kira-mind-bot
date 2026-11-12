@@ -47,7 +47,7 @@ export function workoutTools(factory: Factory = serviceFor): ToolDefinition[] {
             const data = await factory(context).healthStatus();
             return read({ sync: data.sync, dailySteps: data.dailySteps.filter(row => (!args.localDate || row.localDate === args.localDate) && (!args.timeZone || row.timeZone === args.timeZone)).slice(0, 10) });
         }),
-        definition('workouts.command', 'Запросить управление тренировкой Киры на её реальном устройстве. Это queued, фактический успех требует события и ACK устройства.', objectSchema({
+        definition('workouts.command', 'Запросить управление тренировкой персонажа на подключённом устройстве. Это queued, фактический успех требует события и ACK устройства.', objectSchema({
             action: { type: 'string', enum: Object.keys(actionNames) }, workoutId: str('UUID сессии из контекста; без него используется активная'),
             deviceId: str('UUID выбранного iPhone из контекста'), activityType: period.activityType,
             location: { type: 'string', enum: ['indoor', 'outdoor', 'unspecified'] }, timeZone: str('Часовой пояс IANA'),
@@ -59,7 +59,7 @@ export function workoutTools(factory: Factory = serviceFor): ToolDefinition[] {
             if (action === 'start') {
                 if (!args.activityType) return { status: 'needs_input', summary: 'Какую тренировку начать: бег, ходьба, велосипед или силовую?', question: 'Какую тренировку начать?', data: { devices: target.devices } };
                 const devices = target.devices.filter(d => !args.deviceId || d.id === args.deviceId);
-                if (devices.length !== 1) return { status: 'needs_input', summary: devices.length ? 'На каком iPhone начать тренировку?' : 'Открой раздел тренировок в приложении Киры на iPhone.', question: 'Выбери подключённый iPhone.', data: { devices: target.devices } };
+                if (devices.length !== 1) return { status: 'needs_input', summary: devices.length ? 'На каком iPhone начать тренировку?' : 'Открой раздел тренировок в приложении на iPhone.', question: 'Выбери подключённый iPhone.', data: { devices: target.devices } };
                 const d = devices[0];
                 body = { deviceId: d.id, bindingId: d.bindingId, action, args: { activityType: args.activityType, location: args.location ?? 'unspecified', mode: 'manual', timeZone: args.timeZone ?? target.latestDailySteps?.timeZone ?? USER_TIMEZONE } };
             } else {

@@ -113,7 +113,7 @@ export class TelegramUiService {
         if (!match || match[0] !== query.data || (match[1] === 'f') !== (match[4] !== undefined)) return { error: 'Неизвестная команда.' };
         return this.store.transact(owner, async tx => {
             const card = await tx.get<Card>('cards', String(query.message_id));
-            if (!card || card.expires <= this.now() || !await this.current(tx, card.turn)) return { error: 'Карточка устарела. Задай вопрос Кире заново.' };
+            if (!card || card.expires <= this.now() || !await this.current(tx, card.turn)) return { error: 'Карточка устарела. Задай вопрос боту заново.' };
             const { state } = card;
             if (state.done || Number(match[2]) !== state.r) return { state, error: state.done ? 'Запрос уже принят. Проверь ответ в чате.' : 'Состояние изменилось. Повтори выбор.' };
             const index = Number(match[3]);

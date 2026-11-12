@@ -37,7 +37,6 @@ const EMPTY_PROFILE: PersonalityProfile = {
 };
 
 interface ProfileEditorProps {
-  icon: string;
   title: string;
   values: PersonalityProfile;
   onChange: (key: keyof PersonalityProfile, value: string) => void;
@@ -45,11 +44,11 @@ interface ProfileEditorProps {
   saving: boolean;
 }
 
-function ProfileEditor({ icon, title, values, onChange, onSave, saving }: ProfileEditorProps) {
+function ProfileEditor({ title, values, onChange, onSave, saving }: ProfileEditorProps) {
   return (
     <Card id={`personality-${title.toLowerCase().replace(/\s+/g, '-')}`} sx={{ mb: 2 }}>
       <CardHeader
-        title={`${icon} ${title}`}
+        title={title}
         titleTypographyProps={{ variant: 'subtitle1', fontWeight: 600, color: 'secondary.main' }}
         action={
           <Button
@@ -240,9 +239,10 @@ function ProfileEditor({ icon, title, values, onChange, onSave, saving }: Profil
 
 interface Props {
   onToast: (message: string, severity: 'success' | 'error') => void;
+  onSavedName?: (name: string) => void;
 }
 
-export function PersonalitySection({ onToast }: Props) {
+export function PersonalitySection({ onToast, onSavedName }: Props) {
   const [data, setData] = useState<PersonalityConfig>({
     KiraMindBot: { ...EMPTY_PROFILE },
   });
@@ -274,6 +274,7 @@ export function PersonalitySection({ onToast }: Props) {
     try {
       const result = await savePersonality(data);
       if (result.success) {
+        onSavedName?.(data.KiraMindBot.characterName.trim());
         onToast(result.message || '✅ Личность сохранена. Перезапустите бота.', 'success');
       } else {
         onToast(result.error || 'Ошибка сохранения', 'error');
@@ -305,7 +306,6 @@ export function PersonalitySection({ onToast }: Props) {
         </Typography>
 
         <ProfileEditor
-          icon="🌸"
           title={`${data.KiraMindBot.characterName.trim() || 'Персонаж'} — Личность и характер`}
           values={data.KiraMindBot}
           onChange={(key, value) => handleChange('KiraMindBot', key, value)}
@@ -315,7 +315,7 @@ export function PersonalitySection({ onToast }: Props) {
         </>}
       </Box>
       <Box role="tabpanel" id="personality-panel-appearance" aria-labelledby="personality-tab-appearance" hidden={tab !== 'appearance'}>
-        {appearanceVisited && <CharacterReferenceSection onToast={onToast} />}
+        {appearanceVisited && <CharacterReferenceSection onToast={onToast} assistantName={data.KiraMindBot.characterName.trim()} />}
       </Box>
     </Box>
   );

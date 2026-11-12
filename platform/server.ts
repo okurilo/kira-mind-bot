@@ -73,7 +73,7 @@ async function proxy(req: http.IncomingMessage, res: http.ServerResponse, endpoi
         // Browser observers must detach promptly; ordinary held messages retain their existing completion semantics.
         if (/^\/api\/v1\/browser\/sessions\/[0-9a-f-]+\/events$/.test(route)) res.once('close', () => upstream.destroy());
         upstream.setTimeout(600_000, () => upstream.destroy(new Error('Runtime timeout')));
-        upstream.once('error', () => reject(new ApiError(502, 'kira_unavailable', 'Кира временно недоступна. После сбоя повторяй действие с прежним Idempotency-Key.')));
+        upstream.once('error', () => reject(new ApiError(502, 'kira_unavailable', 'Бот временно недоступен. После сбоя повторяй действие с прежним Idempotency-Key.')));
         upstream.end(body);
     });
 }

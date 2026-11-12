@@ -137,13 +137,13 @@ const BASE_CONFIG_SCHEMA: SectionDef[] = [
     fields: [
       {
         key: 'KIRA_BOT_TOKEN',
-        label: 'Kira Bot Token',
+        label: 'Токен Telegram-бота',
         type: 'password',
         required: true,
       },
       {
         key: 'KIRA_ALLOWED_USER_ID',
-        label: 'Kira — Telegram User ID владельца',
+        label: 'Telegram User ID владельца',
         type: 'text',
         hint: 'Узнать свой ID: напиши @userinfobot в Telegram',
         required: true,
@@ -324,18 +324,18 @@ const BASE_CONFIG_SCHEMA: SectionDef[] = [
     title: 'Проактивность и переписки',
     icon: '🌸',
     fields: [
-      { key: 'KIRA_PROACTIVE_ENABLED', label: 'Личные сообщения Киры включены', type: 'toggle' },
+      { key: 'KIRA_PROACTIVE_ENABLED', label: 'Личные сообщения бота включены', type: 'toggle' },
       {
         key: 'KIRA_PROACTIVE_INTERVAL_MS',
-        label: 'Кира пишет первой не чаще, чем раз в',
+        label: 'Бот пишет первым не чаще, чем раз в',
         type: 'duration',
-        hint: 'Ограничивает только самостоятельные сообщения Киры, а не ответы на ваши сообщения',
+        hint: 'Ограничивает только самостоятельные сообщения бота, а не ответы на ваши сообщения',
       },
       {
         key: 'KIRA_LIFE_WEB_GROUNDING_ENABLED',
         label: 'Проверять детали событий через веб-поиск',
         type: 'toggle',
-        hint: 'Находит любую релевантную деталь реального мира по текущей жизненной линии, биографии и интересам Киры',
+        hint: 'Находит релевантные детали реального мира по жизненной линии, биографии и интересам персонажа',
       },
       {
         key: 'KIRA_PROACTIVE_QUIET_HOURS_ENABLED',
@@ -393,7 +393,7 @@ const BASE_CONFIG_SCHEMA: SectionDef[] = [
         label: 'Не включать свежие входящие в рефлексию, минут',
         type: 'number',
         placeholder: '60',
-        hint: 'Даёт вам время ответить до того, как Кира сочтёт сообщение незакрытым хвостом',
+        hint: 'Даёт вам время ответить до того, как бот сочтёт сообщение незакрытым хвостом',
       },
       { key: 'MEMORY_INSIGHT_ENABLED', label: 'Напоминания по сохранённой памяти включены', type: 'toggle' },
       {

@@ -12,6 +12,7 @@ export function defaultImageSettings(env?: NodeJS.ProcessEnv): ImageSettings;
 export function imageConnection(env?: NodeJS.ProcessEnv): { apiKey: string; baseURL: string };
 export function imageMime(data: Buffer): string;
 export function readReference(runtimeDir: string, defaultFile?: string | null): Promise<CharacterReference | null>;
+export function defaultReferenceForName(name: string): string | null;
 export function saveReference(runtimeDir: string, data: Buffer): Promise<void>;
 export function deleteReference(runtimeDir: string): Promise<void>;
 export function buildImageRequest(settings: ImageSettings, prompt: string, reference?: CharacterReference | null): Record<string, unknown>;

@@ -161,7 +161,7 @@ export class CommerceBrowserHost {
             const assistance = host.session.snapshot().assistanceRequest;
             const kind = assistance?.kind === 'login' ? 'login' : assistance?.kind === 'payment' ? 'payment' : 'blocked';
             throw new CommerceFailure(kind === 'login' ? 'login_required' : 'blocked', assistance?.prompt ?? 'Продолжи текущую задачу магазина после ручного шага.',
-                this.interaction(host, kind, assistance?.prompt ?? 'Проверь текущую страницу и явно верни управление Кире.'));
+                this.interaction(host, kind, assistance?.prompt ?? 'Проверь текущую страницу и явно верни управление боту.'));
         }
         const execute = () => host.session.agentCall(host.session.generation, () => work(host));
         const aborted = () => { void host.session.suspend('paused', 'commerce_request_aborted').catch(() => {}); };
@@ -182,7 +182,7 @@ export class CommerceBrowserHost {
         if (!this.provider.startsWith('yandex-')) return;
         const url = new URL(host.page.url());
         if (url.origin !== new URL(storefront(this.provider).url).origin || !/^\/showcaptcha\/?$/.test(url.pathname)) return;
-        const prompt = 'Магазин запросил проверку «Я не робот». Пройди её самостоятельно в общем браузере, затем явно верни управление Кире.';
+        const prompt = 'Магазин запросил проверку «Я не робот». Пройди её самостоятельно в общем браузере, затем явно верни управление боту.';
         if (['running', 'starting'].includes(host.session.state)) await host.session.needsUser(prompt, 'captcha');
         throw new CommerceFailure('blocked', prompt, this.interaction(host, 'captcha', prompt));
     }
@@ -190,7 +190,7 @@ export class CommerceBrowserHost {
     async connect(): Promise<CommerceInteraction> {
         const host = await this.open();
         if (host.page.url() === 'about:blank') await this.run(host => host.page.goto(storefront(this.provider).url, { waitUntil: 'domcontentloaded', timeout: 25000 }).then(() => undefined));
-        await host.session.needsUser('Войди в магазин в общем браузере. Пароль и SMS-код вводи только на сайте, затем верни управление Кире.', 'login');
+        await host.session.needsUser('Войди в магазин в общем браузере. Пароль и SMS-код вводи только на сайте, затем верни управление боту.', 'login');
         return this.interaction(host, 'login', 'Нужен вход в магазин в общем браузере.');
     }
     async authHint() {

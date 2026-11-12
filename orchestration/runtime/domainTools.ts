@@ -243,12 +243,12 @@ export function domainTools(): ToolDefinition[] {
             return processingOutput(result);
         }),
         readTool('health.export', 'health-diary', 'Подготовить файл дневника за выбранное число дней.', objectSchema({ days: { type: 'integer', minimum: 1, maximum: 180 } }), async (args, context) => processingOutput(await createHealthExportResult(context.ctx, Number(args.days)))),
-        readTool('self.getState', 'self-study', 'Прочитать собственное состояние Киры; это не факты о владельце.', objectSchema({}), async () => ({ status: 'ok', summary: 'Собственное состояние персонажа.', data: await getKiraSelfMemoryState() })),
-        readTool('self.searchEvents', 'self-study', 'Найти события собственной истории Киры.', objectSchema({ query: textSchema('Тема события') }), async args => ({ status: 'ok', summary: 'События self-memory.', data: await searchKiraSelfEventsByQuery(String(args.query), 5) })),
+        readTool('self.getState', 'self-study', 'Прочитать собственное состояние персонажа; это не факты о владельце.', objectSchema({}), async () => ({ status: 'ok', summary: 'Собственное состояние персонажа.', data: await getKiraSelfMemoryState() })),
+        readTool('self.searchEvents', 'self-study', 'Найти события собственной истории персонажа.', objectSchema({ query: textSchema('Тема события') }), async args => ({ status: 'ok', summary: 'События self-memory.', data: await searchKiraSelfEventsByQuery(String(args.query), 5) })),
         readTool('self.getResidence', 'self-study', 'Получить авторитетное текущее место жизни персонажа.', objectSchema({}), async () => ({ status: 'ok', summary: 'Текущее место жизни.', data: await getKiraResidence() })),
         {
             name: 'self.relocationRequest', skill: 'self-study', effect: 'state', ownerOnly: true,
-            description: 'Разобрать явную просьбу владельца о переезде Киры и сохранить новое место жизни.',
+            description: 'Разобрать явную просьбу владельца о переезде персонажа и сохранить новое место жизни.',
             inputSchema: objectSchema({ request: textSchema('Исходная просьба о переезде') }),
             async execute(args, context) {
                 if (!looksLikeKiraRelocationRequest(context.message)) return { status: 'failed', summary: 'Нет явной просьбы о переезде.' };
@@ -263,7 +263,7 @@ export function domainTools(): ToolDefinition[] {
         },
         {
             name: 'self.relocate', skill: 'self-study', effect: 'state', ownerOnly: true,
-            description: 'Изменить место жизни Киры только по явной просьбе владельца о переезде.',
+            description: 'Изменить место жизни персонажа только по явной просьбе владельца о переезде.',
             inputSchema: objectSchema({ city: textSchema('Новый город') }),
             async execute(args, context) {
                 if (!looksLikeKiraRelocationRequest(context.message)) return { status: 'failed', summary: 'Нет явной просьбы о переезде.' };

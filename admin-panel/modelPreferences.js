@@ -46,7 +46,7 @@ async function readModelPreferences(pool, vars, memoryProfileName) {
   const serviceWarnings = Object.entries(services).filter(([, ref]) => ref && !providers[ref.provider].optionalApiKey
     && !vars[providers[ref.provider].envKey]?.trim()).map(([label]) => `${label}: требуется отдельное API-подключение.`);
   return { providers: API_PROVIDERS, providerPlans, poolPlans, catalog, serviceWarnings, localRoutes: context.localRoutes,
-    scope: 'account', scopeNote: 'Общие настройки Киры. Явный режим отдельного приложения имеет приоритет только в его диалоге.',
+    scope: 'account', scopeNote: 'Общие настройки бота. Явный режим отдельного приложения имеет приоритет только в его диалоге.',
     mode: policy?.source === 'custom' ? 'custom' : policy ? 'automatic' : 'manual', preferences: policy?.preferences || inferred,
     activePlan: policy, manualPreset,
     plans, localConnected: context.localModels.length > 0, localError: context.localError,

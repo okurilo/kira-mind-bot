@@ -46,7 +46,7 @@ export class PublicOperatorBridge {
                 WHERE s.account_id=$1 AND s.access_hash=$2 AND b.cookie_hash=$3 AND b.expires_at>now() FOR UPDATE OF s`,
                 [confirmedAccountId, digest(access), digest(browserCookie)]);
             const fresh = bound && await this.sessions.authenticate(access, tx);
-            if (!fresh || fresh.account.id !== confirmedAccountId || fresh.session.id !== bound.id) throw new ApiError(401, 'unauthorized', 'Подтверди вход именно в выбранную Киру.');
+            if (!fresh || fresh.account.id !== confirmedAccountId || fresh.session.id !== bound.id) throw new ApiError(401, 'unauthorized', 'Подтверди вход именно в выбранный аккаунт.');
             await consumeReauthentication(tx, fresh.account.id, fresh.session.id, grant, new Date());
             if (enabled) await tx.query(`INSERT INTO kira_public_operator_grants(account_id,granted_by_session) VALUES($1,$2)
                 ON CONFLICT(account_id) DO UPDATE SET granted_by_session=$2,granted_at=now(),revoked_at=NULL`, [fresh.account.id, fresh.session.id]);

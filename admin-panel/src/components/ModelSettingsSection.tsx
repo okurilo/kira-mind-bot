@@ -37,7 +37,7 @@ export const ModelSettingsSection = forwardRef<ConfigSectionHandle, Props>(
           value={config.ELEVENLABS_MODEL_ID?.value || 'Выберите голос и модель'} onClick={() => setVoiceOpen(true)} />
       </Box>
       <Dialog open={voiceOpen} keepMounted fullWidth maxWidth="md" onClose={() => setVoiceOpen(false)} aria-labelledby="voice-dialog-title">
-        <DialogTitle id="voice-dialog-title">Голос Киры</DialogTitle>
+        <DialogTitle id="voice-dialog-title">Голос бота</DialogTitle>
         <DialogContent dividers>{editor(VOICE_MODEL_SECTION, voiceRef)}</DialogContent>
         <DialogActions><Button onClick={() => setVoiceOpen(false)}>Закрыть</Button></DialogActions>
       </Dialog>

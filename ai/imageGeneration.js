@@ -9,6 +9,7 @@ const SIZES = ['1024x1024', '1024x1536', '1536x1024'];
 const QUALITIES = ['low', 'medium', 'high'];
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_REFERENCE_PATH = path.join(__dirname, '..', 'assets', 'characters', 'kira', 'reference.png');
+function defaultReferenceForName(name) { return name?.trim() === 'Кира' ? DEFAULT_REFERENCE_PATH : null; }
 const IDENTITY_INSTRUCTION = 'The attached reference depicts the assistant character. Whenever this character appears, preserve the exact same facial identity, apparent adult age, body build, height proportions, skin tone, hair and distinctive features. The reference is the identity source of truth. Change only pose, expression, clothes, lighting and scene as requested. Do not copy the reference background or framing. Do not substitute a different person. Other people must remain distinct. Do not add this character to scenes that do not call for them.';
 
 function parseImageSettings(raw) {
@@ -44,7 +45,7 @@ function imageMime(data) {
   throw new Error('Загрузите изображение PNG, JPEG или WebP');
 }
 function referencePath(runtimeDir) { return path.join(runtimeDir, 'image-generation', 'character-reference.image'); }
-async function readReference(runtimeDir, defaultFile = DEFAULT_REFERENCE_PATH) {
+async function readReference(runtimeDir, defaultFile = null) {
   let data, source = 'custom';
   try { data = await fs.readFile(referencePath(runtimeDir)); }
   catch (error) {
@@ -100,6 +101,6 @@ async function requestImage({ settings, prompt, reference, env = process.env, fe
   const data = Buffer.from(encoded, 'base64');
   return { data, mime: imageMime(data), usage: result.usage };
 }
-module.exports = { SETTING_KEY, MODELS, SIZES, QUALITIES, MAX_REFERENCE_BYTES, DEFAULT_REFERENCE_PATH, IDENTITY_INSTRUCTION,
+module.exports = { SETTING_KEY, MODELS, SIZES, QUALITIES, MAX_REFERENCE_BYTES, DEFAULT_REFERENCE_PATH, defaultReferenceForName, IDENTITY_INSTRUCTION,
   parseImageSettings, defaultImageSettings, imageConnection, imageMime, readReference, saveReference,
   deleteReference, buildImageRequest, requestImage };

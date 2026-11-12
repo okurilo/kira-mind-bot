@@ -100,7 +100,7 @@ function ensureConfigLoaded() {
 
     return {
       botToken,
-      characterName: "Кира",
+      characterName: "ассистентка",
       allowedUserId: resolveRuntimeIdentity(process.env).allowedUserId,
       openAiApiKey: process.env.OPENAI_API_KEY || "",
     };

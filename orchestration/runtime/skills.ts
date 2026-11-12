@@ -21,7 +21,7 @@ export const KIRA_SKILLS: readonly KiraSkill[] = [
     { id: 'health-diary', description: 'Дневник наблюдений, фотографии, анализ периода и экспорт.', intents: ['ЗДОРОВЬЕ'] },
     { id: 'workouts', description: 'Личные тренировки, команды устройству, подходы, планы, результаты и Apple Health.', intents: [] },
     { id: 'image-creation', description: 'Создание изображений и сохранение внешности персонажа.', intents: ['ГЕНЕРАЦИЯ_ИЗОБРАЖЕНИЯ'] },
-    { id: 'self-study', description: 'Личность, собственная история и самоизучение Киры.', intents: ['САМОИЗУЧЕНИЕ'] },
+    { id: 'self-study', description: 'Личность, собственная история и самоизучение ассистента.', intents: ['САМОИЗУЧЕНИЕ'] },
     { id: 'browser-workflows', description: 'Самостоятельная работа с сайтами, формами и файлами.', intents: ['БРАУЗЕР_ЗАДАЧА'] },
     { id: 'negotiation', description: 'Длительные переговоры с контактом по цели владельца.', intents: ['ДЕЛЕГИРОВАНИЕ_ЗАДАЧИ'] },
 ];

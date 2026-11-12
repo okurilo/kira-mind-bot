@@ -144,13 +144,13 @@ function createOperatorAuth({ username, password, sessionSecret, cookieName, env
           || req.body.operatorPassword.length > 256 || req.body.reauthenticationToken.length > 128) return res.status(400).json({ error: 'Некорректный запрос.' });
         if (!equal(req.body.operatorPassword, password)) { failAttempt(req); return res.status(401).json({ error: 'Неверный пароль оператора.' }); }
         const accessToken = cookie(req, ACCESS_COOKIE), browserCookie = cookie(req, BROWSER_COOKIE);
-        if (!accessToken || !browserCookie) return res.status(401).json({ error: 'Подтвердите вход в выбранную Киру.' });
+        if (!accessToken || !browserCookie) return res.status(401).json({ error: 'Подтвердите вход в выбранный аккаунт.' });
         const result = await internal('/internal/operator/grants', { accessToken, browserCookie,
           reauthenticationToken: req.body.reauthenticationToken, confirmedAccountId: req.body.confirmedAccountId, operation });
         if (!result.ok) {
           const safe = result.body?.error;
           return res.status([400, 401, 403, 409].includes(result.status) ? result.status : 503).json({
-            error: safe?.code === 'reauthentication_required' ? 'Подтвердите вход в Киру ещё раз.' : 'Результат не подтверждён. Проверьте доступ аккаунта.' });
+            error: safe?.code === 'reauthentication_required' ? 'Подтвердите вход в аккаунт ещё раз.' : 'Результат не подтверждён. Проверьте доступ аккаунта.' });
         }
         if (result.body.version !== 1 || result.body.accountId !== req.body.confirmedAccountId || result.body.operatorAccess !== (operation === 'grant')) {
           return res.status(503).json({ error: 'Результат не подтверждён. Проверьте доступ аккаунта.' });

@@ -49,12 +49,12 @@ export function createMerchantDriver(provider: CommerceProvider, host: MerchantH
     const base = async () => {
         const context = await host.shoppingContext();
         if (!Array.isArray((context.position as any)?.location) || (context.position as any).location.length !== 2)
-            return host.requirePageStep('Выбери адрес доставки на странице Лавки: цены и наличие зависят от него. Затем верни управление Кире.');
+            return host.requirePageStep('Выбери адрес доставки на странице Лавки: цены и наличие зависят от него. Затем верни управление боту.');
         return { depotType: 'regular', currencySign: '₽', ...context };
     };
     const kuperStore = async () => {
         const raw = object(await request('GET', '/api/shopping_session')), value = raw.shopping_session?.store?.id;
-        if (!Number.isSafeInteger(value) || value <= 0) return host.requirePageStep('Выбери адрес и магазин в Купере, затем верни управление Кире.');
+        if (!Number.isSafeInteger(value) || value <= 0) return host.requirePageStep('Выбери адрес и магазин в Купере, затем верни управление боту.');
         return value as number;
     };
     const search: CommerceDriver['search'] = async (query, limit) => {

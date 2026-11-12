@@ -190,7 +190,7 @@ ensure_personality_file() {
         cat > "$PERSONALITY_FILE" << EOF
 {
   "KiraMindBot": {
-    "characterName": "Кира",
+    "characterName": "",
     "persona": "",
     "communicationStyle": "",
     "biography": "",

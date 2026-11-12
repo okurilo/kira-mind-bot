@@ -72,7 +72,7 @@ export class PublicWebAuth {
     async challenge(browser: WebBrowser, body: Record<string, unknown>, auth?: AuthenticatedAccount): Promise<WebChallengeReply> {
         v.fields(body, ['version','provider','purpose','reauthenticationToken'], ['version','provider','purpose']); v.version(body);
         if (!['google','telegram','password'].includes(String(body.provider)) || !['login','reauthenticate','link'].includes(String(body.purpose))) v.invalid();
-        if (body.purpose === 'login' && auth) throw new ApiError(409, 'already_authenticated', 'Добавь новый способ входа в настройках текущей Киры.');
+        if (body.purpose === 'login' && auth) throw new ApiError(409, 'already_authenticated', 'Добавь новый способ входа в настройках текущего аккаунта.');
         if (body.purpose !== 'login' && !auth) throw new ApiError(401, 'unauthorized', 'Войди в аккаунт ещё раз.');
         this.identityConfig.readyCapabilities = this.config.readyCapabilities;
         const provider = body.provider as WebProvider;
@@ -176,7 +176,7 @@ export class PublicWebAuth {
         const expiry = new Date(result.pair.refreshExpiresAt);
         const rows = await this.db.query(`UPDATE kira_public_web_browsers SET expires_at=$2,account_id=$3,session_id=$4
             WHERE cookie_hash=$1 AND (account_id IS NULL OR account_id=$3) RETURNING cookie_hash`, [browser.hash, expiry, checked.account.id, checked.session.id]);
-        if (!rows[0]?.length) throw new ApiError(409, 'web_session_changed', 'Текущая Кира уже изменилась. Обнови страницу аккаунта.');
+        if (!rows[0]?.length) throw new ApiError(409, 'web_session_changed', 'Текущий аккаунт уже изменился. Обнови страницу.');
         setWebCredentials(res, result.pair);
         setBrowserCookie(res, browser.cookie, expiry);
         return { version: 1, account: await this.view(checked.account) };

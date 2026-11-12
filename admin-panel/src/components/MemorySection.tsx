@@ -56,8 +56,8 @@ import type {
   MemoryStatus,
 } from '../types';
 
-const PROFILE_OPTIONS: Array<{ value: MemoryProfile; label: string }> = [
-  { value: 'KiraMindBot', label: 'Kira' },
+const profileOptions = (assistantName: string): Array<{ value: MemoryProfile; label: string }> => [
+  { value: 'KiraMindBot', label: assistantName },
 ];
 
 const DOMAIN_LABELS: Record<string, string> = {
@@ -393,6 +393,7 @@ function MemoryEditorDialog({
   onChange,
   onClose,
   onSave,
+  assistantName,
 }: {
   open: boolean;
   mode: 'create' | 'edit';
@@ -404,6 +405,7 @@ function MemoryEditorDialog({
   onChange: (next: MemoryFormPayload) => void;
   onClose: () => void;
   onSave: () => void;
+  assistantName: string;
 }) {
   const [tagDraft, setTagDraft] = useState(tagsText(form.tags));
 
@@ -433,7 +435,7 @@ function MemoryEditorDialog({
             onChange={(event) => patch({ profile: event.target.value as MemoryProfile })}
             disabled={mode === 'edit'}
           >
-            {PROFILE_OPTIONS.map((option) => (
+            {profileOptions(assistantName).map((option) => (
               <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
             ))}
           </TextField>
@@ -766,7 +768,7 @@ function MemoryRow({
   );
 }
 
-export function MemorySection({ onToast }: { onToast?: ToastFn }) {
+export function MemorySection({ onToast, assistantName }: { onToast?: ToastFn; assistantName: string }) {
   const theme = useTheme();
   const isDesktopTable = useMediaQuery(theme.breakpoints.up('md'));
   const [draft, setDraft] = useState<MemoryFilterDraft>(DEFAULT_DRAFT);
@@ -797,13 +799,13 @@ export function MemorySection({ onToast }: { onToast?: ToastFn }) {
 
   const activeFilterLabel = useMemo(() => {
     const parts = [
-      PROFILE_OPTIONS.find((option) => option.value === activeProfile)?.label ?? activeProfile,
+      profileOptions(assistantName).find((option) => option.value === activeProfile)?.label ?? activeProfile,
       query.domain ? DOMAIN_LABELS[query.domain] ?? query.domain : 'все домены',
       query.focus ? FOCUS_LABELS[query.focus] ?? query.focus : '',
       query.q ? `поиск: ${query.q}` : '',
     ].filter(Boolean);
     return parts.join(' · ');
-  }, [activeProfile, query.domain, query.q]);
+  }, [activeProfile, assistantName, query.domain, query.q]);
 
   const load = async (nextQuery = query, signal?: AbortSignal) => {
     setLoading(true);
@@ -1003,7 +1005,7 @@ export function MemorySection({ onToast }: { onToast?: ToastFn }) {
             value={draft.profile}
             onChange={(event) => setDraft((prev) => ({ ...prev, profile: event.target.value as MemoryProfile }))}
           >
-            {PROFILE_OPTIONS.map((option) => (
+            {profileOptions(assistantName).map((option) => (
               <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
             ))}
           </TextField>
@@ -1180,6 +1182,7 @@ export function MemorySection({ onToast }: { onToast?: ToastFn }) {
       )}
 
       <MemoryEditorDialog
+        assistantName={assistantName}
         open={dialogOpen}
         mode={dialogMode}
         form={form}

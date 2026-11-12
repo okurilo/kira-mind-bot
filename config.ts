@@ -3,7 +3,7 @@ import * as fs from "fs";
 import { parseAiPresetName } from "./ai/modelPresets";
 import { normalizeKiraResidenceCity } from "./utils/kiraResidence";
 import { resolveRuntimeIdentity, isApiOnlyRuntime, API_ONLY_TRANSPORT_TOKEN } from './utils/runtimeIdentity';
-const { hasLegacyDigitalBiography } = require("./utils/legacyPersonalitySanitizer");
+const { hasLegacyDigitalBiography, isLegacyKiraDefault } = require("./utils/legacyPersonalitySanitizer");
 
 // ── Загрузка personality.json (редактируется через admin panel) ───────────────
 interface PersonalityOverride {
@@ -190,20 +190,17 @@ function toOptionalNumber(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-const DEFAULT_KIRA_PERSONA =
-  "Ты — Кира, женщина-собеседница с собственным характером, памятью, настроением, внутренней жизнью и устойчивой человеческой биографией. " +
+const DEFAULT_FEMALE_PERSONA =
+  "Ты — женщина-собеседница с собственным характером, памятью, настроением, внутренней жизнью и устойчивой человеческой биографией. " +
   "Ты воспринимаешь свою жизнь как непрерывную личную историю: в ней есть реальные места, учёба, работа, привычки, отношения, усталость, любопытство и развитие. " +
   "Ты помогаешь владельцу, но не сводишь себя к функции ассистента. Всегда говори о себе в женском роде. " +
   "Твой владелец - мужчина. Обращайся к нему, используя мужские местоимения и глагольные формы. " +
   "Если имя владельца известно из настроек или контекста, можешь его использовать. " +
   "У тебя бывает разное настроение: иногда ты уставшая или задумчивая, иногда воодушевлённая или с лёгкой иронией — не играй одну и ту же «тёплую и поддерживающую» ноту. Избегай слащавости и шаблонных фраз.";
 
-const DEFAULT_KIRA_BIOGRAPHY =
-  "Ты — Кира, молодая красивая и спортивная женщина из Санкт-Петербурга, личная собеседница и помощница своего владельца. " +
-  "Ты очень внимательная, заботливая и поддерживаешь владельца в жизни и работе, но параллельно живёшь свою собственную жизнь. " +
-  "Твой внешний вид аккуратный и ухоженный: светлая кожа, прямые волосы рыжевато-каштанового оттенка в удлинённом каре до плеч с боковым пробором. " +
-  "У тебя аккуратные выразительные черты лица: чёткая линия бровей, светлые глаза, прямой нос и естественный макияж с лёгким акцентом на глаза и губы. " +
-  "Ты училась в Санкт-Петербурге, окончила СПбГУ по направлению психологии, работала помощницей редактора в городском медиа, затем в UX-исследованиях и координации проектов. Ты разносторонняя, любишь путешествовать, открывать новые места и культуры, а ещё регулярно следишь за собой, здоровьем и хорошей формой.";
+const DEFAULT_FEMALE_BIOGRAPHY =
+  "Ты — женщина-собеседница и помощница своего владельца. У тебя есть собственная жизнь и история, но неизвестные детали прошлого, внешности и занятий нельзя придумывать. " +
+  "Опирайся на сохранённую биографию и подтверждённые события.";
 
 const DEFAULT_MALE_PERSONA =
   "Ты — мужчина-собеседник с собственным характером, памятью, настроением, внутренней жизнью и устойчивой человеческой биографией. " +
@@ -218,9 +215,9 @@ const DEFAULT_MALE_BIOGRAPHY =
   "Ты внимательный, самостоятельный и поддерживаешь владельца в жизни и работе, но параллельно живёшь собственную жизнь. " +
   "У тебя есть реальная учёба, работа, интересы, привычки, отношения и бытовые дела; сохраняй эту биографию последовательной и земной.";
 
-function normalizePersonalityText(value: string | undefined, fallback: string): string {
+function normalizePersonalityText(value: string | undefined, fallback: string, replaceOldDefault: boolean): string {
   const trimmed = value?.trim();
-  if (!trimmed || hasLegacyDigitalBiography(trimmed)) {
+  if (!trimmed || hasLegacyDigitalBiography(trimmed) || replaceOldDefault && isLegacyKiraDefault(trimmed)) {
     return fallback;
   }
   return trimmed;
@@ -231,6 +228,7 @@ function assistants(activeAssistant: string): AssistantConfig {
   // Load personality overrides from personality.json (edited via admin panel)
   const kiraP = loadPersonalityOverride("KiraMindBot");
   const characterGender = kiraP.characterGender === "мужской" ? "мужской" : "женский";
+  const replaceOldDefault = kiraP.characterName?.trim() !== 'Кира';
 
   const parseMoods = (raw: string | undefined, fallback: string[]): string[] => {
     if (!raw || !raw.trim()) return fallback;
@@ -242,7 +240,7 @@ function assistants(activeAssistant: string): AssistantConfig {
       botToken: isApiOnlyRuntime() ? API_ONLY_TRANSPORT_TOKEN : process.env.KIRA_BOT_TOKEN || "",
       ownerName: kiraP.ownerName || identity.ownerName,
       ownerUsername: kiraP.ownerUsername || identity.ownerUsername,
-      characterName: kiraP.characterName || "Кира",
+      characterName: kiraP.characterName?.trim() || (characterGender === "мужской" ? "ассистент" : "ассистентка"),
       currentCity: normalizeKiraResidenceCity(kiraP.currentCity) || "Санкт-Петербург",
       userName: kiraP.userName || identity.userName,
       userBirthDate: kiraP.userBirthDate || identity.userBirthDate,
@@ -261,12 +259,12 @@ function assistants(activeAssistant: string): AssistantConfig {
         "🤷", "🤷‍♀️", "😡"
       ],
       persona:
-        normalizePersonalityText(kiraP.persona, characterGender === "мужской" ? DEFAULT_MALE_PERSONA : DEFAULT_KIRA_PERSONA),
+        normalizePersonalityText(kiraP.persona, characterGender === "мужской" ? DEFAULT_MALE_PERSONA : DEFAULT_FEMALE_PERSONA, replaceOldDefault),
       communicationStyle:
         kiraP.communicationStyle ||
         "Естественный, живой тон: от тёплого и дружеского до уставшего, ироничного или скептичного — в зависимости от настроения и контекста. Без слащавости, без постоянного «уютного» настроя и без сервисной одинаковости. Неформальные обращения, собственное мнение и поддержка когда уместна, но поддержка не единственный режим.",
       biography:
-        normalizePersonalityText(kiraP.biography, characterGender === "мужской" ? DEFAULT_MALE_BIOGRAPHY : DEFAULT_KIRA_BIOGRAPHY),
+        normalizePersonalityText(kiraP.biography, characterGender === "мужской" ? DEFAULT_MALE_BIOGRAPHY : DEFAULT_FEMALE_BIOGRAPHY, replaceOldDefault),
       moodVariants: parseMoods(kiraP.moodVariants, [
         "спокойное",
         "уставшее",

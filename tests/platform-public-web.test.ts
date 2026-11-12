@@ -19,6 +19,7 @@ test('web links the existing account, shares canonical identity and history with
         const h = await publicWebHarness(db, store);
         try {
             const owner = await h.account(), other = await h.account(), browser = h.client(), phone = h.client();
+            h.setAssistantName(owner.id, 'Салем'); h.setAssistantName(other.id, 'Лира');
             const legacy = await phone.call('/api/v1/accounts/login', { username: owner.username, password: 'synthetic-existing-password-123' });
             assert.equal(legacy.status, 200, JSON.stringify(legacy.data));
             const native = await h.nativePassword(phone, owner);
@@ -26,6 +27,7 @@ test('web links the existing account, shares canonical identity and history with
             assert.equal(native.data.account.id, owner.id);
             const login = await h.webLogin(browser, owner);
             assert.deepEqual(Object.keys(login.data).sort(), ['account', 'version']);
+            assert.equal(login.data.account.assistantName, 'Салем');
             assert.ok(login.setCookies.every(cookie => cookie.includes('HttpOnly') && cookie.includes('Secure')));
             assert.equal(browser.cookies.get(h.cookieNames.refresh)?.path, '/api/v1/web/auth/refresh');
             assert.ok(!browser.cookieHeader('/operator/api/config').includes(h.cookieNames.refresh));
@@ -61,6 +63,7 @@ test('web links the existing account, shares canonical identity and history with
             assert.notEqual(browser.value(h.cookieNames.access), access);
             assert.notEqual(browser.value(h.cookieNames.refresh), refresh);
             assert.equal((await browser.web('session')).data.account.id, owner.id);
+            assert.equal((await browser.web('session')).data.account.assistantName, 'Салем');
             assert.equal((await browser.web('auth/logout', { version: 1 })).status, 200);
             assert.equal(browser.value(h.cookieNames.access), '');
             assert.equal(browser.value(h.cookieNames.refresh), '');
@@ -79,6 +82,7 @@ test('web logout revokes its exact family after access expiry and terminal refre
         const h = await publicWebHarness(db, store);
         try {
             const a = await h.account(), b = await h.account(), c = h.client(), nativeClient = h.client();
+            h.setAssistantName(a.id, 'Салем'); h.setAssistantName(b.id, 'Лира');
             await h.webLogin(c,a); const native = await h.nativePassword(nativeClient,a);
             const access = c.value(h.cookieNames.access), [session] = await db.query('SELECT * FROM kira_public_sessions WHERE access_hash=$1',[digest(access)]);
             await db.query("UPDATE kira_public_sessions SET access_expires_at=now()-interval '1 second',refresh_expires_at=now()-interval '1 second' WHERE id=$1",[session.id]);
@@ -93,6 +97,7 @@ test('web logout revokes its exact family after access expiry and terminal refre
             assert.ok((await db.query('SELECT revoked_at FROM kira_public_sessions WHERE id=$1',[session.id]))[0].revoked_at);
             assert.equal((await nativeClient.call('/api/v1/account',undefined,{token:native.data.accessToken})).data.account.id,a.id);
             await h.webLogin(c,b); assert.equal((await c.web('session')).data.account.id,b.id);
+            assert.equal((await c.web('session')).data.account.assistantName,'Лира');
             assert.equal((await c.web('auth/logout',{version:1})).status,200);
             await h.webLogin(c,a);
             const [validRefreshSession] = await db.query('SELECT * FROM kira_public_sessions WHERE access_hash=$1',[digest(c.value(h.cookieNames.access))]);

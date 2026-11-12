@@ -67,7 +67,7 @@ function formatDate(iso: string) {
   });
 }
 
-function DomainRow({ chat, onUpdate }: { chat: ChatInfo; onUpdate: (updated: ChatInfo) => void }) {
+function DomainRow({ chat, onUpdate, assistantName }: { chat: ChatInfo; onUpdate: (updated: ChatInfo) => void; assistantName: string }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [topicsText, setTopicsText] = useState(chat.forbiddenTopics ?? '');
@@ -114,7 +114,7 @@ function DomainRow({ chat, onUpdate }: { chat: ChatInfo; onUpdate: (updated: Cha
                   sx={{ fontSize: '10px' }}
                 />
                 <Chip
-                  label={chat.profile === 'KiraMindBot' ? '🌸 Kira' : chat.profile}
+                  label={chat.profile === 'KiraMindBot' ? assistantName : chat.profile}
                   size="small"
                   variant="outlined"
                   sx={{ fontSize: '10px' }}
@@ -151,7 +151,7 @@ function DomainRow({ chat, onUpdate }: { chat: ChatInfo; onUpdate: (updated: Cha
         </TableCell>
         <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
           <Typography variant="caption" color="text.secondary">
-            {chat.profile === 'KiraMindBot' ? '🌸 Kira' : chat.profile}
+            {chat.profile === 'KiraMindBot' ? assistantName : chat.profile}
           </Typography>
         </TableCell>
         <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
@@ -270,7 +270,7 @@ function DomainRow({ chat, onUpdate }: { chat: ChatInfo; onUpdate: (updated: Cha
   );
 }
 
-export function ChatsSection() {
+export function ChatsSection({ assistantName }: { assistantName: string }) {
   const [chats, setChats] = useState<ChatInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -341,7 +341,7 @@ export function ChatsSection() {
             </TableHead>
             <TableBody>
               {chats.map(chat => (
-                <DomainRow key={chat.chatId} chat={chat} onUpdate={handleUpdate} />
+                <DomainRow key={chat.chatId} chat={chat} onUpdate={handleUpdate} assistantName={assistantName} />
               ))}
             </TableBody>
           </Table>

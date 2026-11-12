@@ -27,7 +27,7 @@ export function createCommerceMcpServer(source: ServiceSource, authority: () => 
         try {
             const permission = COMMERCE_MCP_EFFECTS[tool.name] === 'external' ? authority() : undefined;
             if (COMMERCE_MCP_EFFECTS[tool.name] === 'external' && !permission)
-                throw new CommerceFailure('invalid_input', 'Требуется подтверждение конкретной операции владельцем в Кире.');
+                throw new CommerceFailure('invalid_input', 'Требуется подтверждение конкретной операции владельцем в приложении.');
             const service = 'load' in source ? await source.load() : source;
             let data: unknown;
             switch (tool.name) {

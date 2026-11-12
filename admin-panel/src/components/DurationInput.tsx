@@ -71,7 +71,6 @@ export function DurationInput({ label, hint, valueMs, onChange }: Props) {
               setUnit(u);
               emit(amount, u);
             }}
-            sx={{ bgcolor: '#0d0d1a', '& fieldset': { borderColor: '#252540' } }}
           >
             {UNITS.map((u) => (
               <MenuItem key={u.value} value={u.value}>{u.label}</MenuItem>

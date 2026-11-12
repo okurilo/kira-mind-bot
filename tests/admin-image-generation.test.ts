@@ -13,11 +13,13 @@ test('image admin authenticates uploads, hides secrets, persists settings and se
   const previous = process.env.KIRA_RUNTIME_DATA_DIR;
   process.env.KIRA_RUNTIME_DATA_DIR = directory;
   let saved: string | undefined;
+  let assistantName = 'Кира';
   const app = express(); app.use(express.json());
   registerImageGenerationRoutes(app, {
     requireAuth: (req: any, res: any, next: any) => req.headers.authorization === 'Bearer synthetic-admin' ? next() : res.status(401).end(),
     createDbPool: () => ({ query: async (sql: string, params: string[]) => { if (sql.startsWith('INSERT')) saved = params[1]; return { rows: saved ? [{ value: saved }] : [] }; }, end: async () => {} }),
     ensureBotSettingsTable: async () => {}, readEnvFile: () => ({ OPENAI_API_KEY: 'synthetic-private-api-key', OPENAI_BASE_URL: 'https://gateway.invalid/v1' }),
+    characterName: () => assistantName,
   });
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -53,4 +55,7 @@ test('image admin authenticates uploads, hides secrets, persists settings and se
   const reset = await (await request()).json();
   assert.equal(reset.reference.source, 'default');
   assert.equal(reset.reference.sha256, defaultHash);
+  assistantName = 'Салем';
+  assert.equal((await (await request()).json()).reference.present, false);
+  assert.equal((await request('/reference')).status, 404);
 });

@@ -1,6 +1,6 @@
 {
-  "name": "Kira Mind — Панель управления",
-  "short_name": "Kira Mind",
+  "name": "Панель управления ботом",
+  "short_name": "Панель бота",
   "lang": "ru",
   "start_url": "./",
   "scope": "./",

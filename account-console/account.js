@@ -15,6 +15,7 @@
   const field = (caption, input) => { const label = node('label', caption); label.append(input); return label; };
   const date = value => { try { return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)); } catch { return ''; } };
   const provider = name => state.config.providers.find(value => value.provider === name);
+  const assistantName = () => state.session?.account?.assistantName || 'Бот';
   const available = name => name === 'password' || provider(name)?.available === true;
   const readHint = () => { try { const value = JSON.parse(sessionStorage.getItem(hintKey) || 'null'); return value && ['login','link','unlink','operator','operator-revoke'].includes(value.kind) && value.expiresAt > Date.now() ? value : null; } catch { return null; } };
   function saveHint(value) { state.intent = value; try { if (value) sessionStorage.setItem(hintKey, JSON.stringify(value)); else sessionStorage.removeItem(hintKey); } catch { /* Only nonsecret UI intent is cached; authentication never depends on storage. */ } }
@@ -22,7 +23,7 @@
   function report(error) { notice(error?.message || 'Не удалось выполнить действие. Повтори позже.', true); }
   async function bootstrap() {
     const response = await fetch(base + '/config', { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) throw Error('Не удалось подключиться к Кире. Проверь соединение.');
+    if (!response.ok) throw Error('Не удалось подключиться к боту. Проверь соединение.');
     state.config = await response.json();
     for (const name of ['privacy','support']) { const url = state.config.links?.[name]; if (url?.startsWith('https://')) $(name).href = url; }
   }
@@ -45,7 +46,7 @@
       if (response.status === 401 && (path === '/session' || path === '/auth/logout' || path.startsWith('/api/')) && await refresh()) response = await fetch(base + path, request);
     } catch (cause) {
       if (cause?.name === 'AbortError') throw cause;
-      const error = Error(mutates ? 'Результат пока не подтверждён. Проверь соединение и состояние аккаунта.' : 'Нет соединения с Кирой. Попробуй ещё раз.'); error.uncertain = mutates; throw error;
+      const error = Error(mutates ? 'Результат пока не подтверждён. Проверь соединение и состояние аккаунта.' : 'Нет соединения с ботом. Попробуй ещё раз.'); error.uncertain = mutates; throw error;
     }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { const error = Error(data.error?.message || 'Сервер временно недоступен. Повтори позже.'); error.status = response.status; error.code = data.error?.code; error.uncertain = mutates && response.status >= 500; throw error; }
@@ -54,11 +55,12 @@
   const own = (path, options) => api('/api/' + path, options);
   async function session(expected) {
     const current = await api('/session');
-    if (expected && current.account.id !== expected) { const error = Error('Сейчас открыта другая Кира. Обнови страницу и выбери действие заново.'); error.code = 'account_changed'; throw error; }
+    if (expected && current.account.id !== expected) { const error = Error('Сейчас открыт другой аккаунт. Обнови страницу и выбери действие заново.'); error.code = 'account_changed'; throw error; }
     state.session = current;
     return current;
   }
   function loginView() {
+    document.title = 'Личный кабинет бота'; $('brand-name').textContent = 'Панель бота';
     $('loading').hidden = true; $('workspace').hidden = true; $('login').hidden = false; $('logout').hidden = !state.config.hasBrowserSession;
     const methods = $('login-methods'); methods.replaceChildren();
     if (available('google')) methods.append(button('Войти через Google', () => startLogin('google'), 'secondary-button provider-button'));
@@ -68,7 +70,8 @@
   function workspace() {
     $('loading').hidden = true; $('login').hidden = true; $('workspace').hidden = false; $('logout').hidden = false;
     $('account-name').textContent = state.session.account.username;
-    $('account-state').textContent = state.session.account.runtimeState === 'ready' ? 'Память, история и настройки твоей Киры' : 'Кира подключена. Некоторые разделы могут быть доступны после запуска.';
+    $('brand-name').textContent = assistantName(); document.title = `${assistantName()} — Личный кабинет`;
+    $('account-state').textContent = state.session.account.runtimeState === 'ready' ? `Память, история и настройки: ${assistantName()}` : 'Бот подключается. Некоторые разделы появятся после запуска.';
     $('operator-entry').hidden = !state.session.operatorAccess;
     const nav = $('navigation'); nav.replaceChildren();
     for (const [id, caption] of [['account','Аккаунт'],['methods','Способы входа'],['sessions','Устройства'],['settings','Настройки'],['models','Модели'],['history','История']]) {
@@ -127,7 +130,7 @@
   }
   async function accountView(expected) {
     await session(expected);
-    const box = node('section', undefined, 'card'); box.append(title('Твоя Кира', 'Все подключённые способы входа ведут в одно личное пространство.'));
+    const box = node('section', undefined, 'card'); box.append(title(assistantName(), 'Все подключённые способы входа ведут в одно личное пространство.'));
     const status = state.session.account.consent.aiAllowed ? 'Согласие на AI подключено' : 'Согласие на AI пока не подключено';
     box.append(node('p', status));
     const quota = state.session.account.quota;
@@ -135,7 +138,7 @@
     const consent = button('Настроить согласие на AI', () => consentView(box, expected), 'secondary-button'); box.append(consent);
     if (state.session.operatorLinkingAvailable) {
       const section = node('details'); section.append(node('summary', 'Доступ оператора'));
-      section.append(node('p', 'Оператор управляет общими настройками установки. Для привязки нужны действующий пароль оператора и подтверждение текущей Киры.', 'secondary'));
+      section.append(node('p', 'Оператор управляет общими настройками установки. Для привязки нужны действующий пароль оператора и подтверждение текущего аккаунта.', 'secondary'));
       section.append(button(state.session.operatorAccess ? 'Отвязать доступ оператора' : 'Привязать доступ оператора', () => queue({ kind: state.session.operatorAccess ? 'operator-revoke' : 'operator', accountId: expected }), 'secondary-button'));
       box.append(section);
     }
@@ -159,7 +162,7 @@
   }
   async function methodsView(expected) {
     const data = await own('account/identities'); await session(expected);
-    const box = node('section', undefined, 'card'); box.append(title('Способы входа', 'Добавленный способ открывает ту же Киру с её памятью и историей.'));
+    const box = node('section', undefined, 'card'); box.append(title('Способы входа', 'Добавленный способ открывает тот же аккаунт с его памятью и историей.'));
     const identities = data.identities || [];
     for (const name of ['google','telegram','password']) {
       const identity = identities.find(value => value.provider === name);
@@ -188,13 +191,13 @@
   async function settingsView(expected) {
     const data = await own('settings'); await session(expected);
     const view = state.view;
-    const box = node('section', undefined, 'card'), form = node('form', undefined, 'stack'); box.append(title('Настройки Киры'));
+    const box = node('section', undefined, 'card'), form = node('form', undefined, 'stack'); box.append(title('Настройки бота'));
     box.append(quotaPanel(state.session.account.quota));
     const catalog = data.activityModes || [], features = data.features || [], checks = new Map(), radios = new Map(), touched = new Set();
     let selected = data.activityMode || 'custom', presetChanged = false, replacing = false;
-    box.append(node('p', 'Выберите, что Кира делает автоматически. Общение, ручные поручения, сохранённая память и обычные напоминания доступны в любом режиме.', 'secondary'));
+    box.append(node('p', 'Выберите, что бот делает автоматически. Общение, ручные поручения, сохранённая память и обычные напоминания доступны в любом режиме.', 'secondary'));
     box.append(node('p', 'Сейчас: ' + (catalog.find(item => item.key === selected)?.title || 'Настроить под себя')));
-    const choices = node('fieldset', undefined, 'activity-modes'); choices.append(node('legend', 'Активность Киры'));
+    const choices = node('fieldset', undefined, 'activity-modes'); choices.append(node('legend', 'Активность бота'));
     const benefits = node('div', undefined, 'activity-benefits'); benefits.setAttribute('aria-live', 'polite');
     const advanced = node('details'); advanced.append(node('summary', 'Настроить под себя'));
     const pause = document.createElement('input'); pause.type = 'checkbox'; pause.checked = data.budgetMode === 'maximum';
@@ -268,9 +271,9 @@
   }
   async function historyView(expected) {
     const data = await own('history?limit=20'); await session(expected);
-    const box = node('section', undefined, 'card'); box.append(title('История', 'Последние сообщения личного API-диалога с Кирой.'));
+    const box = node('section', undefined, 'card'); box.append(title('История', 'Последние сообщения личного API-диалога с ботом.'));
     if (!data.messages?.length) box.append(node('p', 'В этом диалоге пока нет сообщений.', 'secondary'));
-    for (const item of data.messages || []) { const row = node('article', undefined, 'history-item'); row.append(node('small', `${item.role === 'assistant' ? 'Кира' : 'Ты'} · ${date(item.createdAt)}`), node('p', item.text || 'Сообщение')); box.append(row); } return box;
+    for (const item of data.messages || []) { const row = node('article', undefined, 'history-item'); row.append(node('small', `${item.role === 'assistant' ? assistantName() : 'Ты'} · ${date(item.createdAt)}`), node('p', item.text || 'Сообщение')); box.append(row); } return box;
   }
   function telegramMark() {
     // Reuse the installed MUI Telegram mark (Apache-2.0), without remote image requests.
@@ -357,7 +360,7 @@
     const previous = state.flow; if (previous) closeFlow(previous);
     const context = { sequence: ++state.sequence, purpose, provider: name, controller: new AbortController(), credentials, flow: null, sending: false }; state.flow = context;
     $('proof-title').textContent = purpose === 'link' ? `Добавить ${labels[name]}` : purpose === 'reauthenticate' ? 'Подтверди текущий вход' : `Войти через ${labels[name]}`;
-    $('proof-description').textContent = purpose === 'link' ? 'Этот способ будет связан с текущей Кирой.' : 'Подтверди вход и пройди проверку.';
+    $('proof-description').textContent = purpose === 'link' ? 'Этот способ будет связан с текущим аккаунтом.' : 'Подтверди вход и пройди проверку.';
     $('proof-content').replaceChildren(); $('proof-status').textContent = 'Подготавливаем подтверждение…'; openProof();
     try {
       if (purpose !== 'login') await session(state.intent.accountId);
@@ -384,7 +387,7 @@
       if (result.reauthenticationToken) { state.grant = { value:result.reauthenticationToken,expiresAt:Date.parse(result.expiresAt),accountId:expected }; await applyIntent(); }
       else if (result.provider && result.id) { await session(expected); const methods = await own('account/identities');
         if (!methods.identities.some(item => item.id === result.id && item.provider === result.provider)) throw Error('Результат ещё не подтверждён. Проверь список способов входа.');
-        saveHint(null); state.grant = null; notice(`${labels[result.provider]} подключён к твоей Кире.`); await render('methods'); }
+        saveHint(null); state.grant = null; notice(`${labels[result.provider]} подключён к аккаунту.`); await render('methods'); }
       else { state.session = null; saveHint(null); await session(); notice('Вход выполнен.'); await render('account'); }
     } catch (error) {
       context.credentials = null; context.identityToken = null;
@@ -467,7 +470,7 @@
     const currentIntent=()=>state.operatorSubmission===submission&&!submission.cancelled&&state.intent===intent&&state.sequence===submission.sequence&&$('operator-dialog').open;
     const username=form.elements.username.value,password=form.elements.password.value;form.elements.password.value='';
     try {
-      if(!intent||!grant||grant.expiresAt<=Date.now())throw Error('Подтверди вход в Киру ещё раз.');await session(intent.accountId);if(!currentIntent())return;$('operator-status').textContent='Проверяем доступ…';
+      if(!intent||!grant||grant.expiresAt<=Date.now())throw Error('Подтверди вход в аккаунт ещё раз.');await session(intent.accountId);if(!currentIntent())return;$('operator-status').textContent='Проверяем доступ…';
       const context=await fetch('/operator/api/auth/context',{credentials:'same-origin',cache:'no-store'}).then(response=>{if(!response.ok)throw Error('Панель оператора пока недоступна.');return response.json();});
       if(!currentIntent())return;
       const signed=await operatorRequest('login',{username,password},context.csrfToken);if(!signed.success)throw Error('Не удалось подтвердить пароль оператора.');

@@ -36,15 +36,15 @@ import { MonitoringSection } from './MonitoringSection';
 import { ProductAnalyticsSection } from './ProductAnalyticsSection';
 import { RecurringTasksSection } from './RecurringTasksSection';
 import { McpSettingsSection, type McpSettingsHandle } from './McpSettingsSection';
-import { saveConfig, fetchConfig, logout, restartService } from '../api';
+import { saveConfig, fetchConfig, fetchPersonality, logout, restartService } from '../api';
 import type { ConfigResponse, Toast } from '../types';
 
 const SIDEBAR_WIDTH = 304;
 const SIDEBAR_COMPACT_WIDTH = 88;
 const SIDEBAR_STORAGE_KEY = 'kira.admin.sidebar.collapsed.v1';
 const NAVIGATION = [
-  { id: 'settings', label: 'Настройки', icon: <TuneIcon />, caption: 'Модель, самостоятельность и подключения Киры.' },
-  { id: 'personality', label: 'Личность', icon: <PersonOutlineIcon />, caption: 'Характер, история и внешность Киры.' },
+  { id: 'settings', label: 'Настройки', icon: <TuneIcon />, caption: 'Модели, самостоятельность и подключения бота.' },
+  { id: 'personality', label: 'Личность', icon: <PersonOutlineIcon />, caption: 'Характер, история и внешность персонажа.' },
   { id: 'chats', label: 'Чаты', icon: <ForumOutlinedIcon />, caption: 'Группы, публичный режим и доступ к памяти.' },
   { id: 'memory', label: 'Память', icon: <PsychologyOutlinedIcon />, caption: 'Сохранённые факты, связи и поиск.' },
   { id: 'tasks', label: 'Задачи', icon: <EventRepeatIcon />, caption: 'Регулярные запросы и расписание запусков.' },
@@ -55,7 +55,7 @@ const NAVIGATION = [
 type Page = typeof NAVIGATION[number]['id'];
 
 const SETTINGS_TABS = [
-  { id: 'model', label: 'Модели', caption: 'Настройте, как Кира думает, отвечает и создаёт.' },
+  { id: 'model', label: 'Модели', caption: 'Настройте, как бот думает, отвечает и создаёт.' },
   { id: 'background', label: 'Самостоятельность', caption: 'Фоновые функции и контроль расхода AI.' },
   { id: 'connections', label: 'Подключения', caption: 'Ваши ключи и доступ к внешним сервисам.' },
   { id: 'system', label: 'Система', caption: 'Окружение и технические параметры установки.' },
@@ -79,6 +79,8 @@ interface Props {
 }
 
 export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
+  const [assistantName, setAssistantName] = useState('');
+  const displayName = assistantName || 'Панель бота';
   const [page, setPage] = useState<Page>('settings');
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('model');
   const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTab>>(() => new Set(['model']));
@@ -105,6 +107,16 @@ export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
   const markDirty = useCallback((id: string, dirty: boolean) => {
     setDirtySections(previous => previous[id] === dirty ? previous : { ...previous, [id]: dirty });
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetchPersonality().then(data => {
+      if (active) setAssistantName(data.KiraMindBot.characterName.trim());
+    }).catch(() => { /* The neutral heading remains usable when personality is unavailable. */ });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => { document.title = `${displayName} — Панель управления`; }, [displayName]);
 
   useEffect(() => {
     try { localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed)); }
@@ -166,7 +178,7 @@ export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
       <Stack direction="row" alignItems="center" justifyContent={compact ? 'center' : 'flex-start'} spacing={compact ? 0 : 1.5}
         sx={{ px: compact ? 1.5 : 2.5, minHeight: 128, flexShrink: 0, position: 'relative' }}>
         <BrandMark size={compact ? 56 : 88} />
-        {!compact && <Box><Typography sx={{ color: '#F1F5EE', fontSize: 27, fontWeight: 500, letterSpacing: '-.035em', whiteSpace: 'nowrap' }}>Kira <Box component="span" sx={{ fontWeight: 400, color: '#ADC0AF' }}>Mind</Box></Typography>
+        {!compact && <Box sx={{ minWidth: 0 }}><Typography sx={{ color: '#F1F5EE', fontSize: 27, fontWeight: 500, letterSpacing: '-.035em', overflowWrap: 'anywhere' }}>{displayName}</Typography>
           <Typography sx={{ color: '#A5B4AA', fontSize: 10, letterSpacing: '.04em', mt: .5 }}>ПАНЕЛЬ УПРАВЛЕНИЯ</Typography></Box>}
         {mobile && <IconButton aria-label="Закрыть меню" onClick={() => setMobileOpen(false)} size="small" sx={{ position: 'absolute', top: 10, right: 10, color: '#AFBDB2' }}><CloseIcon fontSize="small" /></IconButton>}
       </Stack>
@@ -216,7 +228,7 @@ export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3, gap: 2 }}>
           <Stack direction="row" spacing={1} alignItems="center">
             <IconButton aria-label="Открыть меню" onClick={() => setMobileOpen(true)} sx={{ display: { md: 'none' } }}><MenuIcon /></IconButton>
-            <Typography variant="caption" color="text.secondary">Kira Mind <Box component="span" sx={{ mx: 1.5, color: '#BCC6B9' }}>/</Box> {currentPage.label}</Typography>
+            <Typography variant="caption" color="text.secondary">{displayName} <Box component="span" sx={{ mx: 1.5, color: '#BCC6B9' }}>/</Box> {currentPage.label}</Typography>
           </Stack>
           <StatusBar />
         </Stack>
@@ -273,10 +285,10 @@ export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
           section={section} config={config} onUpdate={onConfigUpdate} onToast={showToast}
           onDirtyChange={markDirty} open={configDialog === section.id} onClose={() => setConfigDialog(null)}
         />)}
-        {page === 'personality' && <PersonalitySection onToast={showToast} />}
-        {page === 'chats' && <ChatsSection />}
+        {page === 'personality' && <PersonalitySection onToast={showToast} onSavedName={setAssistantName} />}
+        {page === 'chats' && <ChatsSection assistantName={assistantName || 'Бот'} />}
         {page === 'health' && <HealthSection />}
-        {page === 'memory' && <MemorySection onToast={showToast} />}
+        {page === 'memory' && <MemorySection onToast={showToast} assistantName={assistantName || 'Бот'} />}
         {page === 'monitoring' && <>
           <Stack component="nav" aria-label="Разделы мониторинга" direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 2 }}>
             {[
@@ -297,7 +309,7 @@ export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
       </Menu>
       <Dialog open={restartOpen} onClose={() => setRestartOpen(false)} aria-labelledby="restart-title">
         <DialogTitle id="restart-title">Перезапустить бота?</DialogTitle>
-        <DialogContent><DialogContentText>Во время перезапуска Кира ненадолго перестанет отвечать. Несохранённые настройки не применятся.</DialogContentText></DialogContent>
+        <DialogContent><DialogContentText>Во время перезапуска бот ненадолго перестанет отвечать. Несохранённые настройки не применятся.</DialogContentText></DialogContent>
         <DialogActions><Button onClick={() => setRestartOpen(false)}>Отмена</Button><Button variant="contained" onClick={() => void handleRestart()}>Перезапустить</Button></DialogActions>
       </Dialog>
       <Snackbar open={toast !== null} autoHideDuration={4500} onClose={() => setToast(null)}><Alert onClose={() => setToast(null)} severity={toast?.severity ?? 'success'} variant="filled" sx={{ maxWidth: 420 }}>{toast?.message}</Alert></Snackbar>

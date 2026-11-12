@@ -124,7 +124,7 @@ export class BotApiBackend implements ApiBackend {
         try {
             const preset = await apiTurnPreset(this.models);
             const route = await runWithChannelPreset(preset, () => photoVisionRoute());
-            if (!route.available) throw new ApiError(503, 'vision_unavailable', `Кира сейчас не может посмотреть фото: ${route.reason}`);
+            if (!route.available) throw new ApiError(503, 'vision_unavailable', `Бот сейчас не может посмотреть фото: ${route.reason}`);
             return preset;
         } catch (error) {
             if (error instanceof ApiError) throw new ApiError(503, 'vision_unavailable', error.message);

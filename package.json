@@ -46,7 +46,8 @@
     "build:all": "npm run build:server && npm run build:admin",
     "test:admin-monitoring": "node scripts/testAdminMonitoring.js && node scripts/testAdminAiUsageAnalytics.js && node scripts/testAdminPersonality.js && npm run test:admin-memory-graph",
     "test:admin-memory-graph": "node scripts/testAdminMemoryGraph.js",
-    "test:image-recognition-ui": "node scripts/testImageRecognitionUi.cjs"
+    "test:image-recognition-ui": "node scripts/testImageRecognitionUi.cjs",
+    "test:personalization-ui": "npm run build:admin && node scripts/testPersonalizationUi.cjs"
   },
   "author": "",
   "license": "ISC",

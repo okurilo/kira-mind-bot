@@ -26,7 +26,7 @@ const { createMonitoringService } = require('./monitoring');
 const { buildAiUsageSummary, buildAiUsageTracePage } = require('./aiUsageAnalytics');
 const { registerProductAnalyticsRoutes } = require('./productAnalytics');
 const { getPresetAvailabilityForMemoryProfile, getProviderDescriptor } = require('./presetAvailability');
-const { hasLegacyDigitalBiography } = require('../utils/legacyPersonalitySanitizer');
+const { hasLegacyDigitalBiography, isLegacyKiraDefault } = require('../utils/legacyPersonalitySanitizer');
 const { createMemoryEmbeddingHttp } = require('../ai/memoryEmbeddingHttp');
 const COMMON_TIMEZONES = require('./src/timezones.json');
 const {
@@ -59,10 +59,11 @@ const KIRA_INSTANCE_NAME = process.env.KIRA_INSTANCE_NAME || KIRA_BOT_CONTAINER_
 function sanitizeLegacyPersonality(profile) {
   const next = normalizeGenderDefaults(profile);
   const defaults = getDefaultPersonalityProfile(next.characterGender);
-  if (typeof next.persona === 'string' && hasLegacyDigitalBiography(next.persona)) {
+  const replaceOldDefault = next.characterName?.trim() !== 'Кира';
+  if (typeof next.persona === 'string' && (hasLegacyDigitalBiography(next.persona) || replaceOldDefault && isLegacyKiraDefault(next.persona))) {
     next.persona = defaults.persona;
   }
-  if (typeof next.biography === 'string' && hasLegacyDigitalBiography(next.biography)) {
+  if (typeof next.biography === 'string' && (hasLegacyDigitalBiography(next.biography) || replaceOldDefault && isLegacyKiraDefault(next.biography))) {
     next.biography = defaults.biography;
   }
   return next;
@@ -371,7 +372,8 @@ registerBudgetModeRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTabl
 registerBackgroundFeatureRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
 registerAccountQuotaRoutes(app, { requireAuth, operatorAuth, readEnvFile });
 registerLocalModelRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
-registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
+registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile,
+  characterName: () => readPersonality().KiraMindBot.characterName });
 registerImageRecognitionRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile });
 registerMcpRoutes(app, { requireAuth, runtimeDir: process.env.KIRA_RUNTIME_DATA_DIR || path.join(__dirname, '..', 'data'),
   accountMode: process.env.KIRA_MCP_ACCOUNT_MODE === 'true' });

@@ -1,11 +1,12 @@
 import type { Bot } from 'grammy';
 import type { BotContext } from '../types';
+import { config } from '../config';
 import { ApiError } from '../api/contracts';
 import { accountAuthority } from '../ai/accountPolicy';
 import { randomUUID } from 'node:crypto';
 
 /** Metadata for the existing handler framework, outside Telegram's positive bot/user identity domain. */
-export const API_ONLY_BOT_INFO={id:0,is_bot:true as const,first_name:'Кира',username:'kira_internal_api',
+export const API_ONLY_BOT_INFO={id:0,is_bot:true as const,first_name:config.characterName,username:'kira_internal_api',
     can_join_groups:false,can_read_all_group_messages:false,supports_inline_queries:false,
     can_connect_to_business:false,has_main_web_app:false,has_topics_enabled:false,allows_users_to_create_topics:false,
     can_manage_bots:false,supports_join_request_queries:false};
@@ -22,7 +23,7 @@ export function installApiOnlyTransport(bot:Bot<BotContext>,ownerId:number):void
             if(typeof body.text!=='string' && typeof body.caption!=='string')return {ok:true,result:true} as any;
         }
         const text=typeof body.text==='string'?body.text:typeof body.caption==='string'?body.caption
-            :method==='sendPhoto'?'Новое изображение Kira.':method==='sendVoice'?'Новое голосовое сообщение Kira.':'Новый файл Kira.';
+            :method==='sendPhoto'?'Новое изображение от бота.':method==='sendVoice'?'Новое голосовое сообщение от бота.':'Новый файл от бота.';
         const saved=await accountAuthority('inbox',{sourceKey:`runtime:${randomUUID()}`,kind:'task_result',text});
         return {ok:true,result:{message_id:saved.messageId,date:Math.floor(Date.now()/1000),chat:{id:ownerId,type:'private'},text}} as any;
     });

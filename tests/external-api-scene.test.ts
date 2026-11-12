@@ -97,10 +97,10 @@ test('actions are validated against the snapshot: known kinds, existing ids, pos
         { kind: 'sit', targetId: seat }, { kind: 'sit', targetId: seat }, { kind: 'runScript', targetId: 'rm -rf' },
     ], s);
     assert.deepEqual(actions.map(a => [a.kind, a.targetId, a.roomVersion]), [['sit', seat, 3]]);
-    assert.deepEqual(rejected.map(r => r.reason), ['Кира уже сидит', 'неизвестное действие']);
+    assert.deepEqual(rejected.map(r => r.reason), ['персонаж уже сидит', 'неизвестное действие']);
     assert.match(actions[0].id, /^[0-9a-f-]{36}$/);
     assert.equal(validateActions([{ kind: 'sit', targetId: '55555555-5555-4555-8555-555555555555' }], s).rejected[0].reason, 'нет такого подтверждённого места');
-    assert.equal(validateActions([{ kind: 'stand' }], s).rejected[0].reason, 'Кира не сидит');
+    assert.equal(validateActions([{ kind: 'stand' }], s).rejected[0].reason, 'персонаж не сидит');
     assert.equal(validateActions([{ kind: 'approach', targetId: chair }], { ...s, avatar: { ...s.avatar, pose: 'seated', seatId: seat } }).rejected[0].reason, 'сначала нужно встать');
     assert.equal(validateActions('sit', s).actions.length, 0);
 });
@@ -113,7 +113,7 @@ test('a frame is read by the model that reads photos, under the app mode, and re
     assert.deepEqual(capabilities.vision, channel.route);
     assert.equal(capabilities.mode.preset, 'gpt-lean');
     assert.deepEqual(channel.routeModes, ['gpt-lean']);
-    assert.match(capabilities.notes, /не становится фактами/);
+    assert.match(capabilities.notes, /не становятся фактами/);
     const look = parseSceneTurn({ text: 'Что ты видишь?', scene: scene(), frame: frame() });
     assert.equal(await service.ready(look), 'gpt-lean');
     channel.route = { available: false, reason: 'Модель gpt-synthetic не поддерживает изображения.' };
@@ -207,8 +207,8 @@ test('sit without a target is the phone\'s own seat choice; a plain "sit down" b
     const s = parseSceneTurn({ text: 'Садись', scene: scene() }).scene;
     const auto = validateActions([{ kind: 'sit' }, { kind: 'sit', targetId: 'auto' }], s);
     assert.deepEqual(auto.actions.map(a => [a.kind, a.targetId]), [['sit', undefined]]);           // one sit, no invented id
-    assert.deepEqual(auto.rejected.map(r => r.reason), ['Кира уже сидит']);
-    assert.equal(validateActions([{ kind: 'sit' }], { ...s, avatar: { ...s.avatar, pose: 'seated', seatId: seat } }).rejected[0].reason, 'Кира уже сидит');
+    assert.deepEqual(auto.rejected.map(r => r.reason), ['персонаж уже сидит']);
+    assert.equal(validateActions([{ kind: 'sit' }], { ...s, avatar: { ...s.avatar, pose: 'seated', seatId: seat } }).rejected[0].reason, 'персонаж уже сидит');
     assert.equal(validateActions([{ kind: 'sit', targetId: 'bad' }], s).rejected[0].reason, 'нет такого подтверждённого места');   // the old form stays strict
     assert.ok(wantsPlainSit('Кира, садись') && wantsPlainSit('присядь, пожалуйста') && wantsPlainSit('Сядь куда-нибудь'));
     assert.ok(!wantsPlainSit('не садись') && !wantsPlainSit('Кира, не садись пока') && !wantsPlainSit('сядьмо') && !wantsPlainSit('как дела?'));
@@ -276,7 +276,7 @@ test('point: a thing on the frame, a remembered thing or furniture; one at a tim
     const s = parseSceneTurn({ text: 'Где телефон?', scene: roomWithThings() }).scene;
     // named only in words: looked for on the frame, so only with one
     assert.deepEqual(validateActions([{ kind: 'point', label: ' телефон ' }], s, true).actions.map(a => [a.kind, a.label, a.targetId]), [['point', 'телефон', undefined]]);
-    assert.equal(validateActions([{ kind: 'point', label: 'телефон' }], s, false).rejected[0].reason, 'нет кадра, и такой вещи Кира не помнит');
+    assert.equal(validateActions([{ kind: 'point', label: 'телефон' }], s, false).rejected[0].reason, 'нет кадра, и такой вещи нет в памяти');
     assert.equal(validateActions([{ kind: 'point' }], s, true).rejected[0].reason, 'не сказано, что показать');
     // a remembered thing or a piece of furniture by id, with or without a frame; never an invented id
     assert.deepEqual(validateActions([{ kind: 'point', targetId: keys, label: 'ключи' }], s).actions.map(a => [a.targetId, a.label]), [[keys, 'ключи']]);

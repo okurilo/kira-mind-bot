@@ -25,6 +25,7 @@ export interface AccountRuntimes {
     status(id: string): string;
     endpoint(account: Account): RuntimeEndpoint;
     restart(id: string): Promise<void>;
+    assistantName?(id: string): Promise<string | null>;
 }
 
 /** Whitelist infrastructure/model credentials; personal identity and integrations are never inherited. */
@@ -90,12 +91,24 @@ export class TenantRuntimeManager implements AccountRuntimes {
         const worker = this.workers.get(id);
         return worker && this.unresponsive(worker) ? 'restarting' : worker?.state || this.pairingErrors.get(id) || 'waiting';
     }
+    async assistantName(id: string): Promise<string | null> {
+        try {
+            const directory = path.join(this.root, tenantName(id));
+            const file = path.join(directory, 'personality.json');
+            const realRoot = await fs.realpath(this.root);
+            if (await fs.realpath(directory) !== path.join(realRoot, tenantName(id))) return null;
+            if (await fs.realpath(file) !== path.join(realRoot, tenantName(id), 'personality.json')) return null;
+            const personality = JSON.parse(await fs.readFile(file, 'utf8'));
+            const name = personality?.KiraMindBot?.characterName;
+            return typeof name === 'string' && name.trim() ? name.trim() : null;
+        } catch { return null; }
+    }
     private unresponsive(worker: Worker): boolean {
         return worker.state === 'ready' && Date.now() - worker.lastHeartbeatAt > HEARTBEAT_TIMEOUT_MS;
     }
     endpoint(account: Account): RuntimeEndpoint {
         const worker = this.workers.get(account.id);
-        if (worker?.state !== 'ready' || !worker.port || this.unresponsive(worker)) throw new ApiError(503, 'kira_starting', 'Кира ещё запускается. Повтори запрос позже.');
+        if (worker?.state !== 'ready' || !worker.port || this.unresponsive(worker)) throw new ApiError(503, 'kira_starting', 'Бот ещё запускается. Повтори запрос позже.');
         return { port: worker.port, token: worker.token };
     }
     start() {

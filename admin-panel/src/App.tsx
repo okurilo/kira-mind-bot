@@ -57,7 +57,7 @@ export default function App() {
         }}
       >
         <BrandMark size={96} />
-        <CircularProgress size={24} aria-label="Загрузка Kira Mind" sx={{ color: 'primary.main' }} />
+        <CircularProgress size={24} aria-label="Загрузка панели бота" sx={{ color: 'primary.main' }} />
       </Box>
     );
   }

@@ -51,7 +51,7 @@ async function fixture(browser, mode, viewport) {
   const context = await browser.newContext({ viewport, colorScheme: viewport.width < 400 ? 'dark' : 'light' });
   let loggedIn = mode === 'reauthenticate', purpose = 'login', authentications = 0, unlinks = 0;
   let identities = [{ id: 'synthetic-password', provider: 'password' }, { id: 'synthetic-google', provider: 'google' }];
-  const session = () => ({ account: { id: accountId, username: 'synthetic_account', runtimeState: 'ready', consent: { aiAllowed: false } }, operatorAccess: false });
+  const session = () => ({ account: { id: accountId, username: 'synthetic_account', assistantName: 'Салем', runtimeState: 'ready', consent: { aiAllowed: false } }, operatorAccess: false });
   await context.route('**/*', async route => {
     const url = new URL(route.request().url()), endpoint = url.pathname;
     const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -113,6 +113,10 @@ async function main() {
         // A native modal dialog makes this body-level provider iframe inert, irrespective of its z-index.
         await task.getByRole('button', { name: 'Подтвердить тестовую проверку', exact: true }).click({ timeout: 3000 });
         await f.page.getByRole('status').filter({ hasText: mode === 'reauthenticate' ? 'Способ входа отключён.' : 'Вход выполнен.' }).waitFor();
+        if (mode !== 'reauthenticate') {
+          await f.page.waitForFunction(() => document.querySelector('#brand-name')?.textContent === 'Салем');
+          assert.match(await f.page.title(), /^Салем/);
+        }
         assert.deepEqual(f.calls(), { authentications: 1, unlinks: mode === 'reauthenticate' ? 1 : 0 });
         assert.equal(await f.page.locator('#account-app').evaluate(el => el.inert), false);
         assert.equal(await f.page.locator('#proof-backdrop').isVisible(), false);

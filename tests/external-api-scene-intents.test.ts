@@ -78,9 +78,9 @@ test('prepare: one classification under the app mode, nothing answered, stored, 
     assert.match(prepared.plan.id, /^[0-9a-f-]{36}$/);
     assert.deepEqual(prepared.plan.vision, { available: true, provider: 'openai', providerLabel: 'OpenAI', model: 'gpt-synthetic', location: 'cloud' });
     assert.deepEqual(m.calls.map(c => [c.task, c.preset]), [['intentClassification', 'gpt-lean']]);
-    // the decision sees what Kira saw and said, not only the words
+    // The decision sees what the configured assistant saw and said, not only the words.
     const asked = m.calls[0].params.messages[1].content;
-    assert.match(asked, /Кира \(о том, что видела на кадре\): На столе вижу два телефона/);
+    assert.match(asked, /ассистентка \(наблюдение с кадра\): На столе вижу два телефона/);
     assert.match(asked, /Камеру телефона можно попросить сделать кадр/);
     assert.deepEqual([channel.said, channel.looked, channel.notes, writes], [[], [], [], []]);
     // a frame, a plan or an avoid point have no place in a preparation

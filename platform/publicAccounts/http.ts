@@ -98,7 +98,7 @@ export class PublicAccountsHttp {
         const runtimeState = state === 'registered' ? 'not_activated' : runtime === 'ready' ? 'ready'
             : ['starting','restarting'].includes(runtime) ? 'starting' : runtime === 'waiting' ? 'queued' : 'unavailable';
         const consent = await this.policy.consent(account.id);
-        return { id: account.id, username: account.username, accountState: state, runtimeState,
+        return { id: account.id, username: account.username, assistantName: await this.runtimes.assistantName?.(account.id) ?? null, accountState: state, runtimeState,
             runtimeMode: account.runtime_mode || 'telegram', isReady: state === 'active' && runtimeState === 'ready',
             autonomousAiEnabled: account.autonomous_ai_enabled ?? true,
             consent: { requiredVersion: consent.catalog.version, acceptedVersion: consent.acceptedVersion, aiAllowed: consent.aiAllowed },

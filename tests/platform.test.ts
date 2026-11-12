@@ -88,6 +88,25 @@ test('passwords, account-bound encryption, and internal credentials cannot be re
     assert.notEqual(secrets.derive('one', 'api'), secrets.derive('one', 'database'));
 });
 
+test('account display name is read from the selected tenant personality without cross-account fallback', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'assistant-name-test-'));
+    const first = randomUUID(), second = randomUUID();
+    const manager = new TenantRuntimeManager({} as any, {} as any, {} as any, {} as any, root);
+    try {
+        for (const id of [first, second]) await fs.mkdir(path.join(root, tenantName(id)), { mode: 0o700 });
+        await fs.writeFile(path.join(root, tenantName(first), 'personality.json'), JSON.stringify({ KiraMindBot: { characterName: '  Салем  ' } }));
+        await fs.writeFile(path.join(root, tenantName(second), 'personality.json'), JSON.stringify({ KiraMindBot: { characterName: '' } }));
+        assert.equal(await manager.assistantName(first), 'Салем');
+        assert.equal(await manager.assistantName(second), null);
+        await fs.writeFile(path.join(root, tenantName(second), 'personality.json'), '{invalid');
+        assert.equal(await manager.assistantName(second), null);
+        assert.equal(await manager.assistantName(first), 'Салем');
+        await fs.rm(path.join(root, tenantName(second), 'personality.json'));
+        await fs.symlink(path.join(root, tenantName(first), 'personality.json'), path.join(root, tenantName(second), 'personality.json'));
+        assert.equal(await manager.assistantName(second), null);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test('each worker has independent storage/identity and never inherits operator personal credentials', async () => {
     const store = new MemoryAccounts();
     const first = await store.create('synthetic_first', 'unused');

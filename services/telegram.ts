@@ -437,10 +437,10 @@ export async function sendMessage(
     try {
         // Добавляем подпись к сообщению
         const botName = config.characterName;
-        const botUsername = config.botUsername || "KiraMindBot";
+        const botUsername = config.botUsername?.trim();
 
         // Элегантная подпись с разделительной линией
-        const signature = `\n\n──────────\n✉️ Сообщение от личного ассистента ${botName} | @${botUsername}`;
+        const signature = `\n\n──────────\n✉️ Сообщение от личного ассистента ${botName}${botUsername ? ` | @${botUsername}` : ''}`;
         const messageWithSignature = message + signature;
 
         // Отправляем сообщение с подписью
@@ -628,8 +628,8 @@ export async function sendMessageToChat(
 ): Promise<{ success: boolean, messageId: number | null }> {
     try {
         const botName = config.characterName;
-        const botUsername = config.botUsername || "KiraMindBot";
-        const signature = `\n\n──────────\n✉️ ${botName} | @${botUsername}`;
+        const botUsername = config.botUsername?.trim();
+        const signature = `\n\n──────────\n✉️ ${botName}${botUsername ? ` | @${botUsername}` : ''}`;
         const messageWithSignature = message + signature;
 
         // Пробуем отправить через Bot API, если бот является участником этой группы

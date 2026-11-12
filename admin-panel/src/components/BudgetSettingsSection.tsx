@@ -100,13 +100,13 @@ export function BudgetSettingsSection({ onToast }: Props) {
     <Stack spacing={1.5}>
       <AccountQuotaPanel onQuota={setQuota} />
       <Stack direction="row" justifyContent="space-between" alignItems="center">
-        <Typography variant="subtitle1" component="h2" fontWeight={600} id="activity-heading">Активность Киры</Typography>
+        <Typography variant="subtitle1" component="h2" fontWeight={600} id="activity-heading">Активность бота</Typography>
         <Tooltip title="Обновить состояния"><Box component="span"><IconButton size="small" aria-label="Обновить фоновые функции" onClick={() => void load()} disabled={loading || saving}>
           {loading || saving ? <CircularProgress size={18} /> : <RefreshIcon fontSize="small" />}
         </IconButton></Box></Tooltip>
       </Stack>
       {error && <Alert severity="error">{error}</Alert>}
-      <Typography variant="body2" color="text.secondary">Выберите, что Кира делает автоматически. Общение, ручные поручения, сохранённая память и обычные напоминания доступны в любом режиме.</Typography>
+      <Typography variant="body2" color="text.secondary">Выберите, что бот делает автоматически. Общение, ручные поручения, сохранённая память и обычные напоминания доступны в любом режиме.</Typography>
       {activity && <Typography variant="body2">Сейчас: <strong>{catalog.find(item => item.key === activity)?.title}</strong></Typography>}
       {mode === 'maximum' && <Alert severity="info">Фоновый AI на паузе. Применение готового режима снимет паузу.</Alert>}
       <Box role="radiogroup" aria-labelledby="activity-heading" sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>

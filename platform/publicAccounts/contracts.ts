@@ -91,6 +91,7 @@ export interface PasswordLoginInput {
 export interface AccountView {
     id: string;
     username: string;
+    assistantName: string | null;
     accountState: AccountState;
     runtimeState: RuntimeState;
     runtimeMode: 'api_only' | 'telegram';

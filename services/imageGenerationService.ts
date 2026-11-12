@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { AppDataSource } from '../data-source';
 import { BotSettingEntity } from '../entity/BotSettingEntity';
 import { RUNTIME_DATA_DIR } from '../utils/runtimeData';
-import { SETTING_KEY, defaultImageSettings, parseImageSettings, readReference, requestImage, type ImageSettings } from '../ai/imageGeneration';
+import { SETTING_KEY, defaultImageSettings, parseImageSettings, readReference, defaultReferenceForName, requestImage, type ImageSettings } from '../ai/imageGeneration';
+import { config } from '../config';
 import { accountPolicyFetch,withAccountImageOperation } from '../ai/accountPolicy';
 
 let cached: ImageSettings | undefined;
@@ -24,8 +25,8 @@ export async function generateOpenAiImage(prompt: string, includesCharacter: boo
 }
 async function generateImage(prompt:string,includesCharacter:boolean):Promise<string>{
     const settings = await getImageSettings();
-    const reference = includesCharacter ? await readReference(RUNTIME_DATA_DIR) : null;
-    if (includesCharacter && !reference) throw new CharacterReferenceRequiredError('Добавьте эталон внешности в админке: «Настройки → Генерация изображений → Референс Киры».');
+    const reference = includesCharacter ? await readReference(RUNTIME_DATA_DIR, defaultReferenceForName(config.characterName)) : null;
+    if (includesCharacter && !reference) throw new CharacterReferenceRequiredError('Добавьте эталон внешности в админке: «Личность → Внешность → Образ персонажа».');
     const image = await requestImage({ settings, prompt, reference,fetchImpl:accountPolicyFetch('openai') });
     const directory = path.join(RUNTIME_DATA_DIR, 'image-generation', 'generated');
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });

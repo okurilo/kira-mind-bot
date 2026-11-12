@@ -2,21 +2,22 @@
 const path = require('node:path');
 const express = require('express');
 const { SETTING_KEY, MODELS, SIZES, QUALITIES, MAX_REFERENCE_BYTES, parseImageSettings,
-  defaultImageSettings, imageConnection, readReference, saveReference, deleteReference } = require('../ai/imageGeneration');
+  defaultImageSettings, imageConnection, readReference, defaultReferenceForName, saveReference, deleteReference } = require('../ai/imageGeneration');
 
 async function readImageSettings(pool, vars) {
   const { rows } = await pool.query('SELECT value FROM bot_settings WHERE key = $1', [SETTING_KEY]);
   return rows[0] ? parseImageSettings(rows[0].value) : defaultImageSettings(vars);
 }
-function registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile }) {
+function registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureBotSettingsTable, readEnvFile, characterName }) {
   const runtimeDir = process.env.KIRA_RUNTIME_DATA_DIR || path.join(__dirname, '..', 'data');
+  const currentReference = () => readReference(runtimeDir, defaultReferenceForName(characterName()));
   app.get('/api/image-generation', requireAuth, async (_req, res) => {
     const pool = createDbPool();
     try {
       await ensureBotSettingsTable(pool);
       const vars = { ...process.env, ...readEnvFile() };
       const settings = await readImageSettings(pool, vars);
-      const reference = await readReference(runtimeDir);
+      const reference = await currentReference();
       let configured = false;
       try { imageConnection(vars); configured = true; } catch {}
       res.set('Cache-Control', 'no-store').json({ settings, models: MODELS, sizes: SIZES, qualities: QUALITIES,
@@ -50,7 +51,7 @@ function registerImageGenerationRoutes(app, { requireAuth, createDbPool, ensureB
   });
   app.get('/api/image-generation/reference', requireAuth, async (_req, res) => {
     try {
-      const reference = await readReference(runtimeDir);
+      const reference = await currentReference();
       if (!reference) return res.status(404).end();
       res.set({ 'Content-Type': reference.mime, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }).send(reference.data);
     } catch { res.status(500).json({ error: 'Не удалось прочитать референс' }); }

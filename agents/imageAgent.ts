@@ -5,6 +5,7 @@ import { MessageClassification, ProcessingResult } from "../orchestrator";
 import { devLog, processReminderTime } from "../utils";
 import { ChatCompletionContentPart } from "openai/resources/chat";
 import { getBotGenderedText, getBotPersona, getCommunicationStyle } from "../persona";
+import { config } from "../config";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import { formatPromptDateTime } from "../utils/time";
 import { accountPolicyError } from '../ai/accountPolicy';
@@ -95,7 +96,7 @@ export async function imageAgent(
                 },
                 "recommendedAction": "рекомендуемое действие на основе анализа",
                 "additionalNotes": "дополнительные примечания",
-                "responseText": "естественный, человечный ответ пользователю от имени женщины-ассистента Киры"
+                "responseText": "естественный ответ пользователю от имени ${config.characterName} с учётом настроенного рода персонажа"
               }`
             : `Текущая дата и время: ${formattedDateTime}
             
@@ -125,7 +126,7 @@ export async function imageAgent(
                 },
                 "recommendedAction": "рекомендуемое действие на основе анализа",
                 "additionalNotes": "дополнительные примечания",
-                "responseText": "естественный, человечный ответ пользователю от имени женщины-ассистента Киры"
+                "responseText": "естественный ответ пользователю от имени ${config.characterName} с учётом настроенного рода персонажа"
               }`;
 
         // Формируем массив контента для сообщения в правильном формате

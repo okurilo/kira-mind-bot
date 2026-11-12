@@ -211,7 +211,7 @@ function buildGuardianPrompt(
 - sourceMessageIds должен содержать 1-5 реальных ID сообщений из выбранного диалога.
 - signalType обязан описывать содержательный сигнал; тип "unread" запрещён.
 - observation — что именно произошло без домыслов; whyImportant — почему это важно владельцу.
-- kiraView — короткая личная позиция Киры, допускающая несогласие, но не выдающая догадку за факт.
+- kiraView — короткая личная позиция ассистента, допускающая несогласие, но не выдающая догадку за факт.
 - suggestedAction — ровно один практичный следующий шаг.
 
 Верни только JSON:
@@ -221,7 +221,7 @@ function buildGuardianPrompt(
       "chatId": "строго один из chatId выше",
       "observation": "что произошло",
       "whyImportant": "почему это важно",
-      "kiraView": "личная позиция Киры",
+      "kiraView": "личная позиция ассистента",
       "suggestedAction": "один следующий шаг",
       "sourceMessageIds": [123],
       "signalType": "request|commitment|plan_change|decision|conflict|emotional|relationship",

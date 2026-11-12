@@ -64,7 +64,7 @@ export function ModelPreferencesSettings({ onToast, localConnection }: {
     try {
       const result = await saveModelPreferences(request);
       if (!result.success) throw new Error(result.error || 'Не удалось сохранить стратегию');
-      await load(); setDialog(false); onToast('Стратегия сохранена. Кира применит её в течение 5 секунд.', 'success');
+      await load(); setDialog(false); onToast('Стратегия сохранена. Бот применит её в течение 5 секунд.', 'success');
     } catch (failure) { onToast(failure instanceof Error ? failure.message : 'Не удалось сохранить стратегию', 'error'); }
     finally { setBusy(false); }
   }
@@ -154,7 +154,7 @@ export function ModelPreferencesSettings({ onToast, localConnection }: {
               control={<Checkbox checked={selectedProviders.includes(id)} disabled={busy || !connectedProviders.includes(id) && !selectedProviders.includes(id)}
                 onChange={(_, checked) => setPreferences(current => ({ ...current,
                   providers: customProviders.filter(provider => provider === id ? checked : selectedProviders.includes(provider)) }))} />} />)}</Stack>
-            <Typography variant="caption" color="text.secondary">Кира распределяет этапы задачи между выбранными моделями. LM Studio включается явно; нужны настроенные и доступные локальные роли.</Typography>
+            <Typography variant="caption" color="text.secondary">Бот распределяет этапы задачи между выбранными моделями. LM Studio включается явно; нужны настроенные и доступные локальные роли.</Typography>
           </Box>}
           <Box>
             <Typography variant="body2" fontWeight={600} sx={{ mb: 1.25 }}>Качество ответов</Typography>

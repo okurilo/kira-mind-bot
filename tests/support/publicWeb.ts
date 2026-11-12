@@ -82,7 +82,8 @@ export async function publicWebHarness(db: any, store: any) {
         return new Response(JSON.stringify({ success: form.get('response')?.startsWith('synthetic-captcha-'), hostname: config.captcha.hostname, challenge_ts: new Date().toISOString() }));
     });
     const workers = new Map<string,{ server: http.Server; port: number; token: string; marker: string }>();
-    const runtimes = { status: () => 'ready', endpoint: (account: any) => { const value = workers.get(account.id); if (!value) throw Error('Synthetic worker missing'); return { port:value.port,token:value.token }; }, restart: async (_id: string) => {} };
+    const assistantNames = new Map<string, string>();
+    const runtimes = { status: () => 'ready', assistantName: async (id: string) => assistantNames.get(id) ?? null, endpoint: (account: any) => { const value = workers.get(account.id); if (!value) throw Error('Synthetic worker missing'); return { port:value.port,token:value.token }; }, restart: async (_id: string) => {} };
     const accounts = new PublicAccountsHttp(db,store,publicTestSecrets,runtimes,config,{ identityVerifier:verifier(config),proofVerifier:proof,
         webConfig:settings,webDependencies:{identityVerifierFactory:verifier,proofVerifier:proof} });
     const server = createPlatformServer({store,secrets:publicTestSecrets,runtimes,telegram:{} as any,publicAccounts:accounts});
@@ -132,5 +133,5 @@ export async function publicWebHarness(db: any, store: any) {
     };
     const cookieNames={access:WEB_ACCESS_COOKIE,browser:WEB_BROWSER_COOKIE,refresh:WEB_REFRESH_COOKIE};
     const shutdown=async()=>{await close(server);await close(opServer);for(const value of workers.values())await close(value.server);};
-    return{db,store,config,settings,accounts,server,base,operatorBase,runtimes,client,account,captcha,sign,prepareTelegram,webFlow,webComplete,webLogin,reauth,nativePassword,cookieNames,captchaCalls,exchanges,operatorRequests,shutdown};
+    return{db,store,config,settings,accounts,server,base,operatorBase,runtimes,setAssistantName:(id:string,name:string)=>assistantNames.set(id,name),client,account,captcha,sign,prepareTelegram,webFlow,webComplete,webLogin,reauth,nativePassword,cookieNames,captchaCalls,exchanges,operatorRequests,shutdown};
 }

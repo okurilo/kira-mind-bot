@@ -23,7 +23,7 @@ async function boundDevice(tx: WorkoutTransaction, id: string, bindingId: string
 }
 export async function requireHealthConsent(tx: WorkoutTransaction, id: string, bindingId: string, generation?: string): Promise<HealthSyncState> {
     const state = await tx.get<HealthSyncState>('workout_health_state', 'state') ?? emptyState();
-    if (!state.enabled) fail('consent_required', 'Нужно согласие на передачу Apple Health в Киру.', 409);
+    if (!state.enabled) fail('consent_required', 'Нужно согласие на передачу Apple Health боту.', 409);
     if (state.deviceId !== id || state.bindingId !== bindingId || state.generation !== generation) fail('sync_generation_conflict', 'Подключение Apple Health изменилось.', 409);
     return state;
 }
@@ -121,7 +121,7 @@ async function upsertWorkout(tx: WorkoutTransaction, key: string, old: SourceIte
     const own = d.kiraWorkoutId !== undefined;
     if (own) {
         const existing = await tx.get<Workout>('workout_records', uuid(d.kiraWorkoutId));
-        if (!existing || existing.source.kind !== 'kira' || existing.source.healthKitId !== healthKitId) fail('source_identity_conflict', 'Экспорт Киры не подтверждён для этого аккаунта.', 409);
+        if (!existing || existing.source.kind !== 'kira' || existing.source.healthKitId !== healthKitId) fail('source_identity_conflict', 'Экспорт бота не подтверждён для этого аккаунта.', 409);
         workout = existing;
     } else {
         const id = stableId('healthkit:' + healthKitId);

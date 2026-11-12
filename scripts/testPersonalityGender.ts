@@ -28,12 +28,20 @@ try {
 
     const { config } = require("../config") as typeof import("../config");
 
+    assert.equal(config.characterName, "Макс");
     assert.equal(config.eventDescriptionGender, "мужской");
     assert.match(config.persona, /мужчин|мужском роде/u);
     assert.doesNotMatch(config.persona, /женщин|женском роде/u);
+    assert.doesNotMatch(config.persona, /Кира/u);
     assert.match(config.biography, /мужчин|помощник/u);
     assert.doesNotMatch(config.biography, /женщин|помощница/u);
+    assert.doesNotMatch(config.biography, /Кира|Санкт-Петербург|СПбГУ/u);
     assert.equal(config.proactiveMessageHint, "как будто ты сам написал первым");
+    const { createDefaultKiraSelfState } = require("../utils/kiraSelfMemory") as typeof import("../utils/kiraSelfMemory");
+    const selfState = createDefaultKiraSelfState();
+    assert.match(selfState.personality.selfImage, /собеседника/u);
+    assert.deepEqual(selfState.biography.timeline, []);
+    assert.doesNotMatch(JSON.stringify(selfState), /Кира|СПбГУ|выросла|собеседницей/u);
     const { getBotGenderedText } = require("../persona") as typeof import("../persona");
 
     assert.equal(selectPersonalityGenderText("женский", "создала", "создал"), "создала");
