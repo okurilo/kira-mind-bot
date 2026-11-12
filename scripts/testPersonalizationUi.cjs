@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
 const origin = 'https://synthetic-admin.example.invalid';
 const dist = path.resolve(__dirname, '../admin-panel/dist');
 const profile = {
-  characterName: 'Салем', characterGender: 'женский', currentCity: '', persona: '',
+  characterName: 'Макс', characterGender: 'мужской', currentCity: '', persona: '',
   communicationStyle: '', biography: '', ownerName: '', ownerUsername: '',
   userName: '', userBirthDate: '', moodVariants: '', defaultMood: '', proactiveMessageHint: '',
 };
@@ -30,6 +30,9 @@ async function main() {
       if (url.pathname === '/api/personality') {
         if (route.request().method() === 'POST') {
           current = route.request().postDataJSON().KiraMindBot;
+          if (current.characterGender === 'мужской' && !current.proactiveMessageHint) {
+            current.proactiveMessageHint = 'как будто ты сам написал первым';
+          }
           return route.fulfill({ json: { success: true } });
         }
         return route.fulfill({ json: { KiraMindBot: current } });
@@ -45,16 +48,25 @@ async function main() {
       return route.fulfill({ path: file, contentType: mime });
     });
     await page.goto(origin + '/');
-    await page.getByText('Салем', { exact: true }).first().waitFor({ timeout: 5000 }).catch(async error => {
+    await page.getByText('Макс', { exact: true }).first().waitFor({ timeout: 5000 }).catch(async error => {
       throw new Error(`${error.message}\nPage errors: ${pageErrors.join('; ')}\nBody: ${(await page.locator('body').innerText()).slice(0, 1000)}`);
     });
-    assert.match(await page.title(), /^Салем/);
+    assert.match(await page.title(), /^Макс/);
     await page.getByRole('button', { name: 'Личность' }).first().click();
-    await page.getByText('Салем — Личность и характер').waitFor();
-    await page.getByLabel('Имя ассистента').fill('Мира');
+    await page.getByText('Макс — Личность и характер').waitFor();
+    assert.match(await page.getByRole('combobox', { name: 'Род персонажа' }).textContent(), /Мужской/);
+    assert.equal(await page.getByLabel('Подсказка для проактивных сообщений').getAttribute('placeholder'), 'как будто ты сам написал первым');
+    await page.getByRole('combobox', { name: 'Род персонажа' }).click();
+    await page.getByRole('option', { name: 'Женский' }).click();
+    assert.equal(await page.getByLabel('Подсказка для проактивных сообщений').getAttribute('placeholder'), 'как будто ты сама написала первой');
+    await page.getByRole('combobox', { name: 'Род персонажа' }).click();
+    await page.getByRole('option', { name: 'Мужской' }).click();
+    await page.getByLabel('Имя ассистента').fill('Лев');
     await page.getByRole('button', { name: 'Сохранить' }).click();
-    await page.getByText('Мира', { exact: true }).first().waitFor();
-    assert.match(await page.title(), /^Мира/);
+    await page.getByText('Лев', { exact: true }).first().waitFor();
+    await page.waitForFunction(() => document.querySelector('input[placeholder="как будто ты сам написал первым"]')?.value === 'как будто ты сам написал первым');
+    assert.equal(await page.getByLabel('Подсказка для проактивных сообщений').inputValue(), 'как будто ты сам написал первым');
+    assert.match(await page.title(), /^Лев/);
     await page.getByRole('button', { name: 'Настройки' }).first().click();
     await page.getByRole('tab', { name: 'Система' }).click();
     await page.getByText('Проактивность и переписки').click();

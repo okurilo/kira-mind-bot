@@ -1075,7 +1075,7 @@ async function addChapterSourceCandidates(
  * 1. История изменений: "(ранее: ...)" — даёт модели понимание эволюции
  * 2. Confidence-маркер — сигнализирует модели насколько уверенно говорить об этом факте:
  *    - [возможно] для confidence 0.35–0.64: модель должна мягко хеджировать ("кажется", "если не ошибаюсь")
- *    - [не уверена] для confidence < 0.35: модель должна явно обозначить неопределённость
+ *    - [низкая уверенность] для confidence < 0.35: модель должна явно обозначить неопределённость
  *    - нет маркера для confidence >= 0.65: факт достаточно надёжен, говорим уверенно
  *
  * Это имитирует мета-память человека: мы знаем, что мы помним хорошо, а что смутно.
@@ -1084,7 +1084,7 @@ export function formatFactWithHistory(r: SearchResultLike): string {
     const conf = r.confidence ?? 0.6;
     let confidenceMarker = '';
     if (conf < 0.35) {
-        confidenceMarker = '[не уверена] ';
+        confidenceMarker = '[низкая уверенность] ';
     } else if (conf < 0.65) {
         confidenceMarker = '[возможно] ';
     }
@@ -1363,7 +1363,7 @@ async function readMultiQueryMemoryContext(
         // Есть недавние факты — возвращаем только их, без vector search
         devLog('Memory need: none, but injecting recent facts:', recentSessionFacts.length);
         return {
-            context: '[Только что запомнила]:\n' + recentSessionFacts.join('\n'),
+            context: '[Недавно сохранённые факты]:\n' + recentSessionFacts.join('\n'),
             recalledMemories: [],
             retrievalTrace: explain ? {
                 memoryNeed: need,
@@ -1890,7 +1890,7 @@ async function readMultiQueryMemoryContext(
         });
     });
     const recentBlock = newRecentFacts.length > 0
-        ? '\n\n[Только что запомнила]:\n' + newRecentFacts.join('\n')
+        ? '\n\n[Недавно сохранённые факты]:\n' + newRecentFacts.join('\n')
         : '';
     const contactScopeNote = entities.people.length ? `\nПредмет вопроса: ${entities.people.map(person => person.displayName).join('; ')}. Факты об этих людях не переноси на владельца.\n` : contactScope?.status === 'ambiguous'
         ? `\nВнимание: имя «${contactScope.queryName}» неоднозначно (${contactScope.candidateNames?.join(', ')}). Контактные факты по этому имени не подмешаны; попроси пользователя уточнить конкретного человека.\n`
@@ -1902,7 +1902,7 @@ async function readMultiQueryMemoryContext(
         'Ниже — сведения из личной памяти. Субъект записи определяется её person/subject/contact полями; принадлежность архива пользователю не означает, что каждый факт о нём. Используй их при ответе.\n' +
         'Маркеры достоверности:\n' +
         '  [возможно] — помню, но не на 100%; используй мягкие обороты: "кажется", "если не ошибаюсь"\n' +
-        '  [не уверена] — слабое воспоминание; скажи что помнишь смутно и предложи уточнить\n' +
+        '  [низкая уверенность] — слабое воспоминание; скажи что помнишь смутно и предложи уточнить\n' +
         '  [качество: слабая опора] — факт прошёл фильтр, но опора в переписке слабая или важность была снижена; не делай из него сильных выводов\n' +
         '  [происхождение: пересказ] — факт сообщил не сам субъект; говори осторожнее\n' +
         '  [происхождение: вывод] — это аккуратный вывод, не прямое свидетельство; не представляй как точный факт\n' +

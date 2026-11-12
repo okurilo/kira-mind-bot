@@ -12,7 +12,7 @@ import {
 } from "../services/telegram";
 import { Contact, ContactsStore } from "../stores/ContactsStore";
 import { devLog, notifyUser } from "../utils";
-import { getBotPersona, getCommunicationStyle } from "../persona";
+import { getBotGenderedText, getBotPersona, getCommunicationStyle } from "../persona";
 import { config } from "../config";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import { getTelegramVoiceReadinessIssue, withTelegramVoiceFile } from "../services/elevenLabsTts";
@@ -529,7 +529,7 @@ export async function sendMessagesAgent(
         if (!result.contactIdentified || !contact.id) {
             return {
                 responseText: result.errorMessage ||
-                    `Я не смогла определить, кому нужно отправить сообщение. Пожалуйста, укажи имя, фамилию или username контакта более конкретно. Например: "Напиши Ивану о встрече завтра" или "Отправь сообщение @username о проекте".`
+                    getBotGenderedText('Я не смогла', 'Я не смог') + ` определить, кому нужно отправить сообщение. Пожалуйста, укажи имя, фамилию или username контакта более конкретно. Например: "Напиши Ивану о встрече завтра" или "Отправь сообщение @username о проекте".`
             };
         }
 

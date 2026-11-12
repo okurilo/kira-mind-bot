@@ -358,7 +358,7 @@ ${historyContext}
         if (classification?.details.behavioralFeedback) prompt += [
             '\nВладелец сообщил о проблеме в твоей работе. Признай конкретную ошибку, если она подтверждена, и исправь текущую задачу доступными средствами. Не ограничивайся обещанием помочь потом, не изображай стыд и не перекладывай обязательную проверку на владельца.',
             `Результат сохранения процедурного урока: ${classification.details.behaviorLearningStatus ?? 'unavailable'}.`,
-            'Только saved подтверждает запись нового урока; unchanged означает, что эта обратная связь уже обработана. При unavailable/rejected не говори «запомнила», «усвоила» или «буду всегда». Даже сохранённый урок не гарантирует отсутствия ошибок. Упоминай сохранение кратко, только если уместно.',
+            'Только saved подтверждает запись нового урока; unchanged означает, что эта обратная связь уже обработана. При unavailable/rejected не утверждай, что обратная связь сохранена или усвоена, и не обещай «буду всегда». Даже сохранённый урок не гарантирует отсутствия ошибок. Упоминай сохранение кратко, только если уместно.',
         ].join('\n');
 
         const communicationPreferences = await communicationProfileContext(ctx);
@@ -369,7 +369,7 @@ ${historyContext}
                     role: "system",
                     content:
                         (memoryAnswer ? `${MEMORY_ANSWER_RULES}\nГрамматический род ассистента: ${config.eventDescriptionGender}. Собственные глаголы согласуй с ним.\nСтиль общения: ${getCommunicationStyle()}\n` :
-                            `${getBotPersona()}\nБиография: ${getBotBiography()}\nСтиль общения: ${getCommunicationStyle()}\n`) +
+                            `${getBotPersona()}\nБиография: ${getBotBiography()}\nСтиль общения: ${getCommunicationStyle()}\nГовори о себе в ${config.eventDescriptionGender === 'мужской' ? 'мужском' : 'женском'} роде. Если старые записи самопамяти содержат другой род, используй их факты, но не повторяй их грамматические формы.\n`) +
                         (isSimpleSocialMessage(message, config.characterName) ? 'На эту короткую реплику ответь естественно в 1–2 коротких предложениях. Проверка связи — не просьба рассказать о себе. Не пересказывай биографию, настроение, события дня и не добавляй список предложений помощи.\n' : '') +
                         `Сейчас: ${formattedDateTime}.\n` +
                         BEHAVIOR_MEMORY_RULES + '\n' + AVAILABILITY_SEARCH_RULES + '\n' + uiAnswerTextRules(ctx) + '\n' +

@@ -3,7 +3,7 @@ import { MessageHistory } from "../types";
 import { ProcessingResult } from "../orchestrator";
 import { GoogleMapsService, PlaceResult } from "../services/googleMaps";
 import { devLog } from "../utils";
-import { getBotPersona, getCommunicationStyle } from "../persona";
+import { getBotGenderedText, getBotPersona, getCommunicationStyle } from "../persona";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 
 // Загрузка переменных окружения
@@ -205,7 +205,7 @@ export async function mapsAgent(
             default:
                 return {
                     operationStatus: 'needs_input', clarificationQuestion: 'Какое место найти или какой маршрут построить?',
-                    responseText: "Извини, но я не смогла точно определить, что ты хочешь узнать. Можешь уточнить свой запрос? Например, 'Как добраться от Кремля до Большого театра' или 'Найди кафе рядом с метро Маяковская'. 🗺️"
+                    responseText: getBotGenderedText("Извини, но я не смогла", "Извини, но я не смог") + " точно определить, что ты хочешь узнать. Можешь уточнить свой запрос? Например, 'Как добраться от Кремля до Большого театра' или 'Найди кафе рядом с метро Маяковская'. 🗺️"
                 };
         }
     } catch (error) {
@@ -276,14 +276,14 @@ async function processDirectionsQuery(
             'bicycling': '🚲'
         }[travelMode];
 
-        const responseText = `${travelModeEmoji} Вот маршрут от ${queryResult.origin} до ${queryResult.destination}:\n\n${formattedDirections}\n\nЯ также подготовила карту для наглядности. Счастливого пути! 🗺️`;
+        const responseText = `${travelModeEmoji} Вот маршрут от ${queryResult.origin} до ${queryResult.destination}:\n\n${formattedDirections}\n\n${getBotGenderedText('Я также подготовила', 'Я также подготовил')} карту для наглядности. Счастливого пути! 🗺️`;
 
         // Возвращаем результат с URL статической карты
         return {
             responseText,
             imageGenerated: true,
             generatedImageUrl: mapUrl,
-            generatedImageDescription: `На карте я отметила начало пути — ${queryResult.origin} — зелёным маркером A, а ${queryResult.destination} — красным маркером B.`,
+            generatedImageDescription: `На карте ${getBotGenderedText('я отметила', 'я отметил')} начало пути — ${queryResult.origin} — зелёным маркером A, а ${queryResult.destination} — красным маркером B.`,
         };
     } catch (error) {
         console.error("Error processing directions query:", error);
@@ -362,16 +362,16 @@ async function processPlaceSearchQuery(
         }
 
         // Формируем ответ пользователю
-        let responseText = `🔍 Вот что я нашла ${queryResult.placeType ? `(${queryResult.placeType})` : ""} рядом с ${queryResult.location}:\n\n${formattedPlaces}`;
+        let responseText = `🔍 Вот что ${getBotGenderedText('я нашла', 'я нашёл')} ${queryResult.placeType ? `(${queryResult.placeType})` : ""} рядом с ${queryResult.location}:\n\n${formattedPlaces}`;
 
         if (mapUrl) {
-            responseText += "\nЯ также подготовила карту для наглядности. Приятного посещения! 🗺️";
+            responseText += "\n" + getBotGenderedText('Я также подготовила', 'Я также подготовил') + " карту для наглядности. Приятного посещения! 🗺️";
 
             return {
                 responseText,
                 imageGenerated: true,
                 generatedImageUrl: mapUrl,
-                generatedImageDescription: `На карте я отметила найденные места рядом с ${queryResult.location}: ${places.slice(0, 5).filter(place => place.geometry?.location).map(place => place.name).join(', ') || 'красные маркеры мест'}. Зелёный маркер S показывает центр поиска.`,
+                generatedImageDescription: `На карте ${getBotGenderedText('я отметила', 'я отметил')} найденные места рядом с ${queryResult.location}: ${places.slice(0, 5).filter(place => place.geometry?.location).map(place => place.name).join(', ') || 'красные маркеры мест'}. Зелёный маркер S показывает центр поиска.`,
             };
         } else {
             return {
@@ -439,7 +439,7 @@ async function processAddressLookupQuery(
             responseText,
             imageGenerated: true,
             generatedImageUrl: mapUrl,
-            generatedImageDescription: `На карте я показала ${geocoded.formatted_address}; нужное место отмечено красным маркером.`,
+            generatedImageDescription: `На карте ${getBotGenderedText('я показала', 'я показал')} ${geocoded.formatted_address}; нужное место отмечено красным маркером.`,
         };
     } catch (error) {
         console.error("Error processing address lookup query:", error);

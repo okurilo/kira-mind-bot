@@ -4,6 +4,7 @@ import { ChatGroupRepository } from '../services/ChatGroupRepository';
 import { ChatGroupEntity } from '../entity/ChatGroupEntity';
 import { notifyChatGroupTrackerChange } from '../services/chatGroupTracker';
 import { config } from '../config';
+import { getBotGenderedText } from '../persona';
 import { esc, heading, list, paragraph, footer, RichBlock, sendStructured, editStructuredCtx } from '../utils/richMessage';
 
 const ITEMS_PER_PAGE = 5;
@@ -303,7 +304,7 @@ export function registerChatGroupCommands(bot: Bot<BotContext>) {
                 .filter(Boolean);
 
             if (parsed.length === 0) {
-                await ctx.reply('Не нашла ни одного названия чата. Перечисли их через запятую или с новой строки:');
+                await ctx.reply(getBotGenderedText('Не нашла', 'Не нашёл') + ' ни одного названия чата. Перечисли их через запятую или с новой строки:');
                 return;
             }
 
@@ -354,7 +355,7 @@ export function registerChatGroupCommands(bot: Bot<BotContext>) {
             }
 
             if (!toRemove) {
-                await ctx.reply(`Не нашла чат «${text}» в группе. Попробуй ещё раз (номер или точное название):`);
+                await ctx.reply(`${getBotGenderedText('Не нашла', 'Не нашёл')} чат «${text}» в группе. Попробуй ещё раз (номер или точное название):`);
                 return;
             }
 

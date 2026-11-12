@@ -3,6 +3,7 @@ import { BotContext, ChatPromptWatchWizardState } from "../types";
 import { getAllChats } from "../services/chatRegistry";
 import { listReadableTelegramChats } from "../services/telegram";
 import { getProactiveChatId } from "../utils/allowedUserChatStore";
+import { getBotGenderedText } from "../persona";
 import {
     addChatPromptWatcher,
     listChatPromptWatchers,
@@ -589,7 +590,7 @@ async function handleWizardSearch(ctx: BotContext, state: ChatPromptWatchWizardS
         }
 
         if (!matches.length) {
-            await ctx.reply("Не нашла такой Telegram-чат среди диалогов пользовательского аккаунта. Напиши часть названия ещё раз.");
+            await ctx.reply(getBotGenderedText("Не нашла", "Не нашёл") + " такой Telegram-чат среди диалогов пользовательского аккаунта. Напиши часть названия ещё раз.");
             return true;
         }
 
@@ -630,7 +631,7 @@ async function handleWizardSearch(ctx: BotContext, state: ChatPromptWatchWizardS
         }
 
         if (!matches.length) {
-            await ctx.reply("Не нашла такой целевой чат. Напиши часть названия ещё раз, @username, id, me для личного чата или добавь бота в нужную группу/канал.");
+            await ctx.reply(getBotGenderedText("Не нашла", "Не нашёл") + " такой целевой чат. Напиши часть названия ещё раз, @username, id, me для личного чата или добавь бота в нужную группу/канал.");
             return true;
         }
 
@@ -694,7 +695,7 @@ export function registerChatPromptWatchCommands(bot: Bot<BotContext>) {
         }
 
         const removed = await removeChatPromptWatcher(id);
-        await ctx.reply(removed ? `✅ Наблюдение ${id} удалено.` : `Не нашла наблюдение с id ${id}.`);
+        await ctx.reply(removed ? `✅ Наблюдение ${id} удалено.` : `${getBotGenderedText('Не нашла', 'Не нашёл')} наблюдение с id ${id}.`);
     });
 
     bot.command("watch_pause", async (ctx) => {
@@ -705,7 +706,7 @@ export function registerChatPromptWatchCommands(bot: Bot<BotContext>) {
         }
 
         const watcher = await setChatPromptWatcherEnabled(id, false);
-        await ctx.reply(watcher ? `⏸ Наблюдение ${id} поставлено на паузу.` : `Не нашла наблюдение с id ${id}.`);
+        await ctx.reply(watcher ? `⏸ Наблюдение ${id} поставлено на паузу.` : `${getBotGenderedText('Не нашла', 'Не нашёл')} наблюдение с id ${id}.`);
     });
 
     bot.command("watch_resume", async (ctx) => {
@@ -716,7 +717,7 @@ export function registerChatPromptWatchCommands(bot: Bot<BotContext>) {
         }
 
         const watcher = await setChatPromptWatcherEnabled(id, true);
-        await ctx.reply(watcher ? `▶️ Наблюдение ${id} снова включено.` : `Не нашла наблюдение с id ${id}.`);
+        await ctx.reply(watcher ? `▶️ Наблюдение ${id} снова включено.` : `${getBotGenderedText('Не нашла', 'Не нашёл')} наблюдение с id ${id}.`);
     });
 
     bot.callbackQuery("cw:menu", async (ctx) => {
@@ -903,7 +904,7 @@ export function registerChatPromptWatchCommands(bot: Bot<BotContext>) {
                 .text("Куда писать", "cw:edit:target").row()
                 .text("Отмена", "cw:cancel");
             await editOrReply(ctx, [
-                "Не смогла проверить целевой чат.",
+                getBotGenderedText("Не смогла", "Не смог") + " проверить целевой чат.",
                 "",
                 `Куда писать: ${state.targetChatTitle || state.targetChatId}`,
                 `Ошибка: ${validationError}`,

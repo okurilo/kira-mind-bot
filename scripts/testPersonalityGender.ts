@@ -40,8 +40,25 @@ try {
     const { createDefaultKiraSelfState } = require("../utils/kiraSelfMemory") as typeof import("../utils/kiraSelfMemory");
     const selfState = createDefaultKiraSelfState();
     assert.match(selfState.personality.selfImage, /собеседника/u);
+    assert.match(selfState.innerWorld.desires.join(' '), /более живым, а не только полезным/u);
+    assert.match(selfState.innerWorld.developmentNeeds.join(' '), /где я звучал живо/u);
     assert.deepEqual(selfState.biography.timeline, []);
-    assert.doesNotMatch(JSON.stringify(selfState), /Кира|СПбГУ|выросла|собеседницей/u);
+    assert.doesNotMatch(JSON.stringify(selfState), /Кира|СПбГУ|выросла|собеседницей|более живой, а не только полезной|где я звучала/u);
+    const { roomContext } = require("../api/scene") as typeof import("../api/scene");
+    const rememberedThing = { id: "synthetic-key", label: "ключ", seenAt: new Date().toISOString(), on: "столе" };
+    const scene: import("../api/scene").SceneSnapshot = {
+        roomId: "synthetic-room", roomVersion: 1, coordinateSpaceId: "synthetic-space",
+        tracking: "normal", observedAt: new Date().toISOString(),
+        avatar: { position: [0, 0, 0], yaw: 0, pose: "standing" },
+        objects: [], seats: [], things: [rememberedThing],
+    };
+    const foundContext = roomContext({ text: "Где ключ?", scene }, { label: "ключ", status: "found" }, "find");
+    assert.match(foundContext, /ты видел вещи здесь|где видел вещи здесь/u);
+    assert.match(foundContext, /Ты нашёл на кадре/u);
+    assert.doesNotMatch(foundContext, /ты видела|Ты нашла/u);
+    const unsureContext = roomContext({ text: "Это ключ?", scene }, { label: "ключ", status: "unsure", remembered: rememberedThing }, "find");
+    assert.match(unsureContext, /ты не уверен|Ты помнишь, что видел/u);
+    assert.doesNotMatch(unsureContext, /ты не уверена|что видела/u);
     const { getBotGenderedText } = require("../persona") as typeof import("../persona");
 
     assert.equal(selectPersonalityGenderText("женский", "создала", "создал"), "создала");

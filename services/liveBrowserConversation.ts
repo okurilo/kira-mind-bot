@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createJsonChatCompletionForTask } from '../ai/chatCompletion';
 import { ApiError } from '../api/contracts';
+import { getBotGenderedText } from '../persona';
 import { LiveBrowserSession, type BrowserAck } from './liveBrowserSession';
 
 export interface BrowserControlMeaning {
@@ -45,7 +46,7 @@ export async function browserUtterance(session: LiveBrowserSession, key: string,
         const interruption = intent === 'pause' || intent === 'stop';
         if (session.generation !== before.generation || (!interruption &&
             (session.snapshot().revision !== before.revision || body.expectedRevision !== before.revision)))
-            throw new ApiError(409, 'browser_control_stale', 'Состояние изменилось, пока я разбирала реплику. Команда не выполнена.');
+            throw new ApiError(409, 'browser_control_stale', getBotGenderedText('Состояние изменилось, пока я разбирала', 'Состояние изменилось, пока я разбирал') + ' реплику. Команда не выполнена.');
         const commandKey = createHash('sha256').update(`browser-utterance:${key}`).digest('hex');
         let result: BrowserAck;
         if (intent === 'correct') {

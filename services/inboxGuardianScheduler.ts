@@ -3,7 +3,7 @@ import { Bot } from "grammy";
 import { config } from "../config";
 import { USER_TIMEZONE } from "../constants";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
-import { getBotPersona, getCommunicationStyle } from "../persona";
+import { getBotGenderedText, getBotPersona, getCommunicationStyle } from "../persona";
 import { MessageStore, StoredMessage } from "../stores/MessageStore";
 import { BotContext } from "../types";
 import { parseLLMJson } from "../utils";
@@ -470,7 +470,7 @@ export async function sendDaytimeReflection(
     nextState.sentCount += 1;
     nextState.sentSourceKeys = [...new Set([...nextState.sentSourceKeys, ...newSourceKeys])];
     await sendStructured(bot.api as any, await getProactiveChatId(), [
-        heading("💭 Что я заметила", 3),
+        heading(getBotGenderedText("💭 Что я заметила", "💭 Что я заметил"), 3),
         paragraph(`<b>${esc(item.senderName)}${username}</b><br/><i>Что произошло:</i> ${esc(item.observation)}`),
         paragraph(`<i>Почему это важно:</i> ${esc(item.whyImportant)}<br/><i>Моё мнение:</i> ${esc(item.kiraView)}<br/><i>Следующий шаг:</i> ${esc(item.suggestedAction)}`),
     ]);

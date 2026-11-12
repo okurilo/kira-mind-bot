@@ -20,6 +20,7 @@ import { RUNTIME_DATA_DIR } from '../utils/runtimeData';
 import { describeOutgoingImage } from '../services/outgoingImageDescription';
 import { replyWithPhotoAndStore } from '../handlers/shared';
 import { config } from '../config';
+import { getBotGenderedText } from '../persona';
 import { BrowserInterrupted, LiveBrowserSession, liveBrowserInvocation, liveBrowserSessions, isLiveBrowserTerminal } from '../services/liveBrowserSession';
 import { LivePlaywrightAdapter } from '../services/liveBrowserPlaywright';
 import { hasApprovedBrowserAction, runReviewedBrowserAction } from '../services/liveBrowserActionPolicy';
@@ -4390,13 +4391,13 @@ function browserDialogPausePromptFromRecord(
     if (dialog.type === 'prompt') {
         return {
             kind: 'browser_dialog',
-            question: `Сайт показал системное окно prompt: «${visibleMessage}». Я отклонила его для безопасности. Напиши текст, который можно ввести при повторе действия, или ответь «отмена», если не надо продолжать.`,
+            question: `Сайт показал системное окно prompt: «${visibleMessage}». ${getBotGenderedText('Я отклонила', 'Я отклонил')} его для безопасности. Напиши текст, который можно ввести при повторе действия, или ответь «отмена», если не надо продолжать.`,
             choices: [{ label: 'Остановиться', answer: 'отмена' }],
         };
     }
     return {
         kind: 'browser_dialog',
-        question: `Сайт показал системное окно ${dialog.type}: «${visibleMessage}». Я отклонила его для безопасности. Подтверди, можно ли принять его при повторе действия, или скажи отменить задачу.`,
+        question: `Сайт показал системное окно ${dialog.type}: «${visibleMessage}». ${getBotGenderedText('Я отклонила', 'Я отклонил')} его для безопасности. Подтверди, можно ли принять его при повторе действия, или скажи отменить задачу.`,
         choices: [
             { label: 'Принять при повторе', answer: 'да, принять системное окно и продолжить' },
             { label: 'Остановиться', answer: 'отмена' },
@@ -4498,7 +4499,7 @@ function latestSafetyDismissedDialog(state: BrowserRunState, includePrompted = t
 }
 
 function isBrowserDialogPauseQuestion(text?: string): boolean {
-    return /сайт\s+показал\s+системн[а-я\s]+окно|системное\s+окно\s+(?:confirm|prompt|beforeunload)|отклонила\s+его\s+для\s+безопасности/iu.test(text || '');
+    return /сайт\s+показал\s+системн[а-я\s]+окно|системное\s+окно\s+(?:confirm|prompt|beforeunload)|отклонил[а]?\s+его\s+для\s+безопасности/iu.test(text || '');
 }
 
 function dialogMessageMatchesHint(message: string, hint?: string): boolean {
@@ -4884,8 +4885,8 @@ function visibleListingFallbackDecision(
         return {
             action: 'done',
             summary: temporal
-                ? `Я просмотрела видимый список, но не нашла карточек за «${temporal.label}».`
-                : `Я просмотрела видимый список и нашла такие варианты:\n${formatVisibleListingItemsForAnswer(prepareVisibleListingItemsForAnswer(allItems).slice(0, 8), { includeDate: true })}`,
+                ? `${getBotGenderedText('Я просмотрела', 'Я просмотрел')} видимый список, но ${getBotGenderedText('не нашла', 'не нашёл')} карточек за «${temporal.label}».`
+                : `${getBotGenderedText('Я просмотрела', 'Я просмотрел')} видимый список и ${getBotGenderedText('нашла', 'нашёл')} такие варианты:\n${formatVisibleListingItemsForAnswer(prepareVisibleListingItemsForAnswer(allItems).slice(0, 8), { includeDate: true })}`,
         };
     }
 
@@ -6124,7 +6125,7 @@ function bookingFormDataSnapshot(data: BookingFormKnownData, kinds?: BookingForm
 
 function memoryBookingDataConfirmationQuestion(data: BookingFormKnownData): string {
     return [
-        `Я нашла в памяти данные для формы: ${bookingFormKnownDataSummary(data)}.`,
+        `${getBotGenderedText('Я нашла', 'Я нашёл')} в памяти данные для формы: ${bookingFormKnownDataSummary(data)}.`,
         'Использовать их для заполнения? Если что-то неверно, нажми «Нет» и пришли правильные данные одним сообщением.',
     ].join(' ');
 }
@@ -9680,7 +9681,7 @@ async function waitForBrowserSelector(page: Page, selector: string, timeoutMs: n
             lastError = err;
         }
     }
-    throw lastError ?? new Error(`Не дождалась selector: ${selector}`);
+    throw lastError ?? new Error(`Не удалось дождаться selector: ${selector}`);
 }
 
 async function waitForBrowserUrl(page: Page, pattern: string, timeoutMs: number): Promise<void> {
@@ -12824,7 +12825,7 @@ async function runBrowserAgent(
                 if (missing.length) {
                     const found = bookingFormKnownDataSummary(knownData);
                     const question = [
-                        found ? `Я проверила память и нашла: ${found}.` : 'Я проверила память, но не нашла достаточно данных для этой формы.',
+                        found ? `${getBotGenderedText('Я проверила', 'Я проверил')} память и ${getBotGenderedText('нашла', 'нашёл')}: ${found}.` : getBotGenderedText('Я проверила память, но не нашла', 'Я проверил память, но не нашёл') + ' достаточно данных для этой формы.',
                         `Не хватает: ${missing.join(', ')}.`,
                         'Пришли недостающие данные одним сообщением, и я продолжу с этого места.',
                     ].join(' ');
@@ -13943,7 +13944,7 @@ async function runBrowserAgent(
                 }
 
                 if (state.memoryLookupQueries.length >= MAX_MEMORY_LOOKUPS) {
-                    const question = 'Я уже проверила долговременную память несколькими запросами и не нашла недостающий факт. Уточни, пожалуйста, недостающие данные для продолжения.';
+                    const question = getBotGenderedText('Я уже проверила долговременную память несколькими запросами и не нашла', 'Я уже проверил долговременную память несколькими запросами и не нашёл') + ' недостающий факт. Уточни, пожалуйста, недостающие данные для продолжения.';
                     pauseBrowserRun(ctx, state, question);
                     shouldClose = false;
                     await sendScreenshot(ctx, page, `❓ Нужно уточнение: ${question.slice(0, 180)}`);
@@ -13995,7 +13996,7 @@ async function runBrowserAgent(
                             isPrimaryBookingDataField(query)
                         ) {
                             const question = [
-                                'Я проверила долгосрочную память, но не нашла достаточно данных для этой формы.',
+                                getBotGenderedText('Я проверила долгосрочную память, но не нашла', 'Я проверил долгосрочную память, но не нашёл') + ' достаточно данных для этой формы.',
                                 bookingFormDataQuestion(observation),
                             ].join(' ');
                             pauseBrowserRun(ctx, state, question);
@@ -14084,7 +14085,7 @@ async function runBrowserAgent(
                         step: i + 1,
                         label,
                         url,
-                        comment: `Не нашла на текущей странице: ${query}`,
+                        comment: `${getBotGenderedText('Не нашла', 'Не нашёл')} на текущей странице: ${query}`,
                         result: 'failed',
                         error,
                     });
@@ -14365,7 +14366,7 @@ async function runBrowserAgent(
                         state.consecutiveActionFailures = 0;
                         actionResultComment = typeof retrySummary === 'string' && retrySummary
                             ? `После восстановления вкладки: ${retrySummary}`
-                            : 'Повторила действие после восстановления вкладки.';
+                            : getBotGenderedText('Повторила действие после восстановления вкладки.', 'Повторил действие после восстановления вкладки.');
                         state.notes.push(actionResultComment.slice(0, 500));
                         pushEvidence(state, 'action', actionResultComment, state.page.url());
                         await adoptLatestPage(state);
@@ -14532,7 +14533,7 @@ async function runBrowserAgent(
                 await sendScreenshot(ctx, state.page, `❓ Нужен ручной ориентир: ${question.slice(0, 180)}`);
                 return {
                     responseText:
-                        `Я остановилась после нескольких неудачных действий подряд.\n\n${question}\n\n` +
+                        `${getBotGenderedText('Я остановилась', 'Я остановился')} после нескольких неудачных действий подряд.\n\n${question}\n\n` +
                         'Ответь следующим сообщением. Если хочешь отменить задачу, напиши «отмена».',
                     keyboard: buildBrowserPauseKeyboard(state.id),
                 };

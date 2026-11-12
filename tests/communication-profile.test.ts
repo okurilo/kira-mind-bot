@@ -144,3 +144,33 @@ test('a saved preference reaches the actual next conversation system prompt in b
     assert.equal(await communicationProfileContext({ ...ctx, from: { id: owner + 1 } }), '');
     assert.equal(await communicationProfileContext({ ...ctx, chat: { type: 'group' } }), '');
 });
+
+test('male persona remains authoritative when old self-memory contains feminine wording', async t => {
+    const previousGender = config.eventDescriptionGender;
+    const previousPersona = config.persona;
+    const previousBiography = config.biography;
+    config.eventDescriptionGender = 'мужской';
+    config.persona = 'Ты — мужчина-собеседник. Говори о себе в мужском роде.';
+    config.biography = 'Синтетическая мужская биография.';
+    t.after(() => { config.eventDescriptionGender = previousGender; config.persona = previousPersona; config.biography = previousBiography; });
+    const selfState = selfMemory.createDefaultKiraSelfState();
+    selfState.personality.selfImage = 'Я была синтетической собеседницей.';
+    t.mock.method(groups, 'isGroupChatContextEnabled', async () => false);
+    t.mock.method(selfMemory, 'getRecentKiraSelfEvents', async () => []);
+    t.mock.method(selfMemory, 'searchKiraSelfEventsByQuery', async () => []);
+    t.mock.method(selfMemory, 'getKiraSelfMemoryState', async () => selfState);
+    t.mock.method(residence, 'getKiraResidence', async () => ({ city: 'Синтетический город' }) as any);
+    t.mock.method(residence, 'detectKiraRelocationIntent', async () => null);
+    t.mock.method(evolution, 'maybeEvolveKiraSelfFromConversation', async () => undefined);
+    let prompt = '';
+    t.mock.method(completion, 'createChatCompletionForTask', async (_task: any, args: any) => {
+        prompt = args.messages.map((message: { content: string }) => message.content).join('\n');
+        return { choices: [{ message: { content: 'Я понял.' } }] } as any;
+    });
+    const ctx = { from: { id: owner }, chat: { id: owner, type: 'private' }, session: { messageHistory: [] } } as any;
+    await conversationAgent(ctx, 'Расскажи о себе.', false, '', [], undefined, { domain: 'personal', context: '', allowSideEffects: false } as any);
+    assert.match(prompt, /Я была синтетической собеседницей/u);
+    assert.match(prompt, /Ты — мужчина-собеседник/u);
+    assert.match(prompt, /Говори о себе в мужском роде/u);
+    assert.match(prompt, /старые записи самопамяти содержат другой род.*не повторяй их грамматические формы/u);
+});

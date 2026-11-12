@@ -213,6 +213,12 @@ test('specific retrieval preserves subject, negation and temporal status in the 
     assert.match(rendered, /статус: done/); assert.match(rendered, /2023-01-01/);
 });
 
+test('low-confidence memory marker does not impose feminine speech on the assistant', () => {
+    const rendered = formatFactWithHistory({ ...fact('uncertain', 'work', 'Синтетический факт.'), confidence: 0.2 });
+    assert.match(rendered, /\[низкая уверенность\]/u);
+    assert.doesNotMatch(rendered, /\[не уверена\]/u);
+});
+
 test('answer eval rejects blanket refusals and missing facets rather than rewarding context hits', () => {
     const cases = memoryAnswerEvalCases(); assert.equal(cases.length, 15);
     const byId = (id: string) => { const item = cases.find(value => value.id === id); assert.ok(item, id); return item; };

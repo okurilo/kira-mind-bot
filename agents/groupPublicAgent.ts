@@ -13,7 +13,7 @@ import { sendGeneratedImageAndStore } from '../handlers/shared';
 
 import { BotContext } from "../types";
 import { config } from "../config";
-import { getBotPersona, getCommunicationStyle, getBotBiography } from "../persona";
+import { getBotGenderedText, getBotPersona, getCommunicationStyle, getBotBiography } from "../persona";
 import { webSearchAgent } from "./webSearchAgent";
 import { mapsAgent } from "./googleMapsAgent";
 import { imageGenerationAgent } from "./imageGenerationAgent";
@@ -222,7 +222,7 @@ async function handlePublicConversation(
         temperature: 0.8,
     });
 
-    const reply = resp.choices[0]?.message?.content?.trim() || "Не смогла обработать запрос.";
+    const reply = resp.choices[0]?.message?.content?.trim() || getBotGenderedText("Не смогла обработать запрос.", "Не смог обработать запрос.");
     await ctx.reply(reply);
     pushGroupHistory(chatId, { userName, userMessage: message, botResponse: reply });
 }

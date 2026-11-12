@@ -226,7 +226,7 @@ function ProfileEditor({ title, values, onChange, onSave, saving }: ProfileEdito
               value={values.proactiveMessageHint}
               onChange={(e) => onChange('proactiveMessageHint', e.target.value)}
               fullWidth
-              placeholder="как будто ты сама написала первой"
+              placeholder={values.characterGender === 'мужской' ? 'как будто ты сам написал первым' : 'как будто ты сама написала первой'}
               helperText="Фраза, описывающая от чьего лица бот пишет первым. Влияет на тон инициативных сообщений."
               FormHelperTextProps={{ sx: { color: 'text.disabled', fontSize: '11px' } }}
             />
@@ -274,7 +274,9 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
     try {
       const result = await savePersonality(data);
       if (result.success) {
-        onSavedName?.(data.KiraMindBot.characterName.trim());
+        const refreshed = await fetchPersonality().catch(() => null);
+        if (refreshed) setData(refreshed);
+        onSavedName?.((refreshed || data).KiraMindBot.characterName.trim());
         onToast(result.message || '✅ Личность сохранена. Перезапустите бота.', 'success');
       } else {
         onToast(result.error || 'Ошибка сохранения', 'error');

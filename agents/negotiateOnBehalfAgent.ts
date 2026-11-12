@@ -9,7 +9,7 @@ import {
     buildNegotiationStartKeyboard,
 } from "../stores/NegotiationStore";
 import { devLog, notifyUser } from "../utils";
-import { getBotPersona, getCommunicationStyle } from "../persona";
+import { getBotGenderedText, getBotPersona, getCommunicationStyle } from "../persona";
 import { config } from "../config";
 import { createChatCompletionForTask } from "../ai/chatCompletion";
 import {
@@ -101,7 +101,7 @@ export async function negotiateOnBehalfAgent(
 
         if (!contact || !contact.id) {
             return {
-                responseText: `Не нашла контакт «${contactSearch}» в списке контактов. Уточни имя или проверь контакты.`,
+                responseText: `${getBotGenderedText('Не нашла', 'Не нашёл')} контакт «${contactSearch}» в списке контактов. Уточни имя или проверь контакты.`,
             };
         }
 

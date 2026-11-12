@@ -10,6 +10,7 @@ import { mapsAgent } from '../../agents/googleMapsAgent';
 import { unclearIntentAgent } from '../../agents/unclearIntentAgent';
 import { answerCapabilitiesQuestion } from '../../capabilities';
 import { config } from '../../config';
+import { getBotGenderedText } from '../../persona';
 import { isValidRuntimeOwnerId } from '../../utils/runtimeIdentity';
 import { USER_TIMEZONE } from '../../constants';
 import { formatPromptDateTime } from '../../utils/time';
@@ -264,7 +265,7 @@ async function runKiraRuntimeInternal(input: KiraRuntimeInput, dependencies: Run
         ? `${input.ctx.sessionStorageKey}:${input.ctx.session.apiActionVersion}` : typeof updateId === 'number' && updateId > 0 ? `telegram:${input.ctx.chat?.id}:${updateId}` : undefined);
     if (!continuation && requestKey && previous?.requestKey === requestKey && previous.receipts.length) {
         const uncertain = previous.receipts.some(receipt => receipt.status === 'running' || receipt.status === 'unknown');
-        return { responseText: uncertain ? 'Этот запрос уже начал выполняться, но результат части действий неизвестен. Я не повторяла их автоматически.'
+        return { responseText: uncertain ? getBotGenderedText('Этот запрос уже начал выполняться, но результат части действий неизвестен. Я не повторяла их автоматически.', 'Этот запрос уже начал выполняться, но результат части действий неизвестен. Я не повторял их автоматически.')
             : previous.receipts.map(receipt => receipt.summary).filter(Boolean).join('\n\n') || 'Этот запрос уже обработан; действия не повторялись.', operationStatus: uncertain ? 'unknown' : previous.status === 'waiting' ? 'needs_input' : previous.status === 'failed' ? 'failed' : 'ok', skipOptionalFollowups: true };
     }
     const state: RuntimeSessionState = { version: 1, accountAiOperation: continuation?.accountAiOperation ?? currentAccountAiOperation(), analyticsTaskId: continuation?.analyticsTaskId ?? input.ctx.productAnalytics?.id, runId: continuation?.runId ?? randomUUID(), requestKey, startedAt: continuation?.startedAt ?? Date.now(), updatedAt: Date.now(), status: 'running',
@@ -487,7 +488,7 @@ async function runKiraRuntimeInternal(input: KiraRuntimeInput, dependencies: Run
         done.operationStatus = state.receipts.some(receipt => receipt.status === 'running' || receipt.status === 'unknown') ? 'unknown' : 'failed';
         const failureReply = accountPolicyReply(error) ?? (isAiContentSafetyError(error) ? AI_CONTENT_SAFETY_REPLY : undefined);
         done.responseText = [done.responseText, failureReply, state.receipts.some(receipt => receipt.status === 'running' || receipt.status === 'unknown')
-            ? 'Выполнение остановилось. Результат части действий неизвестен; я не повторяла их автоматически.'
+            ? getBotGenderedText('Выполнение остановилось. Результат части действий неизвестен; я не повторяла их автоматически.', 'Выполнение остановилось. Результат части действий неизвестен; я не повторял их автоматически.')
             : failureReply ? undefined : 'Не удалось завершить задачу. Уже выполненные действия сохранены.'].filter(Boolean).join('\n\n');
         done.skipOptionalFollowups = true;
         return done;

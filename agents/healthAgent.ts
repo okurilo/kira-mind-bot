@@ -7,6 +7,7 @@ import { ChatCompletionContentPart } from 'openai/resources/chat';
 import type { ProcessingResult } from '../orchestrator';
 import type { BotContext, MessageHistory } from '../types';
 import { createChatCompletionForTask } from '../ai/chatCompletion';
+import { getBotGenderedText } from '../persona';
 import { USER_TIMEZONE } from '../constants';
 import { parseLLMJson } from '../utils';
 import { HealthLogKind, HealthLogRecord, HealthLogRepository, HealthTimeOfDay } from '../services/HealthLogRepository';
@@ -214,7 +215,7 @@ export async function handleHealthCallback(ctx: BotContext, callbackData: string
     if (action === 'discomfort' && value && extra) {
         const level = normalizeSeverity(Number(extra));
         if (level == null) {
-            return { responseText: 'Не смогла сохранить уровень дискомфорта. Укажи число от 0 до 10.' };
+            return { responseText: getBotGenderedText('Не смогла', 'Не смог') + ' сохранить уровень дискомфорта. Укажи число от 0 до 10.' };
         }
         return updateDiscomfortLevel(ctx, value, level, `Выбрано кнопкой: ${level}/10`);
     }
@@ -228,7 +229,7 @@ export async function handleHealthCallback(ctx: BotContext, callbackData: string
     }
 
     return {
-        responseText: 'Не поняла действие дневника здоровья. Открой /health и выбери пункт ещё раз.',
+        responseText: getBotGenderedText('Не поняла', 'Не понял') + ' действие дневника здоровья. Открой /health и выбери пункт ещё раз.',
         keyboard: buildHealthMenuKeyboard(),
     };
 }
@@ -296,7 +297,7 @@ export async function healthPhotoAgent(
 
     if (analysis.action === 'none' && !pending) {
         return {
-            responseText: 'Не уверена, что это фото относится к дневнику здоровья. Если хочешь сохранить его как еду или кожу, открой /health и выбери нужный тип.',
+            responseText: getBotGenderedText('Не уверена', 'Не уверен') + ', что это фото относится к дневнику здоровья. Если хочешь сохранить его как еду или кожу, открой /health и выбери нужный тип.',
             keyboard: buildHealthMenuKeyboard(),
         };
     }
@@ -387,12 +388,12 @@ async function createHealthFollowUpReminder(
 ): Promise<ProcessingResult> {
     const hours = Math.round(hoursRaw);
     if (!HEALTH_FOLLOW_UP_HOURS.has(hours)) {
-        return { responseText: 'Не смогла поставить follow-up: выбери доступный интервал из кнопок.' };
+        return { responseText: getBotGenderedText('Не смогла', 'Не смог') + ' поставить follow-up: выбери доступный интервал из кнопок.' };
     }
 
     const record = await HealthLogRepository.findById(recordId);
     if (!record) {
-        return { responseText: 'Не нашла запись дневника, для которой нужно поставить follow-up.' };
+        return { responseText: getBotGenderedText('Не нашла', 'Не нашёл') + ' запись дневника, для которой нужно поставить follow-up.' };
     }
 
     if (ctx.from?.id && record.userId !== ctx.from.id) {
@@ -876,7 +877,7 @@ async function updateDiscomfortLevel(
     const record = await HealthLogRepository.findById(recordId);
     if (!record) {
         ctx.session.pendingHealthDiscomfort = undefined;
-        return { responseText: 'Не нашла запись дневника, к которой нужно добавить уровень дискомфорта.' };
+        return { responseText: getBotGenderedText('Не нашла', 'Не нашёл') + ' запись дневника, к которой нужно добавить уровень дискомфорта.' };
     }
 
     if (ctx.from?.id && record.userId !== ctx.from.id) {
