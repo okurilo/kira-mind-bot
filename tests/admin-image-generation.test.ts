@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
 const express = require('../admin-panel/node_modules/express');
 const { registerImageGenerationRoutes } = require('../admin-panel/imageGeneration');
+const { createOperatorAuth } = require('../admin-panel/operatorAuth');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j/NkAAAAASUVORK5CYII=', 'base64');
 
 test('image admin authenticates uploads, hides secrets, persists settings and serves private references', async t => {
@@ -14,7 +15,9 @@ test('image admin authenticates uploads, hides secrets, persists settings and se
   process.env.KIRA_RUNTIME_DATA_DIR = directory;
   let saved: string | undefined;
   let assistantName = 'Кира';
-  const app = express(); app.use(express.json());
+  const app = express();
+  app.use(createOperatorAuth({ username: 'synthetic', password: 'synthetic', sessionSecret: 'synthetic-session-secret', cookieName: 'synthetic.sid', env: {} }).prepare);
+  app.use(express.json());
   registerImageGenerationRoutes(app, {
     requireAuth: (req: any, res: any, next: any) => req.headers.authorization === 'Bearer synthetic-admin' ? next() : res.status(401).end(),
     createDbPool: () => ({ query: async (sql: string, params: string[]) => { if (sql.startsWith('INSERT')) saved = params[1]; return { rows: saved ? [{ value: saved }] : [] }; }, end: async () => {} }),
@@ -45,6 +48,9 @@ test('image admin authenticates uploads, hides secrets, persists settings and se
   assert.equal((await request('/reference', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: png })).status, 200);
   const reference = await request('/reference');
   assert.equal(reference.headers.get('cache-control'), 'no-store');
+  assert.equal(reference.headers.get('content-type'), 'image/png');
+  assert.match(reference.headers.get('content-security-policy') || '', /img-src[^;]*\bblob:/);
+  assert.match(reference.headers.get('content-security-policy') || '', /script-src 'self'/);
   assert.deepEqual(Buffer.from(await reference.arrayBuffer()), png);
   assert.equal((await (await request()).json()).reference.present, true);
   assert.equal((await (await request()).json()).reference.source, 'custom');

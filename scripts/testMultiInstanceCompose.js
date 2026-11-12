@@ -55,6 +55,11 @@ function assertInstance(config, name, adminPort) {
   assert.strictEqual(config.services.postgres.ports, undefined);
   assert.strictEqual(config.services.qdrant.ports, undefined);
   assert.strictEqual(config.services['admin-panel'].ports[0].published, String(adminPort));
+  const botRuntime = config.services['kira-mind-bot'].volumes.find(volume => volume.target === '/app/runtime-data');
+  const adminRuntime = config.services['admin-panel'].volumes.find(volume => volume.target === '/app/runtime-data');
+  assert.ok(botRuntime && adminRuntime, 'Bot and admin must both mount runtime data');
+  assert.strictEqual(adminRuntime.source, botRuntime.source, 'Admin and bot must share character references');
+  assert.strictEqual(config.services['admin-panel'].environment.KIRA_RUNTIME_DATA_DIR, '/app/runtime-data');
 }
 
 function assertNoDestructiveVolumeCleanup() {
@@ -107,8 +112,10 @@ function assertOperationalSecurity() {
 function assertRuntimeDataIsolation() {
   for (const filename of ['docker-compose.yml', 'docker-compose.server.yml']) {
     const content = fs.readFileSync(path.join(repoRoot, filename), 'utf8');
-    assert.match(content, /KIRA_RUNTIME_DATA_DIR=\/app\/runtime-data/);
-    assert.match(content, /\.\/runtime-data:\/app\/runtime-data/);
+    const admin = content.split('\n  admin-panel:\n')[1];
+    assert.ok(admin, `${filename} must define admin-panel`);
+    assert.match(admin, /KIRA_RUNTIME_DATA_DIR=\/app\/runtime-data/);
+    assert.match(admin, /\.\/runtime-data:\/app\/runtime-data/);
   }
   assert.match(fs.readFileSync(path.join(repoRoot, '.gitignore'), 'utf8'), /^runtime-data\/$/m);
   assert.match(fs.readFileSync(path.join(repoRoot, '.dockerignore'), 'utf8'), /^runtime-data$/m);

@@ -31,6 +31,7 @@ export function CharacterReferenceSection({ onToast, assistantName }: Props) {
       const response = await apiFetch('/api/image-generation/reference', { signal: controller.signal });
       if (!response.ok) throw new Error('Референс недоступен');
       const blob = await response.blob();
+      if (!blob.size || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) throw new Error('Некорректный формат изображения');
       if (!controller.signal.aborted) {
         objectUrl = URL.createObjectURL(blob);
         setPreview(objectUrl);
@@ -60,8 +61,8 @@ export function CharacterReferenceSection({ onToast, assistantName }: Props) {
       {loading ? <CircularProgress size={20} aria-label="Загрузка образа персонажа" /> : reference && (
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'minmax(0, 320px) minmax(0, 1fr)' }, gap: 3, alignItems: 'start' }}>
           <Box sx={{ minHeight: 180, display: 'grid', placeItems: 'center', bgcolor: 'background.default', borderRadius: 1, overflow: 'hidden' }}>
-            {preview ? <Box component="img" src={preview} alt="Текущий эталон внешности персонажа" sx={{ display: 'block', maxHeight: 360, maxWidth: '100%', objectFit: 'contain' }} />
-              : <Typography variant="body2" color="text.secondary">{reference.present ? 'Загрузка изображения…' : 'Референс не выбран'}</Typography>}
+            {preview ? <Box component="img" src={preview} alt="Текущий эталон внешности персонажа" onError={() => { setPreview(''); setError('Не удалось показать референс.'); }} sx={{ display: 'block', maxHeight: 360, maxWidth: '100%', objectFit: 'contain' }} />
+              : <Typography variant="body2" color="text.secondary">{reference.present ? error ? 'Не удалось показать референс' : 'Загрузка изображения…' : 'Референс не выбран'}</Typography>}
           </Box>
           <Stack spacing={2} alignItems="flex-start">
             <Typography variant="body2" fontWeight={600}>{!reference.present ? 'Добавьте референс' : reference.source === 'custom' ? 'Ваш референс' : 'Стандартный образ'}</Typography>

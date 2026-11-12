@@ -96,6 +96,10 @@ async function main() {
     assert.equal(await page.getByLabel('Стиль общения').inputValue(), 'Несохранённая правка во время обновления');
     await page.getByRole('tab', { name: 'Внешность' }).click();
     await page.getByText('Ваш референс').waitFor();
+    await page.waitForFunction(() => {
+      const image = document.querySelector('img[alt="Текущий эталон внешности персонажа"]');
+      return image && image.complete && image.naturalWidth > 0;
+    });
     await page.getByRole('button', { name: 'Настройки' }).first().click();
     await page.getByRole('tab', { name: 'Система' }).click();
     await page.getByText('Проактивность и переписки').click();
