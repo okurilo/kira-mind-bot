@@ -248,12 +248,13 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
   });
   const [loading, setLoading] = useState(true);
   const [savingKira, setSavingKira] = useState(false);
+  const [savedName, setSavedName] = useState('');
   const [tab, setTab] = useState<'character' | 'appearance'>('character');
   const [appearanceVisited, setAppearanceVisited] = useState(false);
 
   useEffect(() => {
     fetchPersonality()
-      .then(setData)
+      .then(personality => { setData(personality); setSavedName(personality.KiraMindBot.characterName.trim()); })
       .catch(() => onToast('Не удалось загрузить настройки личности', 'error'))
       .finally(() => setLoading(false));
   }, []);
@@ -276,7 +277,9 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
       if (result.success) {
         const refreshed = await fetchPersonality().catch(() => null);
         if (refreshed) setData(refreshed);
-        onSavedName?.((refreshed || data).KiraMindBot.characterName.trim());
+        const name = (refreshed || data).KiraMindBot.characterName.trim();
+        setSavedName(name);
+        onSavedName?.(name);
         onToast(result.message || '✅ Личность сохранена. Перезапустите бота.', 'success');
       } else {
         onToast(result.error || 'Ошибка сохранения', 'error');
@@ -317,7 +320,7 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
         </>}
       </Box>
       <Box role="tabpanel" id="personality-panel-appearance" aria-labelledby="personality-tab-appearance" hidden={tab !== 'appearance'}>
-        {appearanceVisited && <CharacterReferenceSection onToast={onToast} assistantName={data.KiraMindBot.characterName.trim()} />}
+        {appearanceVisited && <CharacterReferenceSection key={savedName} onToast={onToast} assistantName={savedName} />}
       </Box>
     </Box>
   );

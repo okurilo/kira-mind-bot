@@ -100,6 +100,27 @@ try {
     });
     assert.match(femalePromptLanguage, /устала|настроена|задумчива|воодушевлена|написала первой/u);
 
+    fs.writeFileSync(personalityFile, JSON.stringify({ KiraMindBot: { characterName: 'Кира', characterGender: 'женский' } }));
+    delete require.cache[require.resolve('../config')];
+    const kiraConfig = (require('../config') as typeof import('../config')).config;
+    assert.match(kiraConfig.persona, /^Ты — Кира, женщина-собеседница/u);
+    assert.match(kiraConfig.biography, /окончила СПбГУ по направлению психологии/u);
+    const originalName = config.characterName;
+    const originalGender = config.eventDescriptionGender;
+    try {
+        config.characterName = 'Кира';
+        config.eventDescriptionGender = 'женский';
+        assert.equal(createDefaultKiraSelfState().biography.timeline.length, 2);
+    } finally {
+        config.characterName = originalName;
+        config.eventDescriptionGender = originalGender;
+    }
+
+    fs.writeFileSync(personalityFile, JSON.stringify({ KiraMindBot: { characterName: 'Лея', characterGender: 'женский' } }));
+    delete require.cache[require.resolve('../config')];
+    const otherFemaleConfig = (require('../config') as typeof import('../config')).config;
+    assert.doesNotMatch(otherFemaleConfig.persona + otherFemaleConfig.biography, /Кира|СПбГУ/u);
+
     console.log("personality gender fallback checks passed");
 } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

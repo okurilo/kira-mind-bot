@@ -39,6 +39,12 @@ async function main() {
       }
       if (url.pathname === '/api/config') return route.fulfill({ json: {} });
       if (url.pathname === '/api/auth/context') return route.fulfill({ json: { csrfEnabled: false } });
+      if (url.pathname === '/api/image-generation') return route.fulfill({ json: {
+        settings: { enabled: false, model: 'gpt-image-1', size: '1024x1024', quality: 'low' },
+        models: [], sizes: [], qualities: [], connection: { configured: false, baseUrlSource: '', keySource: '' },
+        reference: { present: current.characterName === 'Лев', source: 'custom' },
+      } });
+      if (url.pathname === '/api/image-generation/reference') return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==', 'base64') });
       if (url.pathname.startsWith('/api/')) return route.fulfill({ status: 503, json: { error: 'synthetic unavailable' } });
       const relative = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
       const file = path.resolve(dist, relative);
@@ -61,12 +67,17 @@ async function main() {
     assert.equal(await page.getByLabel('Подсказка для проактивных сообщений').getAttribute('placeholder'), 'как будто ты сама написала первой');
     await page.getByRole('combobox', { name: 'Род персонажа' }).click();
     await page.getByRole('option', { name: 'Мужской' }).click();
+    await page.getByRole('tab', { name: 'Внешность' }).click();
+    await page.getByText('Референс не выбран').waitFor();
+    await page.getByRole('tab', { name: 'Характер' }).click();
     await page.getByLabel('Имя ассистента').fill('Лев');
     await page.getByRole('button', { name: 'Сохранить' }).click();
     await page.getByText('Лев', { exact: true }).first().waitFor();
     await page.waitForFunction(() => document.querySelector('input[placeholder="как будто ты сам написал первым"]')?.value === 'как будто ты сам написал первым');
     assert.equal(await page.getByLabel('Подсказка для проактивных сообщений').inputValue(), 'как будто ты сам написал первым');
     assert.match(await page.title(), /^Лев/);
+    await page.getByRole('tab', { name: 'Внешность' }).click();
+    await page.getByText('Ваш референс').waitFor();
     await page.getByRole('button', { name: 'Настройки' }).first().click();
     await page.getByRole('tab', { name: 'Система' }).click();
     await page.getByText('Проактивность и переписки').click();
