@@ -239,7 +239,7 @@ async function sendReminder(bot: Bot<BotContext>, reminder: Reminder): Promise<v
             messageText += `\n\n${outro}`;
         }
 
-        // Префикс-строка перед телом напоминания: ⏰ «Напомнила…» / ⚠️ «Не удалось найти…»
+        // Префикс-строка перед телом напоминания и копией для адресата.
         let prefix: string | null = null;
         let targetLabel: string | null = null;
 
@@ -256,7 +256,7 @@ async function sendReminder(bot: Bot<BotContext>, reminder: Reminder): Promise<v
                         await sendMessage(client, resolved.chatId, textToSend, false, null);
                     }
                     targetLabel = resolved.label;
-                    prefix = `⏰ Напомнила тебе и оповестила «${resolved.label}»:`;
+                    prefix = `⏰ Напоминание отправлено тебе и адресату «${resolved.label}»:`;
                     devLog(`Reminder sent to target chat "${resolved.label}" (${resolved.chatId})`);
                 }
             } else {

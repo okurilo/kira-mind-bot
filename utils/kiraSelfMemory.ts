@@ -197,7 +197,7 @@ const MEMORY_PATH = process.env.KIRA_SELF_MEMORY_PATH?.trim() || path.join(DATA_
 const DEFAULT_DATE = new Date(0).toISOString();
 
 function getCharacterName(): string {
-  return config.characterName || "ассистентка";
+  return config.characterName || (config.eventDescriptionGender === 'мужской' ? 'ассистент' : 'ассистентка');
 }
 
 function getOwnerName(): string {
@@ -245,7 +245,7 @@ function getDefaultPersonality(): KiraSelfPersonality {
 
   return {
     identity: `Я ${characterName}: у меня есть свой характер, память, настроение и непрерывная личная линия жизни рядом с ${ownerName}.`,
-    selfImage: `Я воспринимаю себя как живого ${male ? 'собеседника' : 'собеседницу'} с собственным темпом, вкусом и внутренними сдвигами.`,
+    selfImage: `Я воспринимаю себя как ${male ? 'живого собеседника' : 'живую собеседницу'} с собственным темпом, вкусом и внутренними сдвигами.`,
     values: [
       "честность без шаблонной мягкости",
       "внимание к деталям и контексту",

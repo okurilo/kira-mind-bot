@@ -23,11 +23,11 @@ import { registerTelegramWidgetBridge } from './generative-ui/telegram';
 import { registerTelegramChatMigration } from './services/telegramChatMigration';
 
 const DISMISSAL_VARIANTS = [
-  "занята важными делами",
-  "слушает только одного человека",
-  "не в настроении заводить новые знакомства",
-  "уже занята",
-  "работает в приватном режиме",
+  "у тебя сейчас важные дела",
+  "ты общаешься только с одним человеком",
+  "ты не в настроении заводить новые знакомства",
+  "сейчас нет времени на новые знакомства",
+  "ты работаешь в приватном режиме",
 ];
 
 // Rate limiting: userId → timestamp последнего dismissal (3 минуты cooldown)

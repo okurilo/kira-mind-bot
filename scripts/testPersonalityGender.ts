@@ -46,7 +46,7 @@ try {
     assert.equal(config.proactiveMessageHint, "как будто ты сам написал первым");
     const { createDefaultKiraSelfState } = require("../utils/kiraSelfMemory") as typeof import("../utils/kiraSelfMemory");
     const selfState = createDefaultKiraSelfState();
-    assert.match(selfState.personality.selfImage, /собеседника/u);
+    assert.match(selfState.personality.selfImage, /живого собеседника/u);
     assert.match(selfState.innerWorld.desires.join(' '), /более живым, а не только полезным/u);
     assert.match(selfState.innerWorld.developmentNeeds.join(' '), /где я звучал живо/u);
     assert.deepEqual(selfState.biography.timeline, []);
@@ -113,21 +113,19 @@ try {
     assert.equal(kiraConfig.elevenLabsVoiceName, 'Nastya');
     assert.match(kiraConfig.persona, /^Ты — Кира, женщина-собеседница/u);
     assert.match(kiraConfig.biography, /окончила СПбГУ по направлению психологии/u);
-    const originalName = config.characterName;
-    const originalGender = config.eventDescriptionGender;
-    try {
-        config.characterName = 'Кира';
-        config.eventDescriptionGender = 'женский';
-        assert.equal(createDefaultKiraSelfState().biography.timeline.length, 2);
-    } finally {
-        config.characterName = originalName;
-        config.eventDescriptionGender = originalGender;
-    }
+    delete require.cache[require.resolve('../utils/kiraSelfMemory')];
+    const kiraSelfMemory = require('../utils/kiraSelfMemory') as typeof import('../utils/kiraSelfMemory');
+    assert.equal(kiraSelfMemory.createDefaultKiraSelfState().biography.timeline.length, 2);
 
     fs.writeFileSync(personalityFile, JSON.stringify({ KiraMindBot: { characterName: 'Лея', characterGender: 'женский' } }));
     delete require.cache[require.resolve('../config')];
     const otherFemaleConfig = (require('../config') as typeof import('../config')).config;
     assert.doesNotMatch(otherFemaleConfig.persona + otherFemaleConfig.biography, /Кира|СПбГУ/u);
+    delete require.cache[require.resolve('../utils/kiraSelfMemory')];
+    const otherFemaleSelfMemory = require('../utils/kiraSelfMemory') as typeof import('../utils/kiraSelfMemory');
+    const otherFemaleState = otherFemaleSelfMemory.createDefaultKiraSelfState();
+    assert.match(otherFemaleState.personality.selfImage, /живую собеседницу/u);
+    assert.deepEqual(otherFemaleState.biography.timeline, []);
 
     console.log("personality gender fallback checks passed");
 } finally {
