@@ -32,6 +32,7 @@ export interface McpServerSettings {
   description: string; transport: 'http' | 'jsonrpc' | 'stdio'; url?: string;
   headers?: Record<string, string | null>; command?: string; args?: string[]; env?: Record<string, string | null>;
   oauth?: { tokenUrl: string; clientId: string; clientSecret: string | null; scope?: string; audience?: string };
+  plaudGrant?: null;
   tools: Record<string, McpEffect>; fixedArguments?: Record<string, unknown>; timeoutMs: number;
 }
 export interface McpConnection { id: string; config: McpServerSettings }
@@ -40,17 +41,33 @@ export interface McpConnectionSettings {
 }
 export interface McpConnectionDraft { revision: string; config: McpServerSettings }
 export interface McpProbeResult { success: boolean; toolCount: number; tools: Array<{ name: string; description: string }>; truncated: boolean; resources: boolean }
-async function mcpApi(method = 'GET', data?: McpConnectionDraft | { revision: string }, suffix = '') {
-  const response = await apiFetch(`/api/mcp/servers${suffix}`, { method,
+async function mcpApi(method = 'GET', data?: McpConnectionDraft | { revision: string } | { state: string; code: string }, suffix = '/servers') {
+  const response = await apiFetch('/api/mcp' + suffix, { method,
     ...(data ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) } : {}) });
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || 'Не удалось настроить MCP');
   return body;
 }
 export function fetchMcpConnections(): Promise<McpConnectionSettings> { return mcpApi(); }
-export function saveMcpConnection(id: string, data: McpConnectionDraft, create = false): Promise<McpConnectionSettings> { return mcpApi(create ? 'POST' : 'PUT', data, `/${encodeURIComponent(id)}`); }
-export function deleteMcpConnection(id: string, revision: string): Promise<McpConnectionSettings> { return mcpApi('DELETE', { revision }, `/${encodeURIComponent(id)}`); }
-export function checkMcpConnection(id: string, data: McpConnectionDraft): Promise<McpProbeResult> { return mcpApi('POST', data, `/${encodeURIComponent(id)}/check`); }
+export function saveMcpConnection(id: string, data: McpConnectionDraft, create = false): Promise<McpConnectionSettings> { return mcpApi(create ? 'POST' : 'PUT', data, `/servers/${encodeURIComponent(id)}`); }
+export function deleteMcpConnection(id: string, revision: string): Promise<McpConnectionSettings> { return mcpApi('DELETE', { revision }, `/servers/${encodeURIComponent(id)}`); }
+export function checkMcpConnection(id: string, data: McpConnectionDraft): Promise<McpProbeResult> { return mcpApi('POST', data, `/servers/${encodeURIComponent(id)}/check`); }
+export function startPlaudConnection(revision: string): Promise<{ url: string }> { return mcpApi('POST', { revision }, '/plaud/start'); }
+const plaudReturn = (() => {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  const state = url.searchParams.get('state');
+  if (!state || !['code', 'error'].some(key => url.searchParams.has(key))) return;
+  const code = url.searchParams.get('code') ?? '';
+  for (const key of ['state', 'code', 'error', 'error_description', 'error_uri', 'iss']) url.searchParams.delete(key);
+  window.history.replaceState(window.history.state, '', url);
+  return { state, code };
+})();
+export const returningFromPlaud = Boolean(plaudReturn);
+let plaudCompletion: Promise<McpConnectionSettings> | undefined;
+export function finishPlaudConnection() {
+  if (plaudReturn) return plaudCompletion ??= mcpApi('POST', plaudReturn, '/plaud/finish');
+}
 
 export interface ImageGenerationConfig {
   settings: { enabled: boolean; model: string; size: string; quality: string };

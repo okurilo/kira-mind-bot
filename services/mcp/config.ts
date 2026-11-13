@@ -3,6 +3,7 @@ import path from 'node:path';
 import { RUNTIME_DATA_DIR } from '../../utils/runtimeData';
 import type { CommerceProvider } from '../commerce/catalog';
 import { nativeCommerceServers } from '../commerce/config';
+import { bindPlaudGrant } from '../../utils/mcpConnection';
 
 export type McpEffect = 'read' | 'external';
 export interface McpServerConfig {
@@ -13,6 +14,7 @@ export interface McpServerConfig {
     url?: string;
     headers?: Record<string, string>;
     oauth?: { tokenUrl: string; clientId: string; clientSecret: string; scope?: string; audience?: string };
+    plaudGrant?: string;
     command?: string;
     args?: string[];
     env?: Record<string, string>;
@@ -44,6 +46,7 @@ export function readMcpConfig(file = MCP_CONFIG_FILE): McpConfig {
         const stamp = `${file}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
         if (cache?.stamp === stamp) return merge(cache.servers);
         const servers = parseMcpConfig(JSON.parse(readFileSync(file, 'utf8')));
+        for (const server of Object.values(servers)) bindPlaudGrant(server, file);
         cache = { stamp, servers };
         return merge(servers);
     } catch (error) {

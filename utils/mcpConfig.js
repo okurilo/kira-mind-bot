@@ -1,5 +1,8 @@
 'use strict';
 
+const PLAUD_MCP_URL = 'https://mcp.plaud.ai/mcp';
+const PLAUD_READ_TOOLS = ['list_files', 'get_file', 'get_note', 'get_transcript'];
+
 // Shared by the bot runtime and authenticated admin settings.
 function object(value) {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -20,7 +23,7 @@ function parseMcpConfig(value) {
     const servers = {};
     for (const [id, raw] of Object.entries(value.servers)) {
         if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || !object(raw)) throw new Error('MCP: некорректный сервер');
-        const keys = ['description', 'transport', 'url', 'headers', 'oauth', 'command', 'args', 'env', 'tools', 'fixedArguments', 'refreshTools', 'timeoutMs'];
+        const keys = ['description', 'transport', 'url', 'headers', 'oauth', 'plaudGrant', 'command', 'args', 'env', 'tools', 'fixedArguments', 'refreshTools', 'timeoutMs'];
         if (Object.keys(raw).some(key => !keys.includes(key)) || !['http', 'jsonrpc', 'stdio'].includes(String(raw.transport)) ||
             typeof raw.description !== 'string' || raw.description.length > 1500 || !object(raw.tools) || Object.keys(raw.tools).length > 200 ||
             Object.entries(raw.tools).some(([name, effect]) => !/^[A-Za-z0-9_.:-]{1,128}$/.test(name) || !['read', 'external'].includes(String(effect)))) throw new Error('MCP: некорректная конфигурация сервера');
@@ -32,6 +35,11 @@ function parseMcpConfig(value) {
         const timeoutMs = raw.timeoutMs ?? 30_000;
         if (typeof timeoutMs !== 'number' || !Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60_000) throw new Error('MCP: timeoutMs должен быть от 100 до 60000');
         if (raw.fixedArguments !== undefined && !object(raw.fixedArguments)) throw new Error('MCP: некорректные fixedArguments');
+        if (raw.plaudGrant !== undefined && (id !== 'plaud' || raw.transport !== 'http' || raw.url !== PLAUD_MCP_URL
+            || typeof raw.plaudGrant !== 'string' || !/^[a-f0-9]{32}$/.test(raw.plaudGrant) || raw.oauth || raw.refreshTools?.length
+            || Object.keys(raw.headers ?? {}).length || Object.entries(raw.tools).some(([name, effect]) => effect !== 'read' || !PLAUD_READ_TOOLS.includes(name)))) {
+            throw new Error('Plaud MCP: разрешены только инструменты чтения официального сервера');
+        }
         if (raw.refreshTools !== undefined && (!Array.isArray(raw.refreshTools) || raw.refreshTools.length > 64 || new Set(raw.refreshTools).size !== raw.refreshTools.length
             || raw.refreshTools.some(name => typeof name !== 'string' || raw.tools[name] !== 'read'))) throw new Error('MCP: refreshTools допускает только разрешённые инструменты чтения без LLM');
         if (raw.transport === 'http' || raw.transport === 'jsonrpc') {
@@ -55,4 +63,4 @@ function parseMcpConfig(value) {
     return servers;
 }
 
-module.exports = { assertSafeMcpValue, parseMcpConfig };
+module.exports = { assertSafeMcpValue, parseMcpConfig, PLAUD_MCP_URL, PLAUD_READ_TOOLS };

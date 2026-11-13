@@ -1,9 +1,87 @@
 'use strict';
-const { createHash } = require('node:crypto');
+const { createHash, randomBytes } = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { setTimeout: pause } = require('node:timers/promises');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+const { refreshAuthorization } = require('@modelcontextprotocol/sdk/client/auth.js');
+const { StreamableHTTPClientTransport, StreamableHTTPError } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
 const { JSONRPCMessageSchema } = require('@modelcontextprotocol/sdk/types.js');
+const { PLAUD_MCP_URL } = require('./mcpConfig');
+
+const PLAUD_ORIGIN = new URL(PLAUD_MCP_URL).origin;
+const PLAUD_OAUTH = {
+    authorization_endpoint: PLAUD_ORIGIN + '/authorize', registration_endpoint: PLAUD_ORIGIN + '/register',
+    token_endpoint: PLAUD_ORIGIN + '/token', token_endpoint_auth_methods_supported: ['none'],
+    response_types_supported: ['code'], code_challenge_methods_supported: ['S256'],
+};
+const plaudDirectories = new WeakMap();
+function bindPlaudGrant(config, settingsFile) {
+    if (config.plaudGrant) plaudDirectories.set(config, plaudDirectory(settingsFile, config.plaudGrant));
+    return config;
+}
+function plaudDirectory(settingsFile, grant) {
+    return path.join(path.dirname(settingsFile), 'mcp-plaud', grant);
+}
+function plaudFetch(signal) {
+    return (url, init) => {
+        if (new URL(url).origin !== PLAUD_ORIGIN) throw new Error('Plaud MCP: недопустимый адрес авторизации');
+        return fetch(url, { ...init, redirect: 'error', signal });
+    };
+}
+function plaudCredentials(clientId, tokens) {
+    const validToken = token => typeof token === 'string' && /^[\x21-\x7e]{1,32000}$/.test(token);
+    if (!validToken(clientId) || !validToken(tokens.access_token) || !validToken(tokens.refresh_token)
+        || String(tokens.token_type).toLowerCase() !== 'bearer' || !Number.isFinite(tokens.expires_in) || tokens.expires_in <= 0) {
+        throw new Error('Plaud MCP: недействительный ответ авторизации');
+    }
+    return { clientId, access: tokens.access_token, refresh: tokens.refresh_token, expiresAt: Date.now() + tokens.expires_in * 1000 };
+}
+async function writePlaudCredentials(directory, credentials) {
+    const temporary = path.join(directory, randomBytes(12).toString('hex') + '.tmp');
+    try {
+        await fs.writeFile(temporary, JSON.stringify(credentials), { flag: 'wx', mode: 0o600 });
+        await fs.rename(temporary, path.join(directory, 'tokens.json'));
+    } finally { await fs.unlink(temporary).catch(() => {}); }
+}
+async function plaudHeaders(config, signal) {
+    const directory = plaudDirectories.get(config);
+    const read = async () => JSON.parse(await fs.readFile(path.join(directory, 'tokens.json'), 'utf8'));
+    const headers = credentials => ({ Authorization: 'Bearer ' + credentials.access });
+    const fresh = credentials => credentials.expiresAt > Date.now() + 30_000;
+    try {
+        if (!directory || config.url !== PLAUD_MCP_URL || config.transport !== 'http') throw new Error();
+        const saved = await read();
+        if (fresh(saved)) return headers(saved);
+        const lockPath = path.join(directory, 'refresh.lock');
+        let lock;
+        try { lock = await fs.open(lockPath, 'wx', 0o600); }
+        catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+            // Another process may be rotating the same refresh token. Never reuse it.
+            for (let wait = 0; wait < 50; wait++) {
+                const updated = await read();
+                if (updated.expiresAt > Date.now() && (updated.access !== saved.access || updated.expiresAt !== saved.expiresAt)) return headers(updated);
+                if (!await fs.stat(lockPath).catch(() => undefined)) break;
+                await pause(200, undefined, { signal });
+            }
+            throw new Error('Plaud refresh did not complete');
+        }
+        try {
+            const current = await read();
+            if (fresh(current)) return headers(current);
+            const tokens = await refreshAuthorization(PLAUD_ORIGIN, { metadata: PLAUD_OAUTH, resource: new URL(PLAUD_MCP_URL),
+                clientInformation: { client_id: current.clientId, token_endpoint_auth_method: 'none' },
+                refreshToken: current.refresh, fetchFn: plaudFetch(AbortSignal.any([signal, AbortSignal.timeout(10_000)])) });
+            const updated = plaudCredentials(current.clientId, tokens);
+            await writePlaudCredentials(directory, updated);
+            return headers(updated);
+        } finally { await lock.close(); await fs.unlink(lockPath); }
+    } catch {
+        throw new Error('Plaud MCP: не удалось обновить доступ. Проверь подключение Plaud в настройках.');
+    }
+}
 
 /** Safe diagnostics: no response payloads, URLs or credential headers. */
 class McpHttpError extends Error {
@@ -55,6 +133,7 @@ class JsonRpcHttpTransport {
 const tokens = new Map();
 /** Dedicated config only; never borrow the operator's provider credentials or browser login. */
 async function mcpRequestHeaders(config, signal) {
+    if (config.plaudGrant) return plaudHeaders(config, signal);
     if (!config.oauth) return config.headers ?? {};
     const auth = config.oauth;
     const key = createHash('sha256').update(JSON.stringify(auth)).digest('hex');
@@ -92,8 +171,14 @@ async function connectMcp(config, signal) {
         : config.transport === 'jsonrpc' ? new JsonRpcHttpTransport(config.url, headers, signal)
         : new StdioClientTransport({ command: config.command, args: config.args, env: config.env, stderr: 'ignore', maxBufferSize: 2_000_000 });
     try { await client.connect(transport, { signal, timeout: config.timeoutMs }); }
-    catch (error) { await transport.close().catch(() => undefined); if (error instanceof McpHttpError) throw error; throw new Error('MCP: соединение не установлено'); }
+    catch (error) {
+        await transport.close().catch(() => undefined);
+        if (error instanceof McpHttpError) throw error;
+        if (config.plaudGrant && error instanceof StreamableHTTPError && error.code === 401) throw new McpHttpError(401);
+        throw new Error('MCP: соединение не установлено');
+    }
     return { client, close: () => client.close(), secrets: secretHeaderValues(headers) };
 }
 
-module.exports = { McpHttpError, JsonRpcHttpTransport, mcpRequestHeaders, secretHeaderValues, connectMcp };
+module.exports = { McpHttpError, JsonRpcHttpTransport, mcpRequestHeaders, secretHeaderValues, connectMcp,
+    PLAUD_ORIGIN, PLAUD_OAUTH, plaudFetch, plaudCredentials, writePlaudCredentials, plaudDirectory, bindPlaudGrant };

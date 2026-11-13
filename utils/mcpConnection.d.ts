@@ -19,3 +19,4 @@ export class JsonRpcHttpTransport implements Transport {
 export function mcpRequestHeaders(config: McpServerConfig, signal: AbortSignal): Promise<Record<string, string>>;
 export function secretHeaderValues(headers: Record<string, string>): string[];
 export function connectMcp(config: McpServerConfig, signal: AbortSignal): Promise<McpConnection>;
+export function bindPlaudGrant(config: McpServerConfig, settingsFile: string): McpServerConfig;

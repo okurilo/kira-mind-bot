@@ -80,7 +80,10 @@ function createOperatorAuth({ username, password, sessionSecret, cookieName, env
     return result.body;
   };
   const prepare = (req, res, next) => {
-    if (trusted(req)) Object.defineProperty(req, 'protocol', { configurable: true, value: 'https' });
+    if (trusted(req)) {
+      Object.defineProperty(req, 'protocol', { configurable: true, value: 'https' });
+      req.operatorPublicOrigin = origin;
+    }
     res.setHeader('Referrer-Policy', 'no-referrer'); res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Security-Policy', OPERATOR_CSP);
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');

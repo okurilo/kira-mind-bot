@@ -36,7 +36,7 @@ import { MonitoringSection } from './MonitoringSection';
 import { ProductAnalyticsSection } from './ProductAnalyticsSection';
 import { RecurringTasksSection } from './RecurringTasksSection';
 import { McpSettingsSection, type McpSettingsHandle } from './McpSettingsSection';
-import { saveConfig, fetchConfig, fetchPersonality, logout, restartService } from '../api';
+import { saveConfig, fetchConfig, fetchPersonality, logout, restartService, returningFromPlaud } from '../api';
 import type { ConfigResponse, Toast } from '../types';
 
 const SIDEBAR_WIDTH = 304;
@@ -82,8 +82,8 @@ export function Dashboard({ config, onLogout, onConfigUpdate }: Props) {
   const [assistantName, setAssistantName] = useState('');
   const displayName = assistantName || 'Панель бота';
   const [page, setPage] = useState<Page>('settings');
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('model');
-  const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTab>>(() => new Set(['model']));
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(returningFromPlaud ? 'connections' : 'model');
+  const [visitedTabs, setVisitedTabs] = useState<Set<SettingsTab>>(() => new Set([settingsTab]));
   const [configDialog, setConfigDialog] = useState<string | null>(null);
   const [visitedDialogs, setVisitedDialogs] = useState<Set<string>>(() => new Set());
   const [mobileOpen, setMobileOpen] = useState(false);

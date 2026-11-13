@@ -2,8 +2,10 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { parseMcpConfig, assertSafeMcpValue } = require('../utils/mcpConfig');
-const { connectMcp, McpHttpError, secretHeaderValues } = require('../utils/mcpConnection');
+const { registerClient, startAuthorization, exchangeAuthorization } = require('@modelcontextprotocol/sdk/client/auth.js');
+const { parseMcpConfig, assertSafeMcpValue, PLAUD_MCP_URL, PLAUD_READ_TOOLS } = require('../utils/mcpConfig');
+const { connectMcp, McpHttpError, secretHeaderValues, PLAUD_ORIGIN, PLAUD_OAUTH, plaudFetch, plaudCredentials,
+  writePlaudCredentials, plaudDirectory, bindPlaudGrant } = require('../utils/mcpConnection');
 
 const MONEY_MAKER_TOOLS = ['get_candles', 'get_price_summary', 'get_indicator', 'list_available_indicators',
   'get_technical_decision_brief', 'get_market_trap_context', 'get_market_regime', 'search_news', 'get_news_decision_brief',
@@ -44,6 +46,7 @@ async function readSettings(file) {
 
 function publicConfig(server) {
   const masked = { ...server, timeoutMs: server.timeoutMs ?? 30000 };
+  if (server.plaudGrant) masked.plaudGrant = null;
   for (const field of ['headers', 'env']) if (server[field]) masked[field] = Object.fromEntries(Object.keys(server[field]).map(key => [key, null]));
   if (server.oauth) masked.oauth = { ...server.oauth, clientSecret: null };
   return masked;
@@ -52,7 +55,7 @@ function publicSettings(snapshot) {
   return { revision: snapshot.revision, servers: Object.entries(snapshot.value.servers).map(([id, config]) => ({ id, config: publicConfig(config) })), templates: TEMPLATES };
 }
 
-function connectionFromDraft(snapshot, id, draft) {
+function connectionFromDraft(snapshot, id, draft, newGrant) {
   if (!validId(id) || !object(draft) || Object.keys(draft).some(key => !['config', 'revision'].includes(key)) || !object(draft.config)) throw new McpSettingsError('Некорректные поля подключения.');
   const previous = snapshot.value.servers[id];
   const config = structuredClone(draft.config);
@@ -60,6 +63,9 @@ function connectionFromDraft(snapshot, id, draft) {
   const sameTarget = previous && previous.transport === config.transport && (config.transport === 'stdio'
     ? previous.command === config.command && JSON.stringify(previous.args ?? []) === JSON.stringify(config.args ?? [])
     : previous.url === config.url);
+  if (newGrant) config.plaudGrant = newGrant;
+  else if (config.plaudGrant === null && sameTarget && previous.plaudGrant) config.plaudGrant = previous.plaudGrant;
+  else if (config.plaudGrant !== undefined || previous?.plaudGrant) throw new McpSettingsError('Измени доступ Plaud через вход в браузере.');
   // Null retains a secret, omitted keys remove it. Never forward retained credentials to a changed target.
   for (const field of ['headers', 'env']) if (object(config[field])) for (const [key, value] of Object.entries(config[field])) {
     if (value !== null) continue;
@@ -85,17 +91,29 @@ function createMcpSettingsStore(fileProvider) {
   };
   return {
     async get() { return publicSettings(await readSettings(await fileProvider())); },
-    async draft(id, draft) { return connectionFromDraft((await snapshotFor(draft)).snapshot, id, draft); },
-    save(id, draft, mode = 'update') { return serial(async () => {
+    async draft(id, draft) {
+      const { snapshot, file } = await snapshotFor(draft);
+      return bindPlaudGrant(connectionFromDraft(snapshot, id, draft), file);
+    },
+    async plaudTarget(revision) {
+      const { snapshot, file } = await snapshotFor({ revision });
+      const previous = snapshot.value.servers.plaud;
+      if (previous && !previous.plaudGrant) throw new McpSettingsError('ID plaud уже занят другим подключением.', 409);
+      if (!previous && Object.keys(snapshot.value.servers).length >= 16) throw new McpSettingsError('Достигнут лимит MCP-серверов.', 409);
+      return { file, previous };
+    },
+    save(id, draft, mode = 'update', authorization) { return serial(async () => {
       if (!validId(id)) throw new McpSettingsError('ID сервера: латинская буква, затем буквы, цифры, дефис или подчёркивание, до 64 символов.');
       const { file, snapshot } = await snapshotFor(draft);
+      if (authorization && file !== authorization.file) throw new McpSettingsError('Аккаунт Эни изменился. Подключи Plaud заново.', 409);
+      const oldGrant = snapshot.value.servers[id]?.plaudGrant;
       const exists = Object.hasOwn(snapshot.value.servers, id);
       if (mode === 'create' && exists) throw new McpSettingsError('Сервер с таким ID уже подключён.', 409);
       if (mode !== 'create' && !exists) throw new McpSettingsError('Подключение не найдено.', 404);
       if (mode === 'delete') {
         if (!object(draft) || Object.keys(draft).some(key => key !== 'revision')) throw new McpSettingsError('Некорректные поля удаления.');
         delete snapshot.value.servers[id];
-      } else snapshot.value.servers[id] = connectionFromDraft(snapshot, id, draft);
+      } else snapshot.value.servers[id] = connectionFromDraft(snapshot, id, draft, authorization?.grant);
       try { parseMcpConfig(snapshot.value); } catch (error) { throw new McpSettingsError(error.message); }
       const contents = JSON.stringify(snapshot.value, null, 2);
       if (Buffer.byteLength(contents) > 128000) throw new McpSettingsError('Конфигурация MCP слишком велика.');
@@ -106,9 +124,82 @@ function createMcpSettingsStore(fileProvider) {
         if ((await readSettings(file)).revision !== snapshot.revision) throw new McpSettingsError('Файл MCP изменился во время сохранения. Обнови настройки.', 409);
         await fs.rename(temp, file);
       } finally { await fs.unlink(temp).catch(() => {}); }
-      return publicSettings(await readSettings(file));
+      if (oldGrant && (mode === 'delete' || authorization)) await fs.rm(plaudDirectory(file, oldGrant), { recursive: true, force: true }).catch(() => {});
+      return publicSettings({ value: snapshot.value, revision: digest(contents) });
     }); },
   };
+}
+
+function plaudRedirect(req) {
+  let origin;
+  try { origin = new URL(req.headers.origin); } catch { throw new McpSettingsError('Открой панель Эни в браузере.'); }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname);
+  const publicOrigin = req.operatorPublicOrigin;
+  if (origin.origin !== req.headers.origin || req.headers['sec-fetch-site'] === 'cross-site'
+      || (publicOrigin ? origin.origin !== publicOrigin : origin.host !== req.headers.host)
+      || !(origin.protocol === 'https:' || loopback && origin.protocol === 'http:')) {
+    throw new McpSettingsError('Для входа в Plaud открой панель по HTTPS или через localhost.', 403);
+  }
+  return origin.origin + (publicOrigin ? '/operator/' : '/');
+}
+
+function registerPlaudRoutes(app, requireAuth, route, store, probe) {
+  const pending = new Map();
+  app.post('/api/mcp/plaud/start', requireAuth, route(async req => {
+    const redirectUri = plaudRedirect(req);
+    const revision = req.body?.revision;
+    const { file } = await store.plaudTarget(revision);
+    for (const [session, flow] of pending) if (flow.until <= Date.now()) pending.delete(session);
+    if (pending.size >= 32 && !pending.has(req.sessionID)) throw new McpSettingsError('Повтори вход в Plaud позже.', 429);
+    const flow = { revision, file, redirectUri, state: crypto.randomBytes(32).toString('base64url'), until: Date.now() + 10 * 60_000 };
+    pending.set(req.sessionID, flow);
+    try {
+      const { client_id: clientId } = await registerClient(PLAUD_ORIGIN, { metadata: PLAUD_OAUTH, fetchFn: plaudFetch(AbortSignal.timeout(10_000)),
+        clientMetadata: { client_name: 'Enya', redirect_uris: [redirectUri], grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'], token_endpoint_auth_method: 'none' } });
+      const { authorizationUrl, codeVerifier } = await startAuthorization(PLAUD_ORIGIN, { metadata: PLAUD_OAUTH,
+        clientInformation: { client_id: clientId }, redirectUrl: redirectUri, state: flow.state, resource: new URL(PLAUD_MCP_URL) });
+      Object.assign(flow, { clientId, codeVerifier });
+      return { url: authorizationUrl.href };
+    } catch {
+      if (pending.get(req.sessionID) === flow) pending.delete(req.sessionID);
+      throw new McpSettingsError('Plaud не открыл вход. Попробуй подключиться ещё раз.', 502);
+    }
+  }));
+  app.post('/api/mcp/plaud/finish', requireAuth, route(async req => {
+    const flow = pending.get(req.sessionID);
+    const { state, code } = req.body ?? {};
+    if (!flow?.codeVerifier || flow.until <= Date.now() || state !== flow.state || plaudRedirect(req) !== flow.redirectUri) {
+      throw new McpSettingsError('Запрос на вход в Plaud истёк. Начни подключение заново.', 409);
+    }
+    pending.delete(req.sessionID);
+    if (typeof code !== 'string' || !code || code.length > 4096) throw new McpSettingsError('Доступ к записям Plaud не выдан.');
+    const { file, previous } = await store.plaudTarget(flow.revision);
+    if (file !== flow.file) throw new McpSettingsError('Аккаунт Эни изменился. Подключи Plaud заново.', 409);
+    const grant = crypto.randomBytes(16).toString('hex');
+    const directory = plaudDirectory(file, grant);
+    let credentials;
+    try {
+      const tokens = await exchangeAuthorization(PLAUD_ORIGIN, { metadata: PLAUD_OAUTH, clientInformation: { client_id: flow.clientId },
+        authorizationCode: code, codeVerifier: flow.codeVerifier, redirectUri: flow.redirectUri, resource: new URL(PLAUD_MCP_URL),
+        fetchFn: plaudFetch(AbortSignal.timeout(10_000)) });
+      credentials = plaudCredentials(flow.clientId, tokens);
+    } catch { throw new McpSettingsError('Plaud не подтвердил вход. Подключи Plaud заново.', 502); }
+    const config = { ...previous, description: previous?.description ?? 'Plaud: поиск записей встреч и звонков, расшифровки и резюме.',
+      transport: 'http', url: PLAUD_MCP_URL, tools: {}, plaudGrant: grant, timeoutMs: previous?.timeoutMs ?? 30000 };
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    let committed = false;
+    try {
+      await writePlaudCredentials(directory, credentials);
+      const catalog = await probe(bindPlaudGrant(config, file));
+      const tools = PLAUD_READ_TOOLS.filter(name => catalog.tools.some(tool => tool.name === name));
+      if (!tools.length) throw new McpSettingsError('Plaud MCP не предоставил инструменты чтения.', 502);
+      config.tools = Object.fromEntries(tools.filter(name => !previous || previous.tools[name] === 'read').map(name => [name, 'read']));
+      const saved = await store.save('plaud', { revision: flow.revision, config }, previous ? 'update' : 'create', { file, grant });
+      committed = true;
+      return saved;
+    } finally { if (!committed) await fs.rm(directory, { recursive: true, force: true }).catch(() => {}); }
+  }));
 }
 
 async function probeMcp(server, connector = connectMcp) {
@@ -133,8 +224,10 @@ async function probeMcp(server, connector = connectMcp) {
       if (seen.has(page.nextCursor) || pageIndex === 9 || truncated) { truncated = true; break; }
       cursor = page.nextCursor; seen.add(cursor);
     }
-    return { success: true, tools, toolCount: tools.length, truncated, resources: Boolean(capabilities.resources) };
+    const visible = server.plaudGrant ? tools.filter(tool => PLAUD_READ_TOOLS.includes(tool.name)) : tools;
+    return { success: true, tools: visible, toolCount: visible.length, truncated, resources: Boolean(capabilities.resources) };
   } catch (error) {
+    if (server.plaudGrant && (error?.status === 401 || error?.message?.startsWith('Plaud MCP:'))) throw new McpSettingsError('Не удалось подтвердить доступ к Plaud. Нажми «Войти заново» в подключениях.', 502);
     if (error instanceof McpHttpError) throw new McpSettingsError(`MCP: HTTP ${error.status}. Проверь доступ к серверу и авторизацию.`, 502);
     throw new McpSettingsError('Не удалось проверить MCP. Проверь адрес, транспорт и авторизацию.', 502);
   } finally { await connection?.close().catch(() => {}); }
@@ -152,5 +245,6 @@ function registerMcpRoutes(app, { requireAuth, runtimeDir, accountMode = false, 
   app.put('/api/mcp/servers/:id', requireAuth, route(req => store.save(req.params.id, req.body)));
   app.delete('/api/mcp/servers/:id', requireAuth, route(req => store.save(req.params.id, req.body, 'delete')));
   app.post('/api/mcp/servers/:id/check', requireAuth, route(async req => probe(await store.draft(req.params.id, req.body))));
+  registerPlaudRoutes(app, requireAuth, route, store, probe);
 }
 module.exports = { MONEY_MAKER_TOOLS, McpSettingsError, mcpSettingsFile, publicSettings, connectionFromDraft, createMcpSettingsStore, probeMcp, registerMcpRoutes };
