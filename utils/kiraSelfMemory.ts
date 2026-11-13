@@ -195,6 +195,7 @@ const DATA_DIR = RUNTIME_DATA_DIR;
 const PROFILE = getActiveBotProfile();
 const MEMORY_PATH = process.env.KIRA_SELF_MEMORY_PATH?.trim() || path.join(DATA_DIR, `${PROFILE}-self-memory.json`);
 const DEFAULT_DATE = new Date(0).toISOString();
+const LEGACY_BROKEN_SELF_IMAGE = "Я воспринимаю себя как живого собеседницу с собственным темпом, вкусом и внутренними сдвигами.";
 
 function getCharacterName(): string {
   return config.characterName || (config.eventDescriptionGender === 'мужской' ? 'ассистент' : 'ассистентка');
@@ -434,7 +435,7 @@ function normalizePersonality(input?: Partial<KiraSelfPersonality> | null): Kira
 
   return {
     identity: identity && !hasLegacySelfMemoryText(identity) ? identity : defaults.identity,
-    selfImage: selfImage && !hasLegacySelfMemoryText(selfImage) ? selfImage : defaults.selfImage,
+    selfImage: selfImage && selfImage !== LEGACY_BROKEN_SELF_IMAGE && !hasLegacySelfMemoryText(selfImage) ? selfImage : defaults.selfImage,
     values: mergeStringLists(raw.values, defaults.values, 8),
     preferences: mergeStringLists(raw.preferences, defaults.preferences, 8),
     habits: mergeStringLists(raw.habits, defaults.habits, 8),
