@@ -28,6 +28,7 @@ async function main() {
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.origin !== origin) return route.abort();
+      if (url.pathname === '/api/accounts') return route.fulfill({ json: { version: 1, available: false, accounts: [] } });
       if (url.pathname === '/api/personality') {
         if (route.request().method() === 'POST') {
           current = route.request().postDataJSON().KiraMindBot;
@@ -44,7 +45,9 @@ async function main() {
         }
         return route.fulfill({ json: { KiraMindBot: current } });
       }
-      if (url.pathname === '/api/config') return route.fulfill({ json: {} });
+      if (url.pathname === '/api/config') return route.fulfill({ json: {
+        KIRA_PROACTIVE_INTERVAL_MS: { value: '3600000', masked: false },
+      } });
       if (url.pathname === '/api/auth/context') return route.fulfill({ json: { csrfEnabled: false } });
       if (url.pathname === '/api/image-generation') return route.fulfill({ json: {
         settings: { enabled: false, model: 'gpt-image-1', size: '1024x1024', quality: 'low' },

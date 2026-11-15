@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 function readPersonalityDocument(file) {
   if (!fs.existsSync(file)) return {};
@@ -15,7 +16,13 @@ function readPersonalityDocument(file) {
 function writePersonalityProfile(file, profile) {
   const document = readPersonalityDocument(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ ...document, KiraMindBot: profile }, null, 2));
+  const temporary = file + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ ...document, KiraMindBot: profile }, null, 2), { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, file);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
 }
 
 module.exports = { readPersonalityDocument, writePersonalityProfile };

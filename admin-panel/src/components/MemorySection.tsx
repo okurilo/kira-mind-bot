@@ -1,4 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { useAccountDraft } from '../accountEdits';
+import { activeAdminAccount } from '../api';
 import {
   Alert,
   Box,
@@ -433,7 +435,7 @@ function MemoryEditorDialog({
             label="Профиль"
             value={form.profile}
             onChange={(event) => patch({ profile: event.target.value as MemoryProfile })}
-            disabled={mode === 'edit'}
+            disabled={mode === 'edit' || Boolean(activeAdminAccount())}
           >
             {profileOptions(assistantName).map((option) => (
               <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
@@ -455,6 +457,7 @@ function MemoryEditorDialog({
             size="small"
             label="User ID"
             value={form.userId || ''}
+            disabled={Boolean(activeAdminAccount())}
             onChange={(event) => patch({ userId: event.target.value })}
             placeholder="по умолчанию владелец профиля"
           />
@@ -791,6 +794,7 @@ export function MemorySection({ onToast, assistantName }: { onToast?: ToastFn; a
   const [viewMode, setViewMode] = useState<'list' | 'atlas'>('list');
   const [atlasRefreshToken, setAtlasRefreshToken] = useState(0);
   const [atlasFiltersOpen, setAtlasFiltersOpen] = useState(false);
+  useAccountDraft(dialogOpen && Boolean(form.content?.trim()));
 
   const page = Math.floor((query.offset ?? 0) / (query.limit ?? draft.limit));
   const rowsPerPage = query.limit ?? draft.limit;
@@ -1003,6 +1007,7 @@ export function MemorySection({ onToast, assistantName }: { onToast?: ToastFn; a
             size="small"
             label="Профиль"
             value={draft.profile}
+            disabled={Boolean(activeAdminAccount())}
             onChange={(event) => setDraft((prev) => ({ ...prev, profile: event.target.value as MemoryProfile }))}
           >
             {profileOptions(assistantName).map((option) => (
@@ -1013,6 +1018,7 @@ export function MemorySection({ onToast, assistantName }: { onToast?: ToastFn; a
             size="small"
             label="User ID"
             value={draft.userId}
+            disabled={Boolean(activeAdminAccount())}
             onChange={(event) => setDraft((prev) => ({ ...prev, userId: event.target.value }))}
             placeholder="владелец профиля"
           />

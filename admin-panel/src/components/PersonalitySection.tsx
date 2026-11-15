@@ -18,6 +18,7 @@ import {
 import SaveIcon from '@mui/icons-material/Save';
 import { CharacterReferenceSection } from './CharacterReferenceSection';
 import { fetchPersonality, savePersonality } from '../api';
+import { useAccountDraft } from '../accountEdits';
 import type { PersonalityConfig, PersonalityProfile } from '../types';
 
 const EMPTY_PROFILE: PersonalityProfile = {
@@ -252,10 +253,12 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
   const editRevision = useRef(0);
   const [tab, setTab] = useState<'character' | 'appearance'>('character');
   const [appearanceVisited, setAppearanceVisited] = useState(false);
+  const [baseline, setBaseline] = useState('');
+  useAccountDraft(Boolean(baseline) && JSON.stringify(data) !== baseline);
 
   useEffect(() => {
     fetchPersonality()
-      .then(personality => { setData(personality); setSavedName(personality.KiraMindBot.characterName.trim()); })
+      .then(personality => { setData(personality); setBaseline(JSON.stringify(personality)); setSavedName(personality.KiraMindBot.characterName.trim()); })
       .catch(() => onToast('Не удалось загрузить настройки личности', 'error'))
       .finally(() => setLoading(false));
   }, []);
@@ -284,6 +287,7 @@ export function PersonalitySection({ onToast, onSavedName }: Props) {
         const name = (refreshed || snapshot).KiraMindBot.characterName.trim();
         setSavedName(name);
         onSavedName?.(name);
+        setBaseline(JSON.stringify(refreshed || snapshot));
         onToast(result.message || '✅ Личность сохранена. Перезапустите бота.', 'success');
       } else {
         onToast(result.error || 'Ошибка сохранения', 'error');
